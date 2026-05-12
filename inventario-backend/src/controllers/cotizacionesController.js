@@ -2,7 +2,7 @@ const ExcelJS = require("exceljs");
 const path = require("path");
 const Cotizacion = require("../models/Cotizacion");
 
-const PLANTILLA = path.join(__dirname, "../../plantillas/plantilla_cotizacion.xlsx");
+const PLANTILLA = path.join(__dirname, "../../plantillas/Cotizacion_Kenott_corregida.xlsx");
 
 const generarNumero = async () => {
   const ultima = await Cotizacion.findOne({ order: [["id", "DESC"]] });
@@ -38,42 +38,45 @@ const exportarCotizacion = async (req, res) => {
     ws.getCell("F8").value = fecha;
     ws.getCell("F9").value = fechaValido.toLocaleDateString("es-CL");
 
-    // Productos desde fila 12
     const FILA_INICIO = 12;
-    if (items.length > 1) {
-      ws.spliceRows(FILA_INICIO + 1, 0, ...Array(items.length - 1).fill([]));
+    const FILAS_DISPONIBLES = 57; // filas 12 a 68
+
+    // Si hay más productos que filas, insertar filas extras antes de los totales
+    if (items.length > FILAS_DISPONIBLES) {
+      const extra = items.length - FILAS_DISPONIBLES;
+      ws.spliceRows(FILA_INICIO + FILAS_DISPONIBLES, 0, ...Array(extra).fill([]));
     }
 
+    // Rellenar productos
     items.forEach((item, idx) => {
       const fila = ws.getRow(FILA_INICIO + idx);
       fila.getCell(2).value = item.nombre;
+      fila.getCell(2).font = { name: "Arial", size: 9 };
       fila.getCell(3).value = item.unidad || "UNID";
-      fila.getCell(3).alignment = { horizontal: "center" };
+      fila.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+      fila.getCell(3).font = { name: "Arial", size: 9 };
       fila.getCell(4).value = item.cantidad;
-      fila.getCell(4).alignment = { horizontal: "center" };
+      fila.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
+      fila.getCell(4).font = { name: "Arial", bold: true, size: 9 };
       fila.getCell(5).value = Number(item.precio);
       fila.getCell(5).numFmt = "#,##0";
-      fila.getCell(5).alignment = { horizontal: "right" };
+      fila.getCell(5).alignment = { horizontal: "right", vertical: "middle" };
+      fila.getCell(5).font = { name: "Arial", size: 9 };
       fila.getCell(6).value = Number(item.precio) * item.cantidad;
       fila.getCell(6).numFmt = "#,##0";
-      fila.getCell(6).alignment = { horizontal: "right" };
+      fila.getCell(6).alignment = { horizontal: "right", vertical: "middle" };
+      fila.getCell(6).font = { name: "Arial", size: 9 };
     });
 
-    // Totales
-    const FT = FILA_INICIO + items.length + 1;
-    const setTotal = (fila, label, valor, bold = false) => {
-      const r = ws.getRow(fila);
-      r.getCell(5).value = label;
-      r.getCell(5).font = { bold, name: "Arial", size: bold ? 10 : 9 };
-      r.getCell(5).alignment = { horizontal: "right" };
-      r.getCell(6).value = valor;
-      r.getCell(6).numFmt = "#,##0";
-      r.getCell(6).font = { bold, name: "Arial", size: bold ? 10 : 9 };
-      r.getCell(6).alignment = { horizontal: "right" };
-    };
-    setTotal(FT, "NETO:", subtotal);
-    setTotal(FT + 1, "IVA (19%):", iva);
-    setTotal(FT + 2, "TOTAL:", total, true);
+    // Totales en las filas correctas (después de los productos)
+    const FILA_TOTALES = FILA_INICIO + Math.max(items.length, FILAS_DISPONIBLES) + 1;
+    ws.getCell(`F${FILA_TOTALES}`).value = subtotal;
+    ws.getCell(`F${FILA_TOTALES}`).numFmt = "#,##0";
+    ws.getCell(`F${FILA_TOTALES + 1}`).value = iva;
+    ws.getCell(`F${FILA_TOTALES + 1}`).numFmt = "#,##0";
+    ws.getCell(`F${FILA_TOTALES + 2}`).value = total;
+    ws.getCell(`F${FILA_TOTALES + 2}`).numFmt = "#,##0";
+    ws.getCell(`F${FILA_TOTALES + 2}`).font = { name: "Arial", bold: true, size: 10 };
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="COT-${numero}.xlsx"`);
