@@ -2,7 +2,7 @@ const ExcelJS = require("exceljs");
 const path = require("path");
 const Cotizacion = require("../models/Cotizacion");
 
-const PLANTILLA = path.join(__dirname, "../../plantillas/Cotizacion_Kenott_corregida.xlsx");
+const PLANTILLA = path.join(__dirname, "../../plantillas/plantilla_cotizacion.xlsx");
 
 const generarNumero = async () => {
   const ultima = await Cotizacion.findOne({ order: [["id", "DESC"]] });
