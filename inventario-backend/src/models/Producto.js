@@ -17,11 +17,16 @@ const Producto = sequelize.define("Producto", {
     allowNull: false,
     defaultValue: "General",
   },
-  precio: {
-    type: DataTypes.DECIMAL(12, 2),
-    allowNull: false,
-    validate: { min: 0 },
-  },
+  precio_compra: {
+  type: DataTypes.DECIMAL(12, 2),
+  allowNull: true,
+  defaultValue: 0,
+},
+precio_venta: {
+  type: DataTypes.DECIMAL(12, 2),
+  allowNull: true,
+  defaultValue: 0,
+},
   stock: {
     type: DataTypes.INTEGER,
     allowNull: false,

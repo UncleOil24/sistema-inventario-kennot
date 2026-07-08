@@ -47,14 +47,12 @@ const getProducto = async (req, res) => {
 // POST /api/productos
 const crearProducto = async (req, res) => {
   try {
-    const { nombre, categoria, precio, stock, unidad, proveedor, contacto } = req.body;
-
-    if (!nombre || precio === undefined || stock === undefined) {
+    const { nombre, categoria, precio_compra, precio_venta, stock, unidad, proveedor, contacto } = req.body;
+if (!nombre || precio_venta === undefined || stock === undefined) {
       return res.status(400).json({ ok: false, error: "nombre, precio y stock son requeridos" });
     }
 
-    const producto = await Producto.create({ nombre, categoria, precio, stock, unidad, proveedor, contacto });
-    res.status(201).json({ ok: true, data: producto });
+const producto = await Producto.create({ nombre, categoria, precio_compra, precio_venta, stock, unidad, proveedor, contacto });    res.status(201).json({ ok: true, data: producto });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -66,8 +64,8 @@ const actualizarProducto = async (req, res) => {
     const producto = await Producto.findByPk(req.params.id);
     if (!producto) return res.status(404).json({ ok: false, error: "Producto no encontrado" });
 
-    const { nombre, categoria, precio, stock, unidad, proveedor, contacto } = req.body;
-    await producto.update({ nombre, categoria, precio, stock, unidad, proveedor, contacto });
+    const { nombre, categoria, precio_compra, precio_venta, stock, unidad, proveedor, contacto } = req.body;
+await producto.update({ nombre, categoria, precio_compra, precio_venta, stock, unidad, proveedor, contacto });
     res.json({ ok: true, data: producto });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
