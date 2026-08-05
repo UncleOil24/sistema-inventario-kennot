@@ -98,12 +98,13 @@ const styles = `
   .notif { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; padding: 12px 18px; font-family: var(--mono); font-size: 12px; color: var(--text); z-index: 300; animation: slideUp 0.2s ease; display: flex; align-items: center; gap: 8px; }
   .notif.success { border-color: var(--success); color: var(--success); }
   .notif.danger { border-color: var(--danger); color: var(--danger); }
-  .hist-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .hist-info { display: flex; flex-direction: column; gap: 4px; }
+  .hist-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .hist-info { display: flex; flex-direction: column; gap: 4px; flex: 1; }
   .hist-nombre { font-size: 14px; font-weight: 500; color: var(--text); }
-  .hist-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); display: flex; gap: 16px; }
-  .hist-total { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 600; }
+  .hist-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); display: flex; gap: 16px; flex-wrap: wrap; }
+  .hist-total { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 600; white-space: nowrap; }
   .hist-list { display: flex; flex-direction: column; gap: 10px; }
+  .hist-detalle { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
   @media (max-width: 768px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .header { padding: 0 1rem; }
@@ -114,7 +115,6 @@ const styles = `
 
 export default function App() {
   const [view, setView] = useState("inventario");
-  // Inventario
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -126,20 +126,18 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [productoActual, setProductoActual] = useState(null);
   const [form, setForm] = useState({});
-  // Cotización
   const [cotizacion, setCotizacion] = useState([]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [nombreCotizacion, setNombreCotizacion] = useState("");
-  // Clientes
   const [clientes, setClientes] = useState([]);
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [formCliente, setFormCliente] = useState({});
   const [clienteActual, setClienteActual] = useState(null);
   const [modalCliente, setModalCliente] = useState(null);
-  // Historial
   const [historial, setHistorial] = useState([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
-  // Notif
+  const [busquedaHistorial, setBusquedaHistorial] = useState("");
+  const [historialDetalle, setHistorialDetalle] = useState(null);
   const [notif, setNotif] = useState(null);
 
   const showNotif = (msg, type = "success") => {
@@ -147,7 +145,6 @@ export default function App() {
     setTimeout(() => setNotif(null), 2500);
   };
 
-  // ── Fetch productos ────────────────────────────────────────
   const fetchProductos = useCallback(async () => {
     setLoading(true);
     try {
@@ -168,7 +165,6 @@ export default function App() {
     return () => clearTimeout(delay);
   }, [fetchProductos]);
 
-  // ── Fetch clientes ─────────────────────────────────────────
   const fetchClientes = useCallback(async () => {
     setLoadingClientes(true);
     try {
@@ -179,11 +175,8 @@ export default function App() {
     finally { setLoadingClientes(false); }
   }, []);
 
-  useEffect(() => {
-    fetchClientes();
-  }, [fetchClientes]);
+  useEffect(() => { fetchClientes(); }, [fetchClientes]);
 
-  // ── Fetch historial ────────────────────────────────────────
   const fetchHistorial = useCallback(async () => {
     setLoadingHistorial(true);
     try {
@@ -198,20 +191,17 @@ export default function App() {
     if (view === "historial") fetchHistorial();
   }, [view, fetchHistorial]);
 
-  // ── Stats ──────────────────────────────────────────────────
   const totalProductos = productos.length;
   const totalStock = productos.reduce((s, p) => s + Number(p.stock), 0);
   const valorInventario = productos.reduce((s, p) => s + Number(p.precio_venta) * Number(p.stock), 0);
   const stockBajo = productos.filter(p => Number(p.stock) < 30).length;
 
-  // ── Sort ───────────────────────────────────────────────────
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortField(field); setSortDir("asc"); }
   };
   const sortIcon = (field) => sortField === field ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
-  // ── CRUD Productos ─────────────────────────────────────────
   const abrirNuevo = () => {
     setForm({ nombre: "", categoria: "Ferretería", precio_compra: "", precio_venta: "", stock: "", unidad: "unidad", proveedor: "", contacto: "" });
     setModal("nuevo");
@@ -257,7 +247,6 @@ export default function App() {
     finally { setGuardando(false); }
   };
 
-  // ── CRUD Clientes ──────────────────────────────────────────
   const abrirNuevoCliente = () => { setFormCliente({ nombre: "", rut: "", telefono: "", email: "", direccion: "" }); setModalCliente("nuevo"); };
   const abrirEditarCliente = (c) => { setClienteActual(c); setFormCliente({ ...c }); setModalCliente("editar"); };
   const abrirEliminarCliente = (c) => { setClienteActual(c); setModalCliente("eliminar"); };
@@ -300,7 +289,6 @@ export default function App() {
     finally { setGuardando(false); }
   };
 
-  // ── Cotización ─────────────────────────────────────────────
   const agregarCotizacion = (p) => {
     setCotizacion(prev => {
       if (prev.find(c => c.id === p.id)) { showNotif("Ya está en la cotización"); return prev; }
@@ -346,6 +334,38 @@ export default function App() {
     finally { setExportando(false); }
   };
 
+  const historialFiltrado = historial.filter(h => {
+    const q = busquedaHistorial.toLowerCase();
+    return !q ||
+      (h.nombre_cotizacion || "").toLowerCase().includes(q) ||
+      (h.cliente || "").toLowerCase().includes(q) ||
+      (h.numero || "").includes(q);
+  });
+
+  const reexportarCotizacion = async (id, nombre) => {
+    try {
+      const res = await fetch(`${API_URL}/api/cotizaciones/reexport/${id}`, { method: "POST" });
+      if (!res.ok) throw new Error("Error");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${nombre || "cotizacion"}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showNotif("✓ Excel descargado");
+    } catch { showNotif("Error al descargar", "danger"); }
+  };
+
+  const eliminarCotizacionHistorial = async (id) => {
+    if (!confirm("¿Eliminar esta cotización?")) return;
+    try {
+      const res = await fetch(`${API_URL}/api/cotizaciones/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok) { fetchHistorial(); showNotif("Cotización eliminada", "danger"); }
+    } catch { showNotif("Error al eliminar", "danger"); }
+  };
+
   const inCot = (id) => cotizacion.some(c => c.id === id);
 
   return (
@@ -366,7 +386,6 @@ export default function App() {
 
         <main className="main">
 
-          {/* ── INVENTARIO ── */}
           {view === "inventario" && (
             <>
               <div className="stats">
@@ -435,7 +454,6 @@ export default function App() {
             </>
           )}
 
-          {/* ── CLIENTES ── */}
           {view === "clientes" && (
             <>
               <div className="toolbar">
@@ -445,9 +463,7 @@ export default function App() {
               <div className="table-wrap">
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>ID</th><th>Nombre</th><th>RUT</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Acciones</th>
-                    </tr>
+                    <tr><th>ID</th><th>Nombre</th><th>RUT</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Acciones</th></tr>
                   </thead>
                   <tbody>
                     {loadingClientes ? (
@@ -476,50 +492,33 @@ export default function App() {
             </>
           )}
 
-          {/* ── COTIZACIÓN ── */}
           {view === "cotizacion" && (
             <>
               <div className="toolbar">
                 <div className="field" style={{flex:1, minWidth:"200px"}}>
                   <label style={{fontFamily:"var(--mono)", fontSize:"10px", color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em"}}>Cliente</label>
-                  <select
-                    className="filter-select"
-                    style={{width:"100%"}}
-                    value={clienteSeleccionado?.id || ""}
-                    onChange={e => {
-                      const c = clientes.find(c => c.id === Number(e.target.value));
-                      setClienteSeleccionado(c || null);
-                    }}
-                  >
+                  <select className="filter-select" style={{width:"100%"}} value={clienteSeleccionado?.id || ""}
+                    onChange={e => { const c = clientes.find(c => c.id === Number(e.target.value)); setClienteSeleccionado(c || null); }}>
                     <option value="">— Seleccionar cliente —</option>
                     {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                   </select>
                 </div>
                 <div className="field" style={{flex:1, minWidth:"200px"}}>
                   <label style={{fontFamily:"var(--mono)", fontSize:"10px", color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em"}}>Nombre cotización</label>
-                  <input
-                    className="search-input"
-                    placeholder="Ej: Cotización 1 Regimiento Linares"
-                    value={nombreCotizacion}
-                    onChange={e => setNombreCotizacion(e.target.value)}
-                    style={{paddingLeft:"12px"}}
-                  />
+                  <input className="search-input" placeholder="Ej: Cotización 1 Regimiento Linares" value={nombreCotizacion} onChange={e => setNombreCotizacion(e.target.value)} style={{paddingLeft:"12px"}} />
                 </div>
                 <button className="btn btn-ghost" onClick={limpiarCotizacion}>Limpiar</button>
                 <button className="btn btn-primary" onClick={exportarExcel} disabled={cotizacion.length === 0 || exportando}>
                   {exportando ? <><span className="spinner"></span>Generando...</> : "↓ Exportar Excel"}
                 </button>
               </div>
-
               {cotizacion.length === 0 ? (
                 <div className="cot-empty">// cotización vacía — agrega productos desde Inventario</div>
               ) : (
                 <>
                   <div className="cot-table-wrap">
                     <table className="table">
-                      <thead>
-                        <tr><th>ID</th><th>Producto</th><th>Precio venta</th><th>Cantidad</th><th>Subtotal</th><th></th></tr>
-                      </thead>
+                      <thead><tr><th>ID</th><th>Producto</th><th>Precio venta</th><th>Cantidad</th><th>Subtotal</th><th></th></tr></thead>
                       <tbody>
                         {cotizacion.map(c => (
                           <tr key={c.id}>
@@ -545,21 +544,24 @@ export default function App() {
             </>
           )}
 
-          {/* ── HISTORIAL ── */}
           {view === "historial" && (
             <>
               <div className="toolbar">
-                <div style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)"}}>{historial.length} cotizaciones guardadas</div>
+                <div className="search-wrap">
+                  <span className="search-icon">⌕</span>
+                  <input className="search-input" placeholder="Buscar por nombre, cliente o número..." value={busquedaHistorial} onChange={e => setBusquedaHistorial(e.target.value)} />
+                </div>
+                <div style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)"}}>{historialFiltrado.length} cotizaciones</div>
               </div>
               {loadingHistorial ? (
                 <div style={{textAlign:"center", padding:"3rem", color:"var(--text3)", fontFamily:"var(--mono)", fontSize:"12px"}}>
                   <span className="spinner"></span>Cargando...
                 </div>
-              ) : historial.length === 0 ? (
+              ) : historialFiltrado.length === 0 ? (
                 <div className="cot-empty">// sin cotizaciones guardadas</div>
               ) : (
                 <div className="hist-list">
-                  {historial.map(h => (
+                  {historialFiltrado.map(h => (
                     <div key={h.id} className="hist-card">
                       <div className="hist-info">
                         <div className="hist-nombre">{h.nombre_cotizacion || `Cotización #${h.numero}`}</div>
@@ -569,8 +571,43 @@ export default function App() {
                           <span>{new Date(h.createdAt).toLocaleDateString("es-CL")}</span>
                           <span>{h.items?.length || 0} productos</span>
                         </div>
+                        {historialDetalle === h.id && (
+                          <div className="hist-detalle">
+                            <table className="table" style={{fontSize:"11px", marginBottom:"10px"}}>
+                              <thead>
+                                <tr><th>Producto</th><th>Unidad</th><th>Cant.</th><th>P. Unitario</th><th>Subtotal</th></tr>
+                              </thead>
+                              <tbody>
+                                {h.items?.map((item, idx) => (
+                                  <tr key={idx}>
+                                    <td>{item.nombre}</td>
+                                    <td style={{fontFamily:"var(--mono)", fontSize:"10px"}}>{item.unidad}</td>
+                                    <td style={{fontFamily:"var(--mono)", fontSize:"10px", textAlign:"center"}}>{item.cantidad}</td>
+                                    <td className="price-cell">{fmt(item.precio)}</td>
+                                    <td className="price-cell">{fmt(item.precio * item.cantidad)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="cot-totals">
+                              <div className="total-row"><span className="total-label">Subtotal</span><span className="total-value">{fmt(h.subtotal)}</span></div>
+                              <div className="total-row"><span className="total-label">IVA (19%)</span><span className="total-value">{fmt(h.iva)}</span></div>
+                              <hr className="divider" />
+                              <div className="total-row grand"><span className="total-label">Total</span><span className="total-value">{fmt(h.total)}</span></div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="hist-total">{fmt(h.total)}</div>
+                      <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"8px"}}>
+                        <div className="hist-total">{fmt(h.total)}</div>
+                        <div style={{display:"flex", gap:"6px"}}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setHistorialDetalle(historialDetalle === h.id ? null : h.id)}>
+                            {historialDetalle === h.id ? "Ocultar" : "Ver detalle"}
+                          </button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => reexportarCotizacion(h.id, h.nombre_cotizacion)}>↓ Excel</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => eliminarCotizacionHistorial(h.id)}>✕</button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -581,7 +618,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* ── MODALES PRODUCTO ── */}
       {(modal === "nuevo" || modal === "editar") && (
         <div className="modal-overlay" onClick={cerrarModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -665,7 +701,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ── MODALES CLIENTE ── */}
       {(modalCliente === "nuevo" || modalCliente === "editar") && (
         <div className="modal-overlay" onClick={cerrarModalCliente}>
           <div className="modal" onClick={e => e.stopPropagation()}>
