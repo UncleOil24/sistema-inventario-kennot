@@ -12,6 +12,7 @@ require("./src/models/Cliente");
 const productosRoutes = require("./src/routes/productos");
 const cotizacionesRoutes = require("./src/routes/cotizaciones");
 const clientesRoutes = require("./src/routes/Clientes");
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -32,8 +33,14 @@ app.use("/api/productos", productosRoutes);
 app.use("/api/cotizaciones", cotizacionesRoutes);
 app.use("/api/clientes", clientesRoutes);
 
-app.use(notFound);
-app.use(errorHandler);
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: `Ruta no encontrada: ${req.method} ${req.path}` });
+});
+
+app.use((err, req, res, next) => {
+  console.error(err.message);
+  res.status(500).json({ ok: false, error: err.message });
+});
 
 const start = async () => {
   try {
