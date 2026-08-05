@@ -11,9 +11,7 @@ require("./src/models/Cliente");
 
 const productosRoutes = require("./src/routes/productos");
 const cotizacionesRoutes = require("./src/routes/cotizaciones");
-const clientesRoutes = require("./src/routes/clientes");
-const { errorHandler, notFound } = require("./src/middlewares/errorHandler");
-
+const clientesRoutes = require("./src/routes/Clientes");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
