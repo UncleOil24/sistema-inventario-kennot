@@ -42,7 +42,7 @@ const exportarCotizacion = async (req, res) => {
 
     // Campos fijos
     ws.getCell("H5").value = numero;
-    ws.getCell("C8").value = cliente || "Sin nombre";
+    ws.getCell("D8").value = cliente || "Sin nombre";
     ws.getCell("H8").value = fecha;
     ws.getCell("H9").value = fechaValido.toLocaleDateString("es-CL");
 
