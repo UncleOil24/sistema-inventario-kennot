@@ -41,23 +41,21 @@ const exportarCotizacion = async (req, res) => {
     const ws = wb.getWorksheet("Cotización") || wb.worksheets[0];
 
     // Campos fijos
-    ws.getCell("G5").value = numero;
-    ws.getCell("D8").value = cliente || "Sin nombre";
+    ws.getCell("H5").value = numero;
+    ws.getCell("C8").value = cliente || "Sin nombre";
     ws.getCell("H8").value = fecha;
     ws.getCell("H9").value = fechaValido.toLocaleDateString("es-CL");
 
     // Productos desde fila 12
     const FILA_INICIO = 12;
     const FILA_TOTALES_ORIG = 42;
-    const FILAS_DISPONIBLES = FILA_TOTALES_ORIG - FILA_INICIO; // 30 filas
+    const FILAS_DISPONIBLES = FILA_TOTALES_ORIG - FILA_INICIO;
 
-    // Insertar filas extra si hay más productos que filas disponibles
     if (items.length > FILAS_DISPONIBLES) {
       const extra = items.length - FILAS_DISPONIBLES;
       ws.spliceRows(FILA_TOTALES_ORIG, 0, ...Array(extra).fill([]));
     }
 
-    // Rellenar productos
     items.forEach((item, idx) => {
       const fila = ws.getRow(FILA_INICIO + idx);
       fila.getCell(2).value = item.nombre;
@@ -78,7 +76,6 @@ const exportarCotizacion = async (req, res) => {
       fila.getCell(8).font = { name: "Arial", size: 9 };
     });
 
-    // Totales en filas fijas (ajustadas si se insertaron filas extra)
     const FILA_TOT = FILA_INICIO + Math.max(items.length, FILAS_DISPONIBLES);
     ws.getCell(`H${FILA_TOT}`).value = subtotal;
     ws.getCell(`H${FILA_TOT}`).numFmt = "#,##0";
@@ -118,4 +115,33 @@ const getCotizacion = async (req, res) => {
   }
 };
 
-module.exports = { exportarCotizacion, getCotizaciones, getCotizacion };
+const eliminarCotizacion = async (req, res) => {
+  try {
+    const cot = await Cotizacion.findByPk(req.params.id);
+    if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+    await cot.destroy();
+    res.json({ ok: true, message: "Cotización eliminada" });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+};
+
+const reexportarCotizacion = async (req, res) => {
+  try {
+    const cot = await Cotizacion.findByPk(req.params.id);
+    if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+
+    req.body = {
+      cliente: cot.cliente,
+      items: cot.items,
+      nombre_cotizacion: cot.nombre_cotizacion,
+      guardar: false,
+    };
+
+    return exportarCotizacion(req, res);
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+};
+
+module.exports = { exportarCotizacion, getCotizaciones, getCotizacion, eliminarCotizacion, reexportarCotizacion };
