@@ -1,33 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
-
 const CATEGORIAS = ["Todas", "Ferretería", "Plomería", "Construcción", "Eléctrico", "Pintura", "Jardín"];
-
 const fmt = (n) => `$${Number(n).toLocaleString("es-CL")}`;
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
   :root {
-    --bg: #0d0e0f;
-    --surface: #141618;
-    --surface2: #1c1f22;
-    --border: #2a2d31;
-    --border2: #363a3f;
-    --accent: #e8c547;
-    --accent2: #c9a82e;
-    --danger: #e05252;
-    --success: #4caf7d;
-    --text: #e2e4e7;
-    --text2: #8b9099;
-    --text3: #555c66;
-    --mono: 'IBM Plex Mono', monospace;
-    --sans: 'IBM Plex Sans', sans-serif;
+    --bg: #0d0e0f; --surface: #141618; --surface2: #1c1f22;
+    --border: #2a2d31; --border2: #363a3f;
+    --accent: #e8c547; --accent2: #c9a82e;
+    --danger: #e05252; --success: #4caf7d;
+    --text: #e2e4e7; --text2: #8b9099; --text3: #555c66;
+    --mono: 'IBM Plex Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
   }
-
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
   .app { display: flex; flex-direction: column; min-height: 100vh; }
   .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 100; }
@@ -111,6 +98,12 @@ const styles = `
   .notif { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; padding: 12px 18px; font-family: var(--mono); font-size: 12px; color: var(--text); z-index: 300; animation: slideUp 0.2s ease; display: flex; align-items: center; gap: 8px; }
   .notif.success { border-color: var(--success); color: var(--success); }
   .notif.danger { border-color: var(--danger); color: var(--danger); }
+  .hist-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .hist-info { display: flex; flex-direction: column; gap: 4px; }
+  .hist-nombre { font-size: 14px; font-weight: 500; color: var(--text); }
+  .hist-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); display: flex; gap: 16px; }
+  .hist-total { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 600; }
+  .hist-list { display: flex; flex-direction: column; gap: 10px; }
   @media (max-width: 768px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .header { padding: 0 1rem; }
@@ -121,6 +114,7 @@ const styles = `
 
 export default function App() {
   const [view, setView] = useState("inventario");
+  // Inventario
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -132,15 +126,28 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [productoActual, setProductoActual] = useState(null);
   const [form, setForm] = useState({});
+  // Cotización
   const [cotizacion, setCotizacion] = useState([]);
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
+  const [nombreCotizacion, setNombreCotizacion] = useState("");
+  // Clientes
+  const [clientes, setClientes] = useState([]);
+  const [loadingClientes, setLoadingClientes] = useState(false);
+  const [formCliente, setFormCliente] = useState({});
+  const [clienteActual, setClienteActual] = useState(null);
+  const [modalCliente, setModalCliente] = useState(null);
+  // Historial
+  const [historial, setHistorial] = useState([]);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
+  // Notif
   const [notif, setNotif] = useState(null);
-  const [clienteNombre, setClienteNombre] = useState("");
 
   const showNotif = (msg, type = "success") => {
     setNotif({ msg, type });
     setTimeout(() => setNotif(null), 2500);
   };
 
+  // ── Fetch productos ────────────────────────────────────────
   const fetchProductos = useCallback(async () => {
     setLoading(true);
     try {
@@ -161,17 +168,50 @@ export default function App() {
     return () => clearTimeout(delay);
   }, [fetchProductos]);
 
+  // ── Fetch clientes ─────────────────────────────────────────
+  const fetchClientes = useCallback(async () => {
+    setLoadingClientes(true);
+    try {
+      const res = await fetch(`${API_URL}/api/clientes`);
+      const data = await res.json();
+      if (data.ok) setClientes(data.data);
+    } catch { showNotif("Error al cargar clientes", "danger"); }
+    finally { setLoadingClientes(false); }
+  }, []);
+
+  useEffect(() => {
+    fetchClientes();
+  }, [fetchClientes]);
+
+  // ── Fetch historial ────────────────────────────────────────
+  const fetchHistorial = useCallback(async () => {
+    setLoadingHistorial(true);
+    try {
+      const res = await fetch(`${API_URL}/api/cotizaciones`);
+      const data = await res.json();
+      if (data.ok) setHistorial(data.data);
+    } catch { showNotif("Error al cargar historial", "danger"); }
+    finally { setLoadingHistorial(false); }
+  }, []);
+
+  useEffect(() => {
+    if (view === "historial") fetchHistorial();
+  }, [view, fetchHistorial]);
+
+  // ── Stats ──────────────────────────────────────────────────
   const totalProductos = productos.length;
   const totalStock = productos.reduce((s, p) => s + Number(p.stock), 0);
   const valorInventario = productos.reduce((s, p) => s + Number(p.precio_venta) * Number(p.stock), 0);
   const stockBajo = productos.filter(p => Number(p.stock) < 30).length;
 
+  // ── Sort ───────────────────────────────────────────────────
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortField(field); setSortDir("asc"); }
   };
   const sortIcon = (field) => sortField === field ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
+  // ── CRUD Productos ─────────────────────────────────────────
   const abrirNuevo = () => {
     setForm({ nombre: "", categoria: "Ferretería", precio_compra: "", precio_venta: "", stock: "", unidad: "unidad", proveedor: "", contacto: "" });
     setModal("nuevo");
@@ -185,8 +225,7 @@ export default function App() {
     setGuardando(true);
     try {
       const res = await fetch(`${API_URL}/api/productos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock) }),
       });
       const data = await res.json();
@@ -199,8 +238,7 @@ export default function App() {
     setGuardando(true);
     try {
       const res = await fetch(`${API_URL}/api/productos/${productoActual.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock) }),
       });
       const data = await res.json();
@@ -214,14 +252,55 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/api/productos/${productoActual.id}`, { method: "DELETE" });
       const data = await res.json();
-      if (data.ok) {
-        setCotizacion(prev => prev.filter(c => c.id !== productoActual.id));
-        cerrarModal(); fetchProductos(); showNotif("Producto eliminado", "danger");
-      }
+      if (data.ok) { setCotizacion(prev => prev.filter(c => c.id !== productoActual.id)); cerrarModal(); fetchProductos(); showNotif("Producto eliminado", "danger"); }
     } catch { showNotif("Error al eliminar", "danger"); }
     finally { setGuardando(false); }
   };
 
+  // ── CRUD Clientes ──────────────────────────────────────────
+  const abrirNuevoCliente = () => { setFormCliente({ nombre: "", rut: "", telefono: "", email: "", direccion: "" }); setModalCliente("nuevo"); };
+  const abrirEditarCliente = (c) => { setClienteActual(c); setFormCliente({ ...c }); setModalCliente("editar"); };
+  const abrirEliminarCliente = (c) => { setClienteActual(c); setModalCliente("eliminar"); };
+  const cerrarModalCliente = () => { setModalCliente(null); setClienteActual(null); };
+
+  const guardarNuevoCliente = async () => {
+    if (!formCliente.nombre) return;
+    setGuardando(true);
+    try {
+      const res = await fetch(`${API_URL}/api/clientes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formCliente),
+      });
+      const data = await res.json();
+      if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("✓ Cliente agregado"); }
+    } catch { showNotif("Error al agregar cliente", "danger"); }
+    finally { setGuardando(false); }
+  };
+
+  const guardarEditarCliente = async () => {
+    setGuardando(true);
+    try {
+      const res = await fetch(`${API_URL}/api/clientes/${clienteActual.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formCliente),
+      });
+      const data = await res.json();
+      if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("✓ Cliente actualizado"); }
+    } catch { showNotif("Error al actualizar", "danger"); }
+    finally { setGuardando(false); }
+  };
+
+  const confirmarEliminarCliente = async () => {
+    setGuardando(true);
+    try {
+      const res = await fetch(`${API_URL}/api/clientes/${clienteActual.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("Cliente eliminado", "danger"); }
+    } catch { showNotif("Error al eliminar", "danger"); }
+    finally { setGuardando(false); }
+  };
+
+  // ── Cotización ─────────────────────────────────────────────
   const agregarCotizacion = (p) => {
     setCotizacion(prev => {
       if (prev.find(c => c.id === p.id)) { showNotif("Ya está en la cotización"); return prev; }
@@ -234,7 +313,7 @@ export default function App() {
     setCotizacion(prev => prev.map(c => c.id === id ? { ...c, cantidad: n } : c));
   };
   const quitarCotizacion = (id) => setCotizacion(prev => prev.filter(c => c.id !== id));
-  const limpiarCotizacion = () => { setCotizacion([]); setClienteNombre(""); };
+  const limpiarCotizacion = () => { setCotizacion([]); setClienteSeleccionado(null); setNombreCotizacion(""); };
 
   const subtotal = cotizacion.reduce((s, c) => s + Number(c.precio_venta) * c.cantidad, 0);
   const iva = Math.round(subtotal * 0.19);
@@ -245,10 +324,10 @@ export default function App() {
     setExportando(true);
     try {
       const res = await fetch(`${API_URL}/api/cotizaciones/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cliente: clienteNombre,
+          cliente: clienteSeleccionado ? clienteSeleccionado.nombre : "",
+          nombre_cotizacion: nombreCotizacion || `Cotización ${new Date().toLocaleDateString("es-CL")}`,
           items: cotizacion.map(c => ({ id: c.id, nombre: c.nombre, unidad: c.unidad, precio: Number(c.precio_venta), cantidad: c.cantidad })),
           guardar: true,
         }),
@@ -258,10 +337,11 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `cotizacion-${Date.now()}.xlsx`;
+      a.download = `${nombreCotizacion || "cotizacion"}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
       showNotif("✓ Excel descargado");
+      limpiarCotizacion();
     } catch { showNotif("Error al exportar Excel", "danger"); }
     finally { setExportando(false); }
   };
@@ -276,13 +356,17 @@ export default function App() {
           <div className="header-brand"><span>▣</span> INVENTARIO <span>/</span> KENNOT</div>
           <nav className="header-nav">
             <button className={`nav-btn ${view === "inventario" ? "active" : ""}`} onClick={() => setView("inventario")}>Inventario</button>
+            <button className={`nav-btn ${view === "clientes" ? "active" : ""}`} onClick={() => setView("clientes")}>Clientes</button>
             <button className={`nav-btn ${view === "cotizacion" ? "active" : ""}`} onClick={() => setView("cotizacion")}>
               Cotización {cotizacion.length > 0 && <span className="badge">{cotizacion.length}</span>}
             </button>
+            <button className={`nav-btn ${view === "historial" ? "active" : ""}`} onClick={() => setView("historial")}>Historial</button>
           </nav>
         </header>
 
         <main className="main">
+
+          {/* ── INVENTARIO ── */}
           {view === "inventario" && (
             <>
               <div className="stats">
@@ -291,7 +375,6 @@ export default function App() {
                 <div className="stat-card"><div className="stat-label">Valor inventario</div><div className="stat-value accent">{fmt(valorInventario)}</div></div>
                 <div className="stat-card"><div className="stat-label">Stock bajo (&lt;30)</div><div className="stat-value" style={{color: stockBajo > 0 ? "var(--danger)" : "var(--success)"}}>{stockBajo}</div></div>
               </div>
-
               <div className="toolbar">
                 <div className="search-wrap">
                   <span className="search-icon">⌕</span>
@@ -302,7 +385,6 @@ export default function App() {
                 </select>
                 <button className="btn btn-primary" onClick={abrirNuevo}>+ Nuevo producto</button>
               </div>
-
               <div className="table-wrap">
                 <table className="table">
                   <thead>
@@ -349,18 +431,79 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <div style={{marginTop:"10px", fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text3)"}}>
-                {productos.length} productos
+              <div style={{marginTop:"10px", fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text3)"}}>{productos.length} productos</div>
+            </>
+          )}
+
+          {/* ── CLIENTES ── */}
+          {view === "clientes" && (
+            <>
+              <div className="toolbar">
+                <div style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)"}}>{clientes.length} clientes registrados</div>
+                <button className="btn btn-primary" onClick={abrirNuevoCliente}>+ Nuevo cliente</button>
+              </div>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th><th>Nombre</th><th>RUT</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loadingClientes ? (
+                      <tr className="empty-row"><td colSpan={7}><span className="spinner"></span>Cargando...</td></tr>
+                    ) : clientes.length === 0 ? (
+                      <tr className="empty-row"><td colSpan={7}>// sin clientes registrados</td></tr>
+                    ) : clientes.map(c => (
+                      <tr key={c.id}>
+                        <td className="id-cell">#{String(c.id).padStart(4, "0")}</td>
+                        <td style={{fontWeight:"500"}}>{c.nombre}</td>
+                        <td style={{fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text2)"}}>{c.rut || "—"}</td>
+                        <td style={{fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text2)"}}>{c.telefono || "—"}</td>
+                        <td style={{fontSize:"12px", color:"var(--text2)"}}>{c.email || "—"}</td>
+                        <td style={{fontSize:"12px", color:"var(--text3)"}}>{c.direccion || "—"}</td>
+                        <td>
+                          <div className="actions">
+                            <button className="btn btn-ghost btn-sm" onClick={() => abrirEditarCliente(c)}>Editar</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => abrirEliminarCliente(c)}>✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
 
+          {/* ── COTIZACIÓN ── */}
           {view === "cotizacion" && (
             <>
               <div className="toolbar">
-                <div className="search-wrap">
-                  <span className="search-icon">👤</span>
-                  <input className="search-input" placeholder="Nombre del cliente..." value={clienteNombre} onChange={e => setClienteNombre(e.target.value)} />
+                <div className="field" style={{flex:1, minWidth:"200px"}}>
+                  <label style={{fontFamily:"var(--mono)", fontSize:"10px", color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em"}}>Cliente</label>
+                  <select
+                    className="filter-select"
+                    style={{width:"100%"}}
+                    value={clienteSeleccionado?.id || ""}
+                    onChange={e => {
+                      const c = clientes.find(c => c.id === Number(e.target.value));
+                      setClienteSeleccionado(c || null);
+                    }}
+                  >
+                    <option value="">— Seleccionar cliente —</option>
+                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                  </select>
+                </div>
+                <div className="field" style={{flex:1, minWidth:"200px"}}>
+                  <label style={{fontFamily:"var(--mono)", fontSize:"10px", color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em"}}>Nombre cotización</label>
+                  <input
+                    className="search-input"
+                    placeholder="Ej: Cotización 1 Regimiento Linares"
+                    value={nombreCotizacion}
+                    onChange={e => setNombreCotizacion(e.target.value)}
+                    style={{paddingLeft:"12px"}}
+                  />
                 </div>
                 <button className="btn btn-ghost" onClick={limpiarCotizacion}>Limpiar</button>
                 <button className="btn btn-primary" onClick={exportarExcel} disabled={cotizacion.length === 0 || exportando}>
@@ -397,18 +540,48 @@ export default function App() {
                     <hr className="divider" />
                     <div className="total-row grand"><span className="total-label">Total</span><span className="total-value">{fmt(total)}</span></div>
                   </div>
-                  <div style={{display:"flex", justifyContent:"flex-end"}}>
-                    <button className="btn btn-primary" onClick={exportarExcel} disabled={exportando}>
-                      {exportando ? <><span className="spinner"></span>Generando...</> : "↓ Exportar cotización en Excel"}
-                    </button>
-                  </div>
                 </>
               )}
             </>
           )}
+
+          {/* ── HISTORIAL ── */}
+          {view === "historial" && (
+            <>
+              <div className="toolbar">
+                <div style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)"}}>{historial.length} cotizaciones guardadas</div>
+              </div>
+              {loadingHistorial ? (
+                <div style={{textAlign:"center", padding:"3rem", color:"var(--text3)", fontFamily:"var(--mono)", fontSize:"12px"}}>
+                  <span className="spinner"></span>Cargando...
+                </div>
+              ) : historial.length === 0 ? (
+                <div className="cot-empty">// sin cotizaciones guardadas</div>
+              ) : (
+                <div className="hist-list">
+                  {historial.map(h => (
+                    <div key={h.id} className="hist-card">
+                      <div className="hist-info">
+                        <div className="hist-nombre">{h.nombre_cotizacion || `Cotización #${h.numero}`}</div>
+                        <div className="hist-meta">
+                          <span>#{h.numero}</span>
+                          <span>{h.cliente || "Sin cliente"}</span>
+                          <span>{new Date(h.createdAt).toLocaleDateString("es-CL")}</span>
+                          <span>{h.items?.length || 0} productos</span>
+                        </div>
+                      </div>
+                      <div className="hist-total">{fmt(h.total)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
         </main>
       </div>
 
+      {/* ── MODALES PRODUCTO ── */}
       {(modal === "nuevo" || modal === "editar") && (
         <div className="modal-overlay" onClick={cerrarModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -485,6 +658,70 @@ export default function App() {
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={cerrarModal}>Cancelar</button>
               <button className="btn btn-danger" onClick={confirmarEliminar} disabled={guardando}>
+                {guardando ? "Eliminando..." : "Eliminar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODALES CLIENTE ── */}
+      {(modalCliente === "nuevo" || modalCliente === "editar") && (
+        <div className="modal-overlay" onClick={cerrarModalCliente}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">{modalCliente === "nuevo" ? "// Nuevo cliente" : "// Editar cliente"}</span>
+              <button className="modal-close" onClick={cerrarModalCliente}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="field">
+                <label>Nombre</label>
+                <input value={formCliente.nombre || ""} onChange={e => setFormCliente(f => ({...f, nombre: e.target.value}))} placeholder="Nombre o razón social" />
+              </div>
+              <div className="fields-row">
+                <div className="field">
+                  <label>RUT</label>
+                  <input value={formCliente.rut || ""} onChange={e => setFormCliente(f => ({...f, rut: e.target.value}))} placeholder="76.000.000-0" />
+                </div>
+                <div className="field">
+                  <label>Teléfono</label>
+                  <input value={formCliente.telefono || ""} onChange={e => setFormCliente(f => ({...f, telefono: e.target.value}))} placeholder="+569..." />
+                </div>
+              </div>
+              <div className="field">
+                <label>Email</label>
+                <input value={formCliente.email || ""} onChange={e => setFormCliente(f => ({...f, email: e.target.value}))} placeholder="correo@ejemplo.com" />
+              </div>
+              <div className="field">
+                <label>Dirección</label>
+                <input value={formCliente.direccion || ""} onChange={e => setFormCliente(f => ({...f, direccion: e.target.value}))} placeholder="Calle, ciudad" />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={cerrarModalCliente}>Cancelar</button>
+              <button className="btn btn-primary" onClick={modalCliente === "nuevo" ? guardarNuevoCliente : guardarEditarCliente} disabled={guardando}>
+                {guardando ? "Guardando..." : modalCliente === "nuevo" ? "Agregar" : "Guardar cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalCliente === "eliminar" && (
+        <div className="modal-overlay" onClick={cerrarModalCliente}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">// Confirmar eliminación</span>
+              <button className="modal-close" onClick={cerrarModalCliente}>×</button>
+            </div>
+            <div className="modal-body">
+              <p style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)", lineHeight:"1.6"}}>
+                ¿Eliminar cliente <strong style={{color:"var(--text)"}}>{clienteActual?.nombre}</strong>?<br/>Esta acción no se puede deshacer.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={cerrarModalCliente}>Cancelar</button>
+              <button className="btn btn-danger" onClick={confirmarEliminarCliente} disabled={guardando}>
                 {guardando ? "Eliminando..." : "Eliminar"}
               </button>
             </div>

@@ -12,7 +12,7 @@ const generarNumero = async () => {
 
 const exportarCotizacion = async (req, res) => {
   try {
-    const { cliente, items, guardar = true } = req.body;
+    const { cliente, items, guardar = true, nombre_cotizacion } = req.body;
     if (!items || items.length === 0)
       return res.status(400).json({ ok: false, error: "Sin items" });
 
@@ -25,7 +25,15 @@ const exportarCotizacion = async (req, res) => {
     fechaValido.setDate(fechaValido.getDate() + 30);
 
     if (guardar) {
-      await Cotizacion.create({ numero, cliente, subtotal, iva, total, items });
+      await Cotizacion.create({
+        numero,
+        cliente,
+        nombre_cotizacion: nombre_cotizacion || `Cotización ${numero}`,
+        subtotal,
+        iva,
+        total,
+        items,
+      });
     }
 
     const wb = new ExcelJS.Workbook();
@@ -33,18 +41,20 @@ const exportarCotizacion = async (req, res) => {
     const ws = wb.getWorksheet("Cotización") || wb.worksheets[0];
 
     // Campos fijos
-    ws.getCell("F4").value = numero;
-    ws.getCell("C8").value = cliente || "Sin nombre";
-    ws.getCell("F8").value = fecha;
-    ws.getCell("F9").value = fechaValido.toLocaleDateString("es-CL");
+    ws.getCell("G5").value = numero;
+    ws.getCell("D8").value = cliente || "Sin nombre";
+    ws.getCell("H8").value = fecha;
+    ws.getCell("H9").value = fechaValido.toLocaleDateString("es-CL");
 
+    // Productos desde fila 12
     const FILA_INICIO = 12;
-    const FILAS_DISPONIBLES = 57; // filas 12 a 68
+    const FILA_TOTALES_ORIG = 42;
+    const FILAS_DISPONIBLES = FILA_TOTALES_ORIG - FILA_INICIO; // 30 filas
 
-    // Si hay más productos que filas, insertar filas extras antes de los totales
+    // Insertar filas extra si hay más productos que filas disponibles
     if (items.length > FILAS_DISPONIBLES) {
       const extra = items.length - FILAS_DISPONIBLES;
-      ws.spliceRows(FILA_INICIO + FILAS_DISPONIBLES, 0, ...Array(extra).fill([]));
+      ws.spliceRows(FILA_TOTALES_ORIG, 0, ...Array(extra).fill([]));
     }
 
     // Rellenar productos
@@ -52,34 +62,35 @@ const exportarCotizacion = async (req, res) => {
       const fila = ws.getRow(FILA_INICIO + idx);
       fila.getCell(2).value = item.nombre;
       fila.getCell(2).font = { name: "Arial", size: 9 };
-      fila.getCell(3).value = item.unidad || "UNID";
-      fila.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
-      fila.getCell(3).font = { name: "Arial", size: 9 };
-      fila.getCell(4).value = item.cantidad;
-      fila.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
-      fila.getCell(4).font = { name: "Arial", bold: true, size: 9 };
-      fila.getCell(5).value = Number(item.precio);
-      fila.getCell(5).numFmt = "#,##0";
-      fila.getCell(5).alignment = { horizontal: "right", vertical: "middle" };
+      fila.getCell(5).value = item.unidad || "UNID";
+      fila.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
       fila.getCell(5).font = { name: "Arial", size: 9 };
-      fila.getCell(6).value = Number(item.precio) * item.cantidad;
-      fila.getCell(6).numFmt = "#,##0";
-      fila.getCell(6).alignment = { horizontal: "right", vertical: "middle" };
-      fila.getCell(6).font = { name: "Arial", size: 9 };
+      fila.getCell(6).value = item.cantidad;
+      fila.getCell(6).alignment = { horizontal: "center", vertical: "middle" };
+      fila.getCell(6).font = { name: "Arial", bold: true, size: 9 };
+      fila.getCell(7).value = Number(item.precio);
+      fila.getCell(7).numFmt = "#,##0";
+      fila.getCell(7).alignment = { horizontal: "right", vertical: "middle" };
+      fila.getCell(7).font = { name: "Arial", size: 9 };
+      fila.getCell(8).value = Number(item.precio) * item.cantidad;
+      fila.getCell(8).numFmt = "#,##0";
+      fila.getCell(8).alignment = { horizontal: "right", vertical: "middle" };
+      fila.getCell(8).font = { name: "Arial", size: 9 };
     });
 
-    // Totales en las filas correctas (después de los productos)
-    const FILA_TOTALES = FILA_INICIO + Math.max(items.length, FILAS_DISPONIBLES) + 1;
-    ws.getCell(`F${FILA_TOTALES}`).value = subtotal;
-    ws.getCell(`F${FILA_TOTALES}`).numFmt = "#,##0";
-    ws.getCell(`F${FILA_TOTALES + 1}`).value = iva;
-    ws.getCell(`F${FILA_TOTALES + 1}`).numFmt = "#,##0";
-    ws.getCell(`F${FILA_TOTALES + 2}`).value = total;
-    ws.getCell(`F${FILA_TOTALES + 2}`).numFmt = "#,##0";
-    ws.getCell(`F${FILA_TOTALES + 2}`).font = { name: "Arial", bold: true, size: 10 };
+    // Totales en filas fijas (ajustadas si se insertaron filas extra)
+    const FILA_TOT = FILA_INICIO + Math.max(items.length, FILAS_DISPONIBLES);
+    ws.getCell(`H${FILA_TOT}`).value = subtotal;
+    ws.getCell(`H${FILA_TOT}`).numFmt = "#,##0";
+    ws.getCell(`H${FILA_TOT + 1}`).value = iva;
+    ws.getCell(`H${FILA_TOT + 1}`).numFmt = "#,##0";
+    ws.getCell(`H${FILA_TOT + 2}`).value = total;
+    ws.getCell(`H${FILA_TOT + 2}`).numFmt = "#,##0";
+    ws.getCell(`H${FILA_TOT + 2}`).font = { name: "Arial", bold: true, size: 10 };
 
+    const nombreArchivo = `COT-${numero}-${cliente || "cliente"}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="COT-${numero}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${nombreArchivo}"`);
     await wb.xlsx.write(res);
     res.end();
   } catch (error) {

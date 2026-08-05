@@ -16,6 +16,10 @@ const Cotizacion = sequelize.define("Cotizacion", {
     type: DataTypes.STRING(255),
     allowNull: true,
   },
+  nombre_cotizacion: {
+  type: DataTypes.STRING(255),
+  allowNull: true,
+},
   subtotal: {
     type: DataTypes.DECIMAL(14, 2),
     allowNull: false,
