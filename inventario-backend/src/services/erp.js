@@ -70,6 +70,7 @@ const moverStock = async (producto, delta, info, t) => {
     referencia_id: info.referencia_id,
     referencia_numero: info.referencia_numero,
     nota: info.nota,
+    creado_por: info.creado_por,
   }, { transaction: t });
 };
 

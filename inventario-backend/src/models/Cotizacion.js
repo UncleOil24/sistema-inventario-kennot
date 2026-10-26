@@ -42,6 +42,10 @@ const Cotizacion = sequelize.define("Cotizacion", {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
+  creado_por: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+  },
   // Items guardados como JSON
   items: {
     type: DataTypes.JSONB,

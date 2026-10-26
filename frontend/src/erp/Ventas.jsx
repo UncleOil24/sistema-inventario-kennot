@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
 import { api, fmt, fecha, useProductos } from "./lib";
 
-export default function Ventas({ notify, clientes, abrirVentaId, onAbierta }) {
+export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbierta }) {
   const [ventas, setVentas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtroPago, setFiltroPago] = useState("");
@@ -40,7 +40,9 @@ export default function Ventas({ notify, clientes, abrirVentaId, onAbierta }) {
       <div className="stats">
         <div className="stat-card"><div className="stat-label">Ventas listadas</div><div className="stat-value">{activas.length}</div></div>
         <div className="stat-card"><div className="stat-label">Total (con IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.total), 0))}</div></div>
-        <div className="stat-card"><div className="stat-label">Margen neto</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.subtotal) - Number(v.costo_total), 0))}</div></div>
+        {esAdmin
+          ? <div className="stat-card"><div className="stat-label">Margen neto</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.subtotal) - Number(v.costo_total), 0))}</div></div>
+          : <div className="stat-card"><div className="stat-label">Neto (sin IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.subtotal), 0))}</div></div>}
         <div className="stat-card"><div className="stat-label">Por cobrar</div><div className="stat-value" style={{ color: porCobrar > 0 ? "var(--danger)" : "var(--success)", fontSize: 16 }}>{fmt(porCobrar)}</div></div>
       </div>
 
@@ -86,7 +88,7 @@ export default function Ventas({ notify, clientes, abrirVentaId, onAbierta }) {
       </div>
 
       {nueva && <NuevaVenta clientes={clientes} notify={notify} onClose={() => setNueva(false)} onCreada={(v) => { setNueva(false); cargar(); verDetalle(v.id); }} />}
-      {detalle && <DetalleVenta venta={detalle} notify={notify} onClose={() => setDetalle(null)} onCambio={() => { cargar(); verDetalle(detalle.id); }} />}
+      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} notify={notify} onClose={() => setDetalle(null)} onCambio={() => { cargar(); verDetalle(detalle.id); }} />}
     </>
   );
 }
@@ -158,7 +160,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   );
 }
 
-function DetalleVenta({ venta, notify, onClose, onCambio }) {
+function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio }) {
   const margen = Number(venta.subtotal) - Number(venta.costo_total);
   const pct = Number(venta.subtotal) ? Math.round((margen / Number(venta.subtotal)) * 100) : 0;
 
@@ -173,7 +175,7 @@ function DetalleVenta({ venta, notify, onClose, onCambio }) {
   return (
     <Modal titulo={`// Venta ${venta.numero}`} onClose={onClose} ancho={720}
       footer={<>
-        {venta.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular venta</button>}
+        {esAdmin && venta.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular venta</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
@@ -181,19 +183,20 @@ function DetalleVenta({ venta, notify, onClose, onCambio }) {
         <span>{venta.cliente_nombre || "Sin cliente"}</span>
         {venta.documento && <span>Doc. {venta.documento}</span>}
         {venta.fecha_vencimiento && <span>Vence {fecha(venta.fecha_vencimiento)}</span>}
+        {venta.creado_por && <span>Por {venta.creado_por}</span>}
         <Estado valor={venta.estado} /> <Estado valor={venta.estado_pago} />
       </div>
       {venta.notas && <div className="mini">{venta.notas}</div>}
       <div className="table-wrap">
         <table className="table table-compacta">
-          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Costo</th><th>Total</th></tr></thead>
+          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th>{esAdmin && <th>Costo</th>}<th>Total</th></tr></thead>
           <tbody>
             {venta.items.map((i, k) => (
               <tr key={k}>
                 <td>{i.nombre}</td>
                 <td className="mini">{i.cantidad} {i.unidad}</td>
                 <td className="price-cell">{fmt(i.precio)}</td>
-                <td className="price-cell compra">{fmt(i.costo)}</td>
+                {esAdmin && <td className="price-cell compra">{fmt(i.costo)}</td>}
                 <td className="price-cell">{fmt(i.precio * i.cantidad)}</td>
               </tr>
             ))}
@@ -201,13 +204,13 @@ function DetalleVenta({ venta, notify, onClose, onCambio }) {
         </table>
       </div>
       <Totales subtotal={venta.subtotal} iva={venta.iva} total={venta.total} />
-      <div className="mini">Margen bruto: <strong style={{ color: "var(--text)" }}>{fmt(margen)}</strong> ({pct}% sobre el neto)</div>
+      {esAdmin && <div className="mini">Margen bruto: <strong style={{ color: "var(--text)" }}>{fmt(margen)}</strong> ({pct}% sobre el neto)</div>}
       <PagosPanel
         key={venta.monto_pagado}
         doc={venta}
         tipo="cobro"
         onRegistrar={(body) => accion(() => api(`/ventas/${venta.id}/cobros`, { method: "POST", body }), "✓ Cobro registrado")}
-        onEliminar={(p) => confirm("¿Eliminar este cobro?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado")}
+        onEliminar={esAdmin ? (p) => confirm("¿Eliminar este cobro?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado") : null}
       />
     </Modal>
   );

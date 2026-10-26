@@ -4,7 +4,7 @@ import { api } from "./lib";
 
 const VACIO = { nombre: "", rut: "", telefono: "", email: "", direccion: "", rubro: "", notas: "" };
 
-export default function Proveedores({ proveedores, loading, recargar, notify }) {
+export default function Proveedores({ esAdmin, proveedores, loading, recargar, notify }) {
   const [form, setForm] = useState(null); // null | objeto en edición
   const [guardando, setGuardando] = useState(false);
   const [busqueda, setBusqueda] = useState("");
@@ -67,7 +67,7 @@ export default function Proveedores({ proveedores, loading, recargar, notify }) 
                   <td>
                     <div className="actions">
                       <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...p })}>Editar</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => eliminar(p)}>✕</button>
+                      {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => eliminar(p)}>✕</button>}
                     </div>
                   </td>
                 </tr>

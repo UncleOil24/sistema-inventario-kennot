@@ -5,7 +5,10 @@ import Compras from "./erp/Compras";
 import Proveedores from "./erp/Proveedores";
 import Kardex from "./erp/Kardex";
 import { Estado } from "./erp/ui";
-import { api } from "./erp/lib";
+import { api, authFetch, getToken, setToken } from "./erp/lib";
+import Login from "./erp/Login";
+import Usuarios from "./erp/Usuarios";
+import CambiarPassword from "./erp/CambiarPassword";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 const CATEGORIAS = ["Todas", "Ferretería", "Plomería", "Construcción", "Eléctrico", "Pintura", "Jardín"];
@@ -116,6 +119,25 @@ const styles = `
   .hist-total { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 600; white-space: nowrap; }
   .hist-list { display: flex; flex-direction: column; gap: 10px; }
   .hist-detalle { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+  /* ---------- Login y sesión ---------- */
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+  .login-card { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .login-error { background: rgba(224,82,82,0.1); border: 1px solid rgba(224,82,82,0.3); color: var(--danger); border-radius: 6px; padding: 9px 12px; font-family: var(--mono); font-size: 12px; }
+  .user-menu { position: relative; flex-shrink: 0; }
+  .user-btn { display: flex; align-items: center; gap: 8px; background: none; border: 1px solid var(--border); border-radius: 18px; padding: 3px 10px 3px 3px; cursor: pointer; color: var(--text); font-family: var(--mono); font-size: 11px; }
+  .user-btn:hover { border-color: var(--border2); }
+  .user-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #000; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; }
+  .rol-badge { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border2); color: var(--text2); }
+  .rol-admin { color: var(--accent); border-color: rgba(232,197,71,0.4); }
+  .menu-fondo { position: fixed; inset: 0; z-index: 150; }
+  .menu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 151; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); display: flex; flex-direction: column; overflow: hidden; }
+  .menu-info { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+  .menu-pop button { background: none; border: none; text-align: left; padding: 10px 14px; color: var(--text); font-family: var(--mono); font-size: 12px; cursor: pointer; }
+  .menu-pop button:hover { background: rgba(255,255,255,0.04); }
+  .menu-pop button.peligro { color: var(--danger); }
+  .field input:disabled { opacity: 0.5; cursor: not-allowed; }
+  @media (max-width: 768px) { .user-nombre, .user-btn .rol-badge { display: none; } .user-btn { padding: 3px; } }
+
   /* ---------- ERP ---------- */
   :root { --serie-1: #3987e5; --serie-2: #d95926; --warn: #e8a33d; --info: #5b9bd5; }
   .mini { font-family: var(--mono); font-size: 11px; color: var(--text3); }
@@ -179,7 +201,48 @@ const styles = `
   }
 `;
 
-export default function App() {
+// Raíz: decide entre pantalla de login y el sistema
+export default function Root() {
+  const [usuario, setUsuario] = useState(null);
+  const [verificando, setVerificando] = useState(() => !!getToken());
+  const [aviso, setAviso] = useState("");
+
+  // Al cargar, si hay token guardado, se valida contra el backend
+  useEffect(() => {
+    if (!getToken()) return;
+    api("/auth/me")
+      .then(setUsuario)
+      .catch(() => setToken(null))
+      .finally(() => setVerificando(false));
+  }, []);
+
+  // Cualquier 401 (token vencido, contraseña cambiada, usuario desactivado) vuelve al login
+  useEffect(() => {
+    const salir = (e) => { setToken(null); setUsuario(null); setAviso(e.detail || "Tu sesión expiró"); };
+    window.addEventListener("sesion-expirada", salir);
+    return () => window.removeEventListener("sesion-expirada", salir);
+  }, []);
+
+  const cerrarSesion = () => { setToken(null); setUsuario(null); setAviso(""); };
+
+  return (
+    <>
+      <style>{styles}</style>
+      {verificando ? (
+        <div className="login-wrap"><span className="spinner"></span></div>
+      ) : usuario ? (
+        <App key={usuario.id} usuario={usuario} onLogout={cerrarSesion} />
+      ) : (
+        <Login aviso={aviso} onEntrar={(u) => { setAviso(""); setUsuario(u); }} />
+      )}
+    </>
+  );
+}
+
+function App({ usuario, onLogout }) {
+  const esAdmin = usuario.rol === "admin";
+  const [menuUsuario, setMenuUsuario] = useState(false);
+  const [cambiarPass, setCambiarPass] = useState(false);
   const [view, setView] = useState("dashboard");
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -233,7 +296,7 @@ export default function App() {
       if (categoriaFiltro !== "Todas") params.append("categoria", categoriaFiltro);
       params.append("sort", sortField);
       params.append("dir", sortDir);
-      const res = await fetch(`${API_URL}/api/productos?${params}`);
+      const res = await authFetch(`${API_URL}/api/productos?${params}`);
       const data = await res.json();
       if (data.ok) setProductos(data.data);
     } catch { showNotif("Error al cargar productos", "danger"); }
@@ -248,7 +311,7 @@ export default function App() {
   const fetchClientes = useCallback(async () => {
     setLoadingClientes(true);
     try {
-      const res = await fetch(`${API_URL}/api/clientes`);
+      const res = await authFetch(`${API_URL}/api/clientes`);
       const data = await res.json();
       if (data.ok) setClientes(data.data);
     } catch { showNotif("Error al cargar clientes", "danger"); }
@@ -260,7 +323,7 @@ export default function App() {
   const fetchHistorial = useCallback(async () => {
     setLoadingHistorial(true);
     try {
-      const res = await fetch(`${API_URL}/api/cotizaciones`);
+      const res = await authFetch(`${API_URL}/api/cotizaciones`);
       const data = await res.json();
       if (data.ok) setHistorial(data.data);
     } catch { showNotif("Error al cargar historial", "danger"); }
@@ -295,7 +358,7 @@ export default function App() {
     if (!form.nombre || !form.precio_venta || !form.stock) return;
     setGuardando(true);
     try {
-      const res = await fetch(`${API_URL}/api/productos`, {
+      const res = await authFetch(`${API_URL}/api/productos`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock), stock_minimo: Number(form.stock_minimo ?? 30) }),
       });
@@ -308,7 +371,7 @@ export default function App() {
   const guardarEditar = async () => {
     setGuardando(true);
     try {
-      const res = await fetch(`${API_URL}/api/productos/${productoActual.id}`, {
+      const res = await authFetch(`${API_URL}/api/productos/${productoActual.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock), stock_minimo: Number(form.stock_minimo ?? 30) }),
       });
@@ -321,7 +384,7 @@ export default function App() {
   const confirmarEliminar = async () => {
     setGuardando(true);
     try {
-      const res = await fetch(`${API_URL}/api/productos/${productoActual.id}`, { method: "DELETE" });
+      const res = await authFetch(`${API_URL}/api/productos/${productoActual.id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.ok) { setCotizacion(prev => prev.filter(c => c.id !== productoActual.id)); cerrarModal(); fetchProductos(); showNotif("Producto eliminado", "danger"); }
     } catch { showNotif("Error al eliminar", "danger"); }
@@ -337,7 +400,7 @@ export default function App() {
     if (!formCliente.nombre) return;
     setGuardando(true);
     try {
-      const res = await fetch(`${API_URL}/api/clientes`, {
+      const res = await authFetch(`${API_URL}/api/clientes`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formCliente),
       });
@@ -350,7 +413,7 @@ export default function App() {
   const guardarEditarCliente = async () => {
     setGuardando(true);
     try {
-      const res = await fetch(`${API_URL}/api/clientes/${clienteActual.id}`, {
+      const res = await authFetch(`${API_URL}/api/clientes/${clienteActual.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formCliente),
       });
@@ -363,7 +426,7 @@ export default function App() {
   const confirmarEliminarCliente = async () => {
     setGuardando(true);
     try {
-      const res = await fetch(`${API_URL}/api/clientes/${clienteActual.id}`, { method: "DELETE" });
+      const res = await authFetch(`${API_URL}/api/clientes/${clienteActual.id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("Cliente eliminado", "danger"); }
     } catch { showNotif("Error al eliminar", "danger"); }
@@ -392,7 +455,7 @@ export default function App() {
     if (cotizacion.length === 0) return;
     setExportando(true);
     try {
-      const res = await fetch(`${API_URL}/api/cotizaciones/export`, {
+      const res = await authFetch(`${API_URL}/api/cotizaciones/export`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente: clienteSeleccionado ? clienteSeleccionado.nombre : "",
@@ -425,7 +488,7 @@ export default function App() {
 
   const reexportarCotizacion = async (id, nombre) => {
     try {
-      const res = await fetch(`${API_URL}/api/cotizaciones/reexport/${id}`, { method: "POST" });
+      const res = await authFetch(`${API_URL}/api/cotizaciones/reexport/${id}`, { method: "POST" });
       if (!res.ok) throw new Error("Error");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -441,7 +504,7 @@ export default function App() {
   const eliminarCotizacionHistorial = async (id) => {
     if (!confirm("¿Eliminar esta cotización?")) return;
     try {
-      const res = await fetch(`${API_URL}/api/cotizaciones/${id}`, { method: "DELETE" });
+      const res = await authFetch(`${API_URL}/api/cotizaciones/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.ok) { fetchHistorial(); showNotif("Cotización eliminada", "danger"); }
     } catch { showNotif("Error al eliminar", "danger"); }
@@ -467,7 +530,6 @@ export default function App() {
 
   return (
     <>
-      <style>{styles}</style>
       <div className="app">
         <header className="header">
           <div className="header-brand"><span>▣</span> INVENTARIO <span>/</span> KENNOT</div>
@@ -484,7 +546,31 @@ export default function App() {
             <span className="nav-sep" />
             <button className={`nav-btn ${view === "compras" ? "active" : ""}`} onClick={() => setView("compras")}>Compras</button>
             <button className={`nav-btn ${view === "proveedores" ? "active" : ""}`} onClick={() => setView("proveedores")}>Proveedores</button>
+            {esAdmin && <>
+              <span className="nav-sep" />
+              <button className={`nav-btn ${view === "usuarios" ? "active" : ""}`} onClick={() => setView("usuarios")}>Usuarios</button>
+            </>}
           </nav>
+          <div className="user-menu">
+            <button className="user-btn" onClick={() => setMenuUsuario(m => !m)}>
+              <span className="user-avatar">{usuario.nombre.trim().charAt(0).toUpperCase()}</span>
+              <span className="user-nombre">{usuario.nombre.split(" ")[0]}</span>
+              <span className={`rol-badge rol-${usuario.rol}`}>{usuario.rol}</span>
+            </button>
+            {menuUsuario && (
+              <>
+                <div className="menu-fondo" onClick={() => setMenuUsuario(false)} />
+                <div className="menu-pop">
+                  <div className="menu-info">
+                    <strong>{usuario.nombre}</strong>
+                    <span className="mini">{usuario.email}</span>
+                  </div>
+                  <button onClick={() => { setMenuUsuario(false); setCambiarPass(true); }}>Cambiar contraseña</button>
+                  <button className="peligro" onClick={onLogout}>Cerrar sesión</button>
+                </div>
+              </>
+            )}
+          </div>
         </header>
 
         <main className="main">
@@ -514,7 +600,7 @@ export default function App() {
                       <th onClick={() => toggleSort("id")}>ID{sortIcon("id")}</th>
                       <th onClick={() => toggleSort("nombre")}>Nombre{sortIcon("nombre")}</th>
                       <th onClick={() => toggleSort("categoria")}>Categoría{sortIcon("categoria")}</th>
-                      <th onClick={() => toggleSort("precio_compra")}>P. Compra{sortIcon("precio_compra")}</th>
+                      {esAdmin && <th onClick={() => toggleSort("precio_compra")}>P. Compra{sortIcon("precio_compra")}</th>}
                       <th onClick={() => toggleSort("precio_venta")}>P. Venta{sortIcon("precio_venta")}</th>
                       <th onClick={() => toggleSort("stock")}>Stock{sortIcon("stock")}</th>
                       <th>Unidad</th>
@@ -525,15 +611,15 @@ export default function App() {
                   </thead>
                   <tbody>
                     {loading ? (
-                      <tr className="empty-row"><td colSpan={10}><span className="spinner"></span>Cargando...</td></tr>
+                      <tr className="empty-row"><td colSpan={esAdmin ? 10 : 9}><span className="spinner"></span>Cargando...</td></tr>
                     ) : productos.length === 0 ? (
-                      <tr className="empty-row"><td colSpan={10}>// sin resultados</td></tr>
+                      <tr className="empty-row"><td colSpan={esAdmin ? 10 : 9}>// sin resultados</td></tr>
                     ) : productos.map(p => (
                       <tr key={p.id}>
                         <td className="id-cell">#{String(p.id).padStart(4, "0")}</td>
                         <td>{p.nombre}</td>
                         <td><span className="cat-badge">{p.categoria}</span></td>
-                        <td className="price-cell compra">{fmt(p.precio_compra)}</td>
+                        {esAdmin && <td className="price-cell compra">{fmt(p.precio_compra)}</td>}
                         <td className="price-cell">{fmt(p.precio_venta)}</td>
                         <td className={`stock-cell ${bajoMinimo(p) ? "stock-low" : "stock-ok"}`} title={`Mínimo: ${p.stock_minimo ?? 30}`}>{p.stock}</td>
                         <td style={{color:"var(--text3)", fontFamily:"var(--mono)", fontSize:"11px"}}>{p.unidad}</td>
@@ -546,7 +632,7 @@ export default function App() {
                             <button className={`btn btn-sm ${inCot(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => agregarCotizacion(p)}>
                               {inCot(p.id) ? "✓ En cot." : "+ Cotizar"}
                             </button>
-                            <button className="btn btn-danger btn-sm" onClick={() => abrirEliminar(p)}>✕</button>
+                            {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => abrirEliminar(p)}>✕</button>}
                           </div>
                         </td>
                       </tr>
@@ -585,7 +671,7 @@ export default function App() {
                         <td>
                           <div className="actions">
                             <button className="btn btn-ghost btn-sm" onClick={() => abrirEditarCliente(c)}>Editar</button>
-                            <button className="btn btn-danger btn-sm" onClick={() => abrirEliminarCliente(c)}>✕</button>
+                            {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => abrirEliminarCliente(c)}>✕</button>}
                           </div>
                         </td>
                       </tr>
@@ -713,7 +799,7 @@ export default function App() {
                           {h.estado === "vendida"
                             ? <button className="btn btn-ghost btn-sm" onClick={() => { setVentaAbrir(h.venta_id); setView("ventas"); }}>Ver venta</button>
                             : <button className="btn btn-success btn-sm" onClick={() => convertirEnVenta(h)}>→ Venta</button>}
-                          <button className="btn btn-danger btn-sm" onClick={() => eliminarCotizacionHistorial(h.id)}>✕</button>
+                          {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => eliminarCotizacionHistorial(h.id)}>✕</button>}
                         </div>
                       </div>
                     </div>
@@ -723,14 +809,15 @@ export default function App() {
             </>
           )}
 
-          {view === "dashboard" && <Dashboard notify={showNotif} irA={setView} />}
+          {view === "dashboard" && <Dashboard notify={showNotif} irA={setView} esAdmin={esAdmin} />}
           {view === "ventas" && (
-            <Ventas notify={showNotif} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />
+            <Ventas notify={showNotif} esAdmin={esAdmin} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />
           )}
-          {view === "compras" && <Compras notify={showNotif} proveedores={proveedores} onStockCambio={fetchProductos} />}
+          {view === "compras" && <Compras notify={showNotif} esAdmin={esAdmin} proveedores={proveedores} onStockCambio={fetchProductos} />}
           {view === "proveedores" && (
-            <Proveedores proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
+            <Proveedores esAdmin={esAdmin} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
+          {view === "usuarios" && esAdmin && <Usuarios notify={showNotif} yo={usuario} />}
 
         </main>
       </div>
@@ -754,10 +841,12 @@ export default function App() {
                 </select>
               </div>
               <div className="fields-row">
-                <div className="field">
-                  <label>Precio compra (CLP)</label>
-                  <input type="number" value={form.precio_compra || ""} onChange={e => setForm(f => ({...f, precio_compra: e.target.value}))} placeholder="0" />
-                </div>
+                {esAdmin && (
+                  <div className="field">
+                    <label>Precio compra (CLP)</label>
+                    <input type="number" value={form.precio_compra || ""} onChange={e => setForm(f => ({...f, precio_compra: e.target.value}))} placeholder="0" />
+                  </div>
+                )}
                 <div className="field">
                   <label>Precio venta (CLP)</label>
                   <input type="number" value={form.precio_venta || ""} onChange={e => setForm(f => ({...f, precio_venta: e.target.value}))} placeholder="0" />
@@ -765,8 +854,10 @@ export default function App() {
               </div>
               <div className="fields-row">
                 <div className="field">
-                  <label>Stock</label>
-                  <input type="number" value={form.stock || ""} onChange={e => setForm(f => ({...f, stock: e.target.value}))} placeholder="0" />
+                  <label>{modal === "editar" ? "Stock" : "Stock inicial"}</label>
+                  <input type="number" value={form.stock ?? ""} disabled={modal === "editar" && !esAdmin}
+                    title={modal === "editar" && !esAdmin ? "El stock cambia con ventas y compras. Para corregirlo, pide un ajuste al administrador." : ""}
+                    onChange={e => setForm(f => ({...f, stock: e.target.value}))} placeholder="0" />
                 </div>
                 <div className="field">
                   <label>Stock mínimo (alerta)</label>
@@ -888,13 +979,15 @@ export default function App() {
       )}
 
       {kardexProducto && (
-        <Kardex producto={kardexProducto} notify={showNotif} onClose={() => setKardexProducto(null)}
+        <Kardex producto={kardexProducto} esAdmin={esAdmin} notify={showNotif} onClose={() => setKardexProducto(null)}
           onAjustado={async () => {
             await fetchProductos();
             const p = await api(`/productos/${kardexProducto.id}`).catch(() => null);
             if (p) setKardexProducto(p);
           }} />
       )}
+
+      {cambiarPass && <CambiarPassword notify={showNotif} onClose={() => setCambiarPass(false)} />}
 
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
     </>

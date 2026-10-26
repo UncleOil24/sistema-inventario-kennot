@@ -21,6 +21,7 @@ const OrdenCompra = sequelize.define("OrdenCompra", {
   monto_pagado: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
   estado_pago: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "pendiente" },
   notas: { type: DataTypes.TEXT, allowNull: true },
+  creado_por: { type: DataTypes.STRING(100), allowNull: true }, // nombre del usuario que lo registró
 }, {
   tableName: "ordenes_compra",
   timestamps: true,
