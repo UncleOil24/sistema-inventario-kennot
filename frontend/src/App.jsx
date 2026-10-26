@@ -1,4 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
+import Dashboard from "./erp/Dashboard";
+import Ventas from "./erp/Ventas";
+import Compras from "./erp/Compras";
+import Proveedores from "./erp/Proveedores";
+import Kardex from "./erp/Kardex";
+import { Estado } from "./erp/ui";
+import { api } from "./erp/lib";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 const CATEGORIAS = ["Todas", "Ferretería", "Plomería", "Construcción", "Eléctrico", "Pintura", "Jardín"];
@@ -16,11 +23,15 @@ const styles = `
     --mono: 'IBM Plex Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
   }
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+  /* Anula el layout de la plantilla de Vite (index.css) que centraba todo */
+  #root { width: 100%; max-width: none; text-align: left; border: none; font-size: 14px; letter-spacing: normal; }
   .app { display: flex; flex-direction: column; min-height: 100vh; }
-  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 100; }
-  .header-brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; }
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 56px; position: sticky; top: 0; z-index: 100; }
+  .header-brand { flex-shrink: 0; display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; }
   .header-brand span { color: var(--text3); }
-  .header-nav { display: flex; gap: 2px; }
+  .header-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+  .header-nav::-webkit-scrollbar { display: none; }
+  .nav-sep { width: 1px; background: var(--border); margin: 8px 6px; flex-shrink: 0; }
   .nav-btn { background: none; border: none; cursor: pointer; padding: 6px 14px; border-radius: 4px; font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--text2); text-transform: uppercase; transition: all 0.15s; }
   .nav-btn:hover { color: var(--text); background: var(--surface2); }
   .nav-btn.active { color: var(--accent); background: rgba(232,197,71,0.08); }
@@ -50,7 +61,7 @@ const styles = `
   .stat-label { font-family: var(--mono); font-size: 10px; color: var(--text3); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
   .stat-value { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--text); }
   .stat-value.accent { color: var(--accent); font-size: 16px; }
-  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; }
   .table { width: 100%; border-collapse: collapse; }
   .table th { background: var(--surface2); padding: 10px 14px; font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.1em; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; }
   .table th:hover { color: var(--text2); }
@@ -105,7 +116,62 @@ const styles = `
   .hist-total { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 600; white-space: nowrap; }
   .hist-list { display: flex; flex-direction: column; gap: 10px; }
   .hist-detalle { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+  /* ---------- ERP ---------- */
+  :root { --serie-1: #3987e5; --serie-2: #d95926; --warn: #e8a33d; --info: #5b9bd5; }
+  .mini { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .estado { display: inline-block; border-radius: 4px; padding: 2px 8px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; border: 1px solid; white-space: nowrap; }
+  .estado-ok { color: var(--success); border-color: rgba(76,175,125,0.35); background: rgba(76,175,125,0.08); }
+  .estado-warn { color: var(--warn); border-color: rgba(232,163,61,0.35); background: rgba(232,163,61,0.08); }
+  .estado-info { color: var(--info); border-color: rgba(91,155,213,0.35); background: rgba(91,155,213,0.08); }
+  .estado-neutral { color: var(--text2); border-color: var(--border2); background: var(--surface2); }
+  .estado-muted { color: var(--text3); border-color: var(--border); background: transparent; text-decoration: line-through; }
+  .fila-anulada td { opacity: 0.45; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-x: auto; }
+  .modal .panel { background: var(--surface2); margin-bottom: 0; }
+  .panel-titulo { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .table-compacta td, .table-compacta th { padding: 7px 10px; font-size: 12px; }
+  .table-compacta th { cursor: default; }
+  .id-cell, .price-cell, .stock-cell, td.mini { white-space: nowrap; }
+  .pago-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .pago-form input, .pago-form select { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: 12px; color: var(--text); outline: none; flex: 1; min-width: 110px; }
+  .pago-form input:focus { border-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--text2); cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .aviso { background: rgba(232,163,61,0.08); border: 1px solid rgba(232,163,61,0.3); color: var(--warn); border-radius: 6px; padding: 10px 14px; font-family: var(--mono); font-size: 12px; margin-bottom: 1rem; }
+  .items-editor { display: flex; flex-direction: column; gap: 10px; }
+  .sugerencias { position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: var(--surface2); border: 1px solid var(--border2); border-radius: 6px; margin-top: 4px; max-height: 260px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+  .sugerencia { width: 100%; display: flex; justify-content: space-between; gap: 10px; background: none; border: none; border-bottom: 1px solid var(--border); padding: 9px 12px; color: var(--text); font-family: var(--sans); font-size: 13px; text-align: left; cursor: pointer; }
+  .sugerencia:hover { background: rgba(232,197,71,0.08); }
+  .sug-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); white-space: nowrap; }
+  .modal { max-height: calc(100vh - 2rem); display: flex; flex-direction: column; }
+  .modal-body { overflow-y: auto; }
+  .dash-titulo { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: 0.06em; text-transform: uppercase; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 1rem; }
+  .clickable { cursor: pointer; transition: border-color 0.15s; }
+  .clickable:hover { border-color: var(--border2); }
+  .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 0 16px; }
+  .cot-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .cot-kpis .stat-value { font-size: 18px; }
+  .leyenda { display: flex; gap: 16px; font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .leyenda i, .tooltip i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .grafico-area { display: flex; gap: 8px; height: 220px; margin-top: 8px; }
+  .grafico-eje { position: relative; font-family: var(--mono); font-size: 10px; color: var(--text3); min-width: 48px; }
+  .grafico-eje span { position: absolute; right: 0; transform: translateY(50%); white-space: nowrap; }
+  .grafico-barras { flex: 1; display: flex; position: relative; padding-bottom: 22px; }
+  .grid-capa { position: absolute; inset: 0 0 22px 0; pointer-events: none; }
+  .grid-line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--border); }
+  .grid-line.base { border-top-style: solid; border-color: var(--border2); }
+  .grupo { flex: 1; position: relative; display: flex; flex-direction: column; justify-content: flex-end; cursor: default; min-width: 0; }
+  .grupo:hover { background: rgba(255,255,255,0.025); }
+  .barras-par { display: flex; align-items: flex-end; justify-content: center; gap: 2px; height: 100%; }
+  .barra { width: min(22px, 32%); border-radius: 4px 4px 0 0; min-height: 0; transition: height 0.3s; }
+  .grupo-label { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-family: var(--mono); font-size: 10px; color: var(--text3); white-space: nowrap; }
+  .tooltip { position: absolute; bottom: 60%; left: 50%; z-index: 5; background: var(--surface2); border: 1px solid var(--border2); border-radius: 6px; padding: 10px 12px; font-family: var(--mono); font-size: 11px; color: var(--text); white-space: nowrap; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); pointer-events: none; }
+  .tooltip.izq { left: auto; right: 50%; }
+  .grafico-vacio { position: absolute; inset: 0 0 22px 0; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; color: var(--text3); }
   @media (max-width: 768px) {
+    .dash-grid { grid-template-columns: 1fr; }
+    .header-brand { font-size: 11px; }
     .stats { grid-template-columns: repeat(2, 1fr); }
     .header { padding: 0 1rem; }
     .main { padding: 1rem; }
@@ -114,7 +180,7 @@ const styles = `
 `;
 
 export default function App() {
-  const [view, setView] = useState("inventario");
+  const [view, setView] = useState("dashboard");
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -139,11 +205,25 @@ export default function App() {
   const [busquedaHistorial, setBusquedaHistorial] = useState("");
   const [historialDetalle, setHistorialDetalle] = useState(null);
   const [notif, setNotif] = useState(null);
+  const [proveedores, setProveedores] = useState([]);
+  const [loadingProveedores, setLoadingProveedores] = useState(false);
+  const [kardexProducto, setKardexProducto] = useState(null);
+  const [ventaAbrir, setVentaAbrir] = useState(null);
 
-  const showNotif = (msg, type = "success") => {
+  // useCallback: las vistas del ERP la usan como dependencia
+  const showNotif = useCallback((msg, type = "success") => {
     setNotif({ msg, type });
-    setTimeout(() => setNotif(null), 2500);
-  };
+    setTimeout(() => setNotif(null), type === "danger" ? 4000 : 2500);
+  }, []);
+
+  const fetchProveedores = useCallback(async () => {
+    setLoadingProveedores(true);
+    try { setProveedores(await api("/proveedores")); }
+    catch { showNotif("Error al cargar proveedores", "danger"); }
+    finally { setLoadingProveedores(false); }
+  }, [showNotif]);
+
+  useEffect(() => { fetchProveedores(); }, [fetchProveedores]);
 
   const fetchProductos = useCallback(async () => {
     setLoading(true);
@@ -158,7 +238,7 @@ export default function App() {
       if (data.ok) setProductos(data.data);
     } catch { showNotif("Error al cargar productos", "danger"); }
     finally { setLoading(false); }
-  }, [busqueda, categoriaFiltro, sortField, sortDir]);
+  }, [busqueda, categoriaFiltro, sortField, sortDir, showNotif]);
 
   useEffect(() => {
     const delay = setTimeout(fetchProductos, 300);
@@ -173,7 +253,7 @@ export default function App() {
       if (data.ok) setClientes(data.data);
     } catch { showNotif("Error al cargar clientes", "danger"); }
     finally { setLoadingClientes(false); }
-  }, []);
+  }, [showNotif]);
 
   useEffect(() => { fetchClientes(); }, [fetchClientes]);
 
@@ -185,7 +265,7 @@ export default function App() {
       if (data.ok) setHistorial(data.data);
     } catch { showNotif("Error al cargar historial", "danger"); }
     finally { setLoadingHistorial(false); }
-  }, []);
+  }, [showNotif]);
 
   useEffect(() => {
     if (view === "historial") fetchHistorial();
@@ -194,7 +274,8 @@ export default function App() {
   const totalProductos = productos.length;
   const totalStock = productos.reduce((s, p) => s + Number(p.stock), 0);
   const valorInventario = productos.reduce((s, p) => s + Number(p.precio_venta) * Number(p.stock), 0);
-  const stockBajo = productos.filter(p => Number(p.stock) < 30).length;
+  const bajoMinimo = (p) => Number(p.stock) <= Number(p.stock_minimo ?? 30);
+  const stockBajo = productos.filter(bajoMinimo).length;
 
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -203,7 +284,7 @@ export default function App() {
   const sortIcon = (field) => sortField === field ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   const abrirNuevo = () => {
-    setForm({ nombre: "", categoria: "Ferretería", precio_compra: "", precio_venta: "", stock: "", unidad: "unidad", proveedor: "", contacto: "" });
+    setForm({ nombre: "", categoria: "Ferretería", precio_compra: "", precio_venta: "", stock: "", stock_minimo: 30, unidad: "unidad", proveedor: "", contacto: "" });
     setModal("nuevo");
   };
   const abrirEditar = (p) => { setProductoActual(p); setForm({ ...p }); setModal("editar"); };
@@ -216,7 +297,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/api/productos`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock) }),
+        body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock), stock_minimo: Number(form.stock_minimo ?? 30) }),
       });
       const data = await res.json();
       if (data.ok) { cerrarModal(); fetchProductos(); showNotif("✓ Producto agregado"); }
@@ -229,7 +310,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_URL}/api/productos/${productoActual.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock) }),
+        body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock), stock_minimo: Number(form.stock_minimo ?? 30) }),
       });
       const data = await res.json();
       if (data.ok) { cerrarModal(); fetchProductos(); showNotif("✓ Producto actualizado"); }
@@ -366,6 +447,22 @@ export default function App() {
     } catch { showNotif("Error al eliminar", "danger"); }
   };
 
+  const convertirEnVenta = async (h) => {
+    const dias = prompt(`Convertir "${h.nombre_cotizacion || h.numero}" en venta.\nSe descontará el stock.\n\nDías de crédito (0 = contado):`, "30");
+    if (dias === null) return;
+    try {
+      const venta = await api(`/ventas/desde-cotizacion/${h.id}`, {
+        method: "POST",
+        body: Number(dias) > 0 ? { dias_credito: Number(dias) } : { pagada_al_contado: true },
+      });
+      showNotif(`✓ Venta ${venta.numero} creada — stock descontado`);
+      fetchHistorial();
+      fetchProductos();
+      setVentaAbrir(venta.id);
+      setView("ventas");
+    } catch (e) { showNotif(e.message, "danger"); }
+  };
+
   const inCot = (id) => cotizacion.some(c => c.id === id);
 
   return (
@@ -375,12 +472,18 @@ export default function App() {
         <header className="header">
           <div className="header-brand"><span>▣</span> INVENTARIO <span>/</span> KENNOT</div>
           <nav className="header-nav">
+            <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
             <button className={`nav-btn ${view === "inventario" ? "active" : ""}`} onClick={() => setView("inventario")}>Inventario</button>
-            <button className={`nav-btn ${view === "clientes" ? "active" : ""}`} onClick={() => setView("clientes")}>Clientes</button>
+            <span className="nav-sep" />
+            <button className={`nav-btn ${view === "ventas" ? "active" : ""}`} onClick={() => setView("ventas")}>Ventas</button>
             <button className={`nav-btn ${view === "cotizacion" ? "active" : ""}`} onClick={() => setView("cotizacion")}>
               Cotización {cotizacion.length > 0 && <span className="badge">{cotizacion.length}</span>}
             </button>
             <button className={`nav-btn ${view === "historial" ? "active" : ""}`} onClick={() => setView("historial")}>Historial</button>
+            <button className={`nav-btn ${view === "clientes" ? "active" : ""}`} onClick={() => setView("clientes")}>Clientes</button>
+            <span className="nav-sep" />
+            <button className={`nav-btn ${view === "compras" ? "active" : ""}`} onClick={() => setView("compras")}>Compras</button>
+            <button className={`nav-btn ${view === "proveedores" ? "active" : ""}`} onClick={() => setView("proveedores")}>Proveedores</button>
           </nav>
         </header>
 
@@ -392,7 +495,7 @@ export default function App() {
                 <div className="stat-card"><div className="stat-label">Productos</div><div className="stat-value">{totalProductos}</div></div>
                 <div className="stat-card"><div className="stat-label">Unidades totales</div><div className="stat-value">{totalStock.toLocaleString("es-CL")}</div></div>
                 <div className="stat-card"><div className="stat-label">Valor inventario</div><div className="stat-value accent">{fmt(valorInventario)}</div></div>
-                <div className="stat-card"><div className="stat-label">Stock bajo (&lt;30)</div><div className="stat-value" style={{color: stockBajo > 0 ? "var(--danger)" : "var(--success)"}}>{stockBajo}</div></div>
+                <div className="stat-card"><div className="stat-label">Bajo stock mínimo</div><div className="stat-value" style={{color: stockBajo > 0 ? "var(--danger)" : "var(--success)"}}>{stockBajo}</div></div>
               </div>
               <div className="toolbar">
                 <div className="search-wrap">
@@ -432,13 +535,14 @@ export default function App() {
                         <td><span className="cat-badge">{p.categoria}</span></td>
                         <td className="price-cell compra">{fmt(p.precio_compra)}</td>
                         <td className="price-cell">{fmt(p.precio_venta)}</td>
-                        <td className={`stock-cell ${Number(p.stock) < 30 ? "stock-low" : "stock-ok"}`}>{p.stock}</td>
+                        <td className={`stock-cell ${bajoMinimo(p) ? "stock-low" : "stock-ok"}`} title={`Mínimo: ${p.stock_minimo ?? 30}`}>{p.stock}</td>
                         <td style={{color:"var(--text3)", fontFamily:"var(--mono)", fontSize:"11px"}}>{p.unidad}</td>
                         <td style={{fontSize:"12px"}}>{p.proveedor || <span style={{color:"var(--text3)"}}>—</span>}</td>
                         <td style={{fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text2)"}}>{p.contacto || <span style={{color:"var(--text3)"}}>—</span>}</td>
                         <td>
                           <div className="actions">
                             <button className="btn btn-ghost btn-sm" onClick={() => abrirEditar(p)}>Editar</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setKardexProducto(p)} title="Movimientos y ajuste de stock">Kardex</button>
                             <button className={`btn btn-sm ${inCot(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => agregarCotizacion(p)}>
                               {inCot(p.id) ? "✓ En cot." : "+ Cotizar"}
                             </button>
@@ -570,6 +674,7 @@ export default function App() {
                           <span>{h.cliente || "Sin cliente"}</span>
                           <span>{new Date(h.createdAt).toLocaleDateString("es-CL")}</span>
                           <span>{h.items?.length || 0} productos</span>
+                          <Estado valor={h.estado || "pendiente"} />
                         </div>
                         {historialDetalle === h.id && (
                           <div className="hist-detalle">
@@ -600,11 +705,14 @@ export default function App() {
                       </div>
                       <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"8px"}}>
                         <div className="hist-total">{fmt(h.total)}</div>
-                        <div style={{display:"flex", gap:"6px"}}>
+                        <div style={{display:"flex", gap:"6px", flexWrap:"wrap", justifyContent:"flex-end"}}>
                           <button className="btn btn-ghost btn-sm" onClick={() => setHistorialDetalle(historialDetalle === h.id ? null : h.id)}>
                             {historialDetalle === h.id ? "Ocultar" : "Ver detalle"}
                           </button>
                           <button className="btn btn-ghost btn-sm" onClick={() => reexportarCotizacion(h.id, h.nombre_cotizacion)}>↓ Excel</button>
+                          {h.estado === "vendida"
+                            ? <button className="btn btn-ghost btn-sm" onClick={() => { setVentaAbrir(h.venta_id); setView("ventas"); }}>Ver venta</button>
+                            : <button className="btn btn-success btn-sm" onClick={() => convertirEnVenta(h)}>→ Venta</button>}
                           <button className="btn btn-danger btn-sm" onClick={() => eliminarCotizacionHistorial(h.id)}>✕</button>
                         </div>
                       </div>
@@ -613,6 +721,15 @@ export default function App() {
                 </div>
               )}
             </>
+          )}
+
+          {view === "dashboard" && <Dashboard notify={showNotif} irA={setView} />}
+          {view === "ventas" && (
+            <Ventas notify={showNotif} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />
+          )}
+          {view === "compras" && <Compras notify={showNotif} proveedores={proveedores} onStockCambio={fetchProductos} />}
+          {view === "proveedores" && (
+            <Proveedores proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
 
         </main>
@@ -651,6 +768,12 @@ export default function App() {
                   <label>Stock</label>
                   <input type="number" value={form.stock || ""} onChange={e => setForm(f => ({...f, stock: e.target.value}))} placeholder="0" />
                 </div>
+                <div className="field">
+                  <label>Stock mínimo (alerta)</label>
+                  <input type="number" value={form.stock_minimo ?? 30} onChange={e => setForm(f => ({...f, stock_minimo: e.target.value}))} placeholder="30" />
+                </div>
+              </div>
+              <div className="fields-row">
                 <div className="field">
                   <label>Unidad de medida</label>
                   <select value={form.unidad || "unidad"} onChange={e => setForm(f => ({...f, unidad: e.target.value}))}>
@@ -762,6 +885,15 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {kardexProducto && (
+        <Kardex producto={kardexProducto} notify={showNotif} onClose={() => setKardexProducto(null)}
+          onAjustado={async () => {
+            await fetchProductos();
+            const p = await api(`/productos/${kardexProducto.id}`).catch(() => null);
+            if (p) setKardexProducto(p);
+          }} />
       )}
 
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}

@@ -32,6 +32,16 @@ const Cotizacion = sequelize.define("Cotizacion", {
     type: DataTypes.DECIMAL(14, 2),
     allowNull: false,
   },
+  // pendiente | vendida (se convirtió en venta)
+  estado: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: "pendiente",
+  },
+  venta_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
   // Items guardados como JSON
   items: {
     type: DataTypes.JSONB,
