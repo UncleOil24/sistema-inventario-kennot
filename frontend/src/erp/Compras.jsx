@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
 import { api, fmt, fecha, useProductos } from "./lib";
 
-export default function Compras({ notify, proveedores, onStockCambio }) {
+export default function Compras({ notify, esAdmin, proveedores, onStockCambio }) {
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState("");
@@ -89,7 +89,7 @@ export default function Compras({ notify, proveedores, onStockCambio }) {
           onGuardada={(o) => { setEditando(null); refrescar(o.id); }} />
       )}
       {detalle && (
-        <DetalleOrden orden={detalle} notify={notify} onClose={() => setDetalle(null)}
+        <DetalleOrden orden={detalle} esAdmin={esAdmin} notify={notify} onClose={() => setDetalle(null)}
           onEditar={() => { setEditando(detalle); setDetalle(null); }}
           onCambio={(stock) => { refrescar(detalle.id); if (stock) onStockCambio?.(); }}
           onEliminada={() => { setDetalle(null); cargar(); }} />
@@ -162,7 +162,7 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
   );
 }
 
-function DetalleOrden({ orden, notify, onClose, onEditar, onCambio, onEliminada }) {
+function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onEliminada }) {
   const [actualizarCostos, setActualizarCostos] = useState(true);
 
   const accion = async (fn, ok, stock = false) => {
@@ -186,11 +186,12 @@ function DetalleOrden({ orden, notify, onClose, onEditar, onCambio, onEliminada 
     <Modal titulo={`// Orden ${orden.numero}`} onClose={onClose} ancho={720}
       footer={<>
         {orden.estado === "borrador" && <>
-          <button className="btn btn-danger" onClick={eliminar}>Eliminar</button>
+          {esAdmin && <button className="btn btn-danger" onClick={eliminar}>Eliminar</button>}
           <button className="btn btn-ghost" onClick={onEditar}>Editar</button>
           <button className="btn btn-success" onClick={recibir}>✓ Marcar recibida</button>
         </>}
-        {orden.estado === "recibida" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
+        {esAdmin && orden.estado === "recibida" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
+        {esAdmin && orden.estado === "borrador" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
@@ -199,6 +200,7 @@ function DetalleOrden({ orden, notify, onClose, onEditar, onCambio, onEliminada 
         {orden.documento && <span>Factura {orden.documento}</span>}
         {orden.fecha_recepcion && <span>Recibida {fecha(orden.fecha_recepcion)}</span>}
         {orden.fecha_vencimiento && <span>Vence {fecha(orden.fecha_vencimiento)}</span>}
+        {orden.creado_por && <span>Por {orden.creado_por}</span>}
         <Estado valor={orden.estado} />
       </div>
       {orden.notas && <div className="mini">{orden.notas}</div>}
@@ -230,7 +232,7 @@ function DetalleOrden({ orden, notify, onClose, onEditar, onCambio, onEliminada 
           doc={orden}
           tipo="pago"
           onRegistrar={(body) => accion(() => api(`/ordenes-compra/${orden.id}/pagos`, { method: "POST", body }), "✓ Pago registrado")}
-          onEliminar={(p) => confirm("¿Eliminar este pago?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Pago eliminado")}
+          onEliminar={esAdmin ? (p) => confirm("¿Eliminar este pago?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Pago eliminado") : null}
         />
       )}
     </Modal>

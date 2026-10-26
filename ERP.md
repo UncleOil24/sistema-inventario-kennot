@@ -11,6 +11,34 @@
 | **Kardex** | Cada cambio de stock queda registrado (compra, venta, anulación, ajuste, stock inicial). Botón **Kardex** en Inventario, con ajuste por conteo físico. |
 | **Stock mínimo** | Cada producto tiene su propio mínimo (por defecto 30, igual que antes). |
 
+## Login y roles
+
+Todo el sistema exige iniciar sesión (email + contraseña). Las sesiones duran 12 horas.
+
+| Puede… | Admin | Usuario |
+|---|:---:|:---:|
+| Cotizar, vender, cobrar, crear clientes | ✓ | ✓ |
+| Crear órdenes de compra, recibirlas y pagarlas, crear proveedores | ✓ | ✓ |
+| Crear y editar productos (precio venta, stock mínimo) | ✓ | ✓ |
+| Ver precio de compra, costos, márgenes, caja y cuentas por pagar | ✓ | — |
+| Cambiar el costo o el stock de un producto a mano, ajustar stock | ✓ | — |
+| Anular ventas u órdenes, borrar cualquier registro o pago | ✓ | — |
+| Administrar usuarios | ✓ | — |
+
+- Cada venta, compra, pago y movimiento de stock guarda **quién lo registró**.
+- Las contraseñas se guardan cifradas (bcrypt). Mínimo 8 caracteres.
+- Cambiar una contraseña, el rol o desactivar a alguien cierra sus sesiones abiertas.
+- 5 intentos fallidos seguidos bloquean ese email por 15 minutos.
+- Siempre debe quedar al menos un administrador activo.
+- Las órdenes de compra sí muestran los costos a quien las crea (son necesarios para comprar).
+
+### Variables en Render
+
+| Variable | Para qué |
+|---|---|
+| `JWT_SECRET` | Firma de las sesiones. Texto largo y aleatorio. Si falta, las sesiones se pierden en cada reinicio. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NOMBRE` | Crean el primer administrador la primera vez que arranca (solo si no hay usuarios). Después se pueden borrar. |
+
 ## Reglas que aplica el backend
 
 - Todo movimiento de stock va en una transacción con bloqueo de fila: dos ventas simultáneas no pueden dejar stock negativo.
@@ -39,7 +67,13 @@ GET                  /api/pagos?tipo=cobro|pago   DELETE /api/pagos/:id
 GET                  /api/productos/:id/movimientos
 POST                 /api/productos/:id/ajuste    { stock_real, nota }
 GET                  /api/dashboard?meses=6
+POST                 /api/auth/login              { email, password } -> { token, usuario }
+GET                  /api/auth/me
+POST                 /api/auth/cambiar-password   { actual, nueva }
+GET/POST/PUT         /api/usuarios                (solo admin)
 ```
+
+Todas las rutas de `/api` (excepto `/api/auth/login`) exigen el header `Authorization: Bearer <token>`.
 
 ## Desarrollo local sin Supabase
 
@@ -50,4 +84,4 @@ DB_SSL=false
 
 ## Próximas fases sugeridas
 
-Login y roles, importación masiva desde Excel, emisión de documento tributario (SII), reportes exportables.
+Importación masiva desde Excel, emisión de documento tributario (SII), reportes exportables.

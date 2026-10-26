@@ -12,6 +12,7 @@ const Pago = sequelize.define("Pago", {
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   medio: { type: DataTypes.STRING(30), allowNull: false, defaultValue: "transferencia" },
   nota: { type: DataTypes.STRING(255), allowNull: true },
+  creado_por: { type: DataTypes.STRING(100), allowNull: true }, // nombre del usuario que lo registró
 }, {
   tableName: "pagos",
   timestamps: true,

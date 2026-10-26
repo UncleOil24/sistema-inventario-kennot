@@ -11,7 +11,7 @@ const compacto = (n) => {
   return `$${Math.round(n)}`;
 };
 
-export default function Dashboard({ notify, irA }) {
+export default function Dashboard({ notify, irA, esAdmin }) {
   const [data, setData] = useState(null);
   const [meses, setMeses] = useState(6);
 
@@ -38,16 +38,18 @@ export default function Dashboard({ notify, irA }) {
 
       <div className="kpis">
         <Kpi label="Ventas del mes (neto)" valor={fmt(m.ventas)} sub={`${m.cantidad} ventas · ticket ${fmt(m.ticket_promedio)}`} acento />
-        <Kpi label="Margen del mes" valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />
+        {esAdmin && <Kpi label="Margen del mes" valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
         <Kpi label="Por cobrar" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
-        <Kpi label="Por pagar" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />
-        <Kpi label="Caja del mes" valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />
-        <Kpi label="Inventario (a costo)" valor={fmt(inventario.valor_costo)} sub={`${inventario.productos} productos · a venta ${fmt(inventario.valor_venta)}`} />
+        {esAdmin && <Kpi label="Por pagar" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
+        {esAdmin && <Kpi label="Caja del mes" valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />}
+        {esAdmin
+          ? <Kpi label="Inventario (a costo)" valor={fmt(inventario.valor_costo)} sub={`${inventario.productos} productos · a venta ${fmt(inventario.valor_venta)}`} />
+          : <Kpi label="Inventario (a precio venta)" valor={fmt(inventario.valor_venta)} sub={`${inventario.productos} productos · ${inventario.criticos} bajo el mínimo`} />}
       </div>
 
       <div className="panel">
-        <div className="panel-titulo">Ventas vs. compras por mes (neto, sin IVA)</div>
-        <GraficoMeses serie={data.serie} />
+        <div className="panel-titulo">{esAdmin ? "Ventas vs. compras por mes (neto, sin IVA)" : "Ventas por mes (neto, sin IVA)"}</div>
+        <GraficoMeses serie={data.serie} conCompras={esAdmin} />
       </div>
 
       <div className="dash-grid">
@@ -96,14 +98,14 @@ export default function Dashboard({ notify, irA }) {
           <div className="panel-titulo">Productos más vendidos <span className="mini">(período)</span></div>
           {data.top_productos.length === 0 ? <div className="mini">Aún no hay ventas en el período</div> : (
             <table className="table table-compacta">
-              <thead><tr><th>Producto</th><th>Cant.</th><th>Venta</th><th>Margen</th></tr></thead>
+              <thead><tr><th>Producto</th><th>Cant.</th><th>Venta</th>{esAdmin && <th>Margen</th>}</tr></thead>
               <tbody>
                 {data.top_productos.map((p) => (
                   <tr key={p.producto_id}>
                     <td>{p.nombre}</td>
                     <td className="mini">{p.cantidad}</td>
                     <td className="price-cell">{fmt(p.venta)}</td>
-                    <td className="price-cell compra">{fmt(p.margen)}</td>
+                    {esAdmin && <td className="price-cell compra">{fmt(p.margen)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -150,16 +152,16 @@ function Kpi({ label, valor, sub, acento, alerta, onClick }) {
 }
 
 // Barras agrupadas: ventas (azul) y compras (naranja), un solo eje en CLP.
-function GraficoMeses({ serie }) {
+function GraficoMeses({ serie, conCompras = true }) {
   const [hover, setHover] = useState(null);
-  const max = Math.max(1, ...serie.flatMap((s) => [s.ventas, s.compras]));
-  const sinDatos = serie.every((s) => !s.ventas && !s.compras);
+  const max = Math.max(1, ...serie.flatMap((s) => [s.ventas, conCompras ? s.compras : 0]));
+  const sinDatos = serie.every((s) => !s.ventas && !(conCompras && s.compras));
 
   return (
     <div className="grafico">
       <div className="leyenda">
         <span><i style={{ background: "var(--serie-1)" }} />Ventas</span>
-        <span><i style={{ background: "var(--serie-2)" }} />Compras recibidas</span>
+        {conCompras && <span><i style={{ background: "var(--serie-2)" }} />Compras recibidas</span>}
       </div>
       <div className="grafico-area">
         <div className="grafico-eje">
@@ -175,15 +177,15 @@ function GraficoMeses({ serie }) {
             <div key={s.mes} className="grupo" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} onClick={() => setHover(hover === i ? null : i)}>
               <div className="barras-par">
                 <div className="barra" style={{ height: `${(s.ventas / max) * 100}%`, background: "var(--serie-1)" }} />
-                <div className="barra" style={{ height: `${(s.compras / max) * 100}%`, background: "var(--serie-2)" }} />
+                {conCompras && <div className="barra" style={{ height: `${(s.compras / max) * 100}%`, background: "var(--serie-2)" }} />}
               </div>
               <div className="grupo-label">{nombreMes(s.mes)}</div>
               {hover === i && (
                 <div className={`tooltip ${i > serie.length / 2 ? "izq" : ""}`}>
                   <strong>{nombreMes(s.mes)}</strong>
                   <div><i style={{ background: "var(--serie-1)" }} />Ventas {fmt(s.ventas)}</div>
-                  <div><i style={{ background: "var(--serie-2)" }} />Compras {fmt(s.compras)}</div>
-                  <div className="mini">Margen {fmt(s.margen)} · {s.cantidad} ventas</div>
+                  {conCompras && <div><i style={{ background: "var(--serie-2)" }} />Compras {fmt(s.compras)}</div>}
+                  <div className="mini">{conCompras ? `Margen ${fmt(s.margen)} · ` : ""}{s.cantidad} ventas</div>
                 </div>
               )}
             </div>

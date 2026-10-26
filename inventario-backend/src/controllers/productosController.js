@@ -3,6 +3,15 @@ const sequelize = require("../../config/database");
 const Producto = require("../models/Producto");
 const MovimientoStock = require("../models/MovimientoStock");
 const { moverStock, handler, ErrorNegocio } = require("../services/erp");
+const { esAdmin } = require("../middlewares/auth");
+
+// El rol "usuario" no ve el precio de compra
+const verProducto = (req, p) => {
+  if (esAdmin(req)) return p;
+  const j = typeof p.toJSON === "function" ? p.toJSON() : { ...p };
+  delete j.precio_compra;
+  return j;
+};
 
 // GET /api/productos
 const getProductos = async (req, res) => {
@@ -30,7 +39,7 @@ const getProductos = async (req, res) => {
       order: [[ordenBy, ordenDir]],
     });
 
-    res.json({ ok: true, data: productos });
+    res.json({ ok: true, data: productos.map((p) => verProducto(req, p)) });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -41,7 +50,7 @@ const getProducto = async (req, res) => {
   try {
     const producto = await Producto.findByPk(req.params.id);
     if (!producto) return res.status(404).json({ ok: false, error: "Producto no encontrado" });
-    res.json({ ok: true, data: producto });
+    res.json({ ok: true, data: verProducto(req, producto) });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -50,7 +59,9 @@ const getProducto = async (req, res) => {
 // POST /api/productos
 const crearProducto = async (req, res) => {
   try {
-    const { nombre, categoria, precio_compra, precio_venta, stock, stock_minimo, unidad, proveedor, contacto } = req.body;
+    const { nombre, categoria, precio_venta, stock, stock_minimo, unidad, proveedor, contacto } = req.body;
+    // El costo lo define un admin o la recepción de una orden de compra
+    const precio_compra = esAdmin(req) ? req.body.precio_compra : 0;
     if (!nombre || precio_venta === undefined || stock === undefined) {
       return res.status(400).json({ ok: false, error: "nombre, precio y stock son requeridos" });
     }
@@ -62,11 +73,13 @@ const crearProducto = async (req, res) => {
       );
       // El stock inicial queda registrado en el kardex
       if (Number(stock) > 0) {
-        await moverStock(p, Number(stock), { tipo: "entrada", referencia_tipo: "inicial", nota: "Stock inicial" }, t);
+        await moverStock(p, Number(stock), {
+          tipo: "entrada", referencia_tipo: "inicial", nota: "Stock inicial", creado_por: req.usuario.nombre,
+        }, t);
       }
       return p;
     });
-    res.status(201).json({ ok: true, data: producto });
+    res.status(201).json({ ok: true, data: verProducto(req, producto) });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }
@@ -75,7 +88,10 @@ const crearProducto = async (req, res) => {
 // PUT /api/productos/:id
 const actualizarProducto = async (req, res) => {
   try {
-    const { nombre, categoria, precio_compra, precio_venta, stock, stock_minimo, unidad, proveedor, contacto } = req.body;
+    const { nombre, categoria, precio_venta, stock_minimo, unidad, proveedor, contacto } = req.body;
+    // Solo un admin puede cambiar el costo o corregir el stock a mano
+    const precio_compra = esAdmin(req) ? req.body.precio_compra : undefined;
+    const stock = esAdmin(req) ? req.body.stock : undefined;
     const producto = await sequelize.transaction(async (t) => {
       const p = await Producto.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
       if (!p) throw new ErrorNegocio("Producto no encontrado", 404);
@@ -85,12 +101,12 @@ const actualizarProducto = async (req, res) => {
       // Si cambiaron el stock a mano, se registra como ajuste en el kardex
       if (stock !== undefined && stock !== null && stock !== "" && Number(stock) !== Number(p.stock)) {
         await moverStock(p, Number(stock) - Number(p.stock), {
-          tipo: "ajuste", referencia_tipo: "ajuste", nota: "Edición manual del producto",
+          tipo: "ajuste", referencia_tipo: "ajuste", nota: "Edición manual del producto", creado_por: req.usuario.nombre,
         }, t);
       }
       return p;
     });
-    res.json({ ok: true, data: producto });
+    res.json({ ok: true, data: verProducto(req, producto) });
   } catch (error) {
     res.status(error.status || 500).json({ ok: false, error: error.message });
   }
@@ -116,7 +132,10 @@ const getMovimientos = handler(async (req, res) => {
     order: [["createdAt", "DESC"], ["id", "DESC"]],
     limit: 200,
   });
-  res.json({ ok: true, data });
+  res.json({
+    ok: true,
+    data: esAdmin(req) ? data : data.map((m) => { const j = m.toJSON(); delete j.costo_unitario; return j; }),
+  });
 });
 
 // POST /api/productos/:id/ajuste   { stock_real, nota }  -> para conteos físicos / mermas
@@ -130,7 +149,9 @@ const ajustarStock = handler(async (req, res) => {
     if (!p) throw new ErrorNegocio("Producto no encontrado", 404);
     const delta = Math.trunc(Number(stock_real)) - Number(p.stock);
     if (delta !== 0) {
-      await moverStock(p, delta, { tipo: "ajuste", referencia_tipo: "ajuste", nota: nota || "Ajuste de inventario" }, t);
+      await moverStock(p, delta, {
+        tipo: "ajuste", referencia_tipo: "ajuste", nota: nota || "Ajuste de inventario", creado_por: req.usuario.nombre,
+      }, t);
     }
     return p;
   });

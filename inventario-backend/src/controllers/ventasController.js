@@ -8,6 +8,16 @@ const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, bloquearProductos,
   moverStock, estadoPago, sumarDias,
 } = require("../services/erp");
+const { esAdmin } = require("../middlewares/auth");
+
+// El rol "usuario" no ve costos ni márgenes
+const sinCostos = (v) => {
+  const j = typeof v.toJSON === "function" ? v.toJSON() : { ...v };
+  delete j.costo_total;
+  j.items = (j.items || []).map(({ costo, ...resto }) => resto);
+  return j;
+};
+const verVenta = (req, v) => (esAdmin(req) ? v : sinCostos(v));
 
 const numeroVenta = (id) => `V-${String(id).padStart(4, "0")}`;
 
@@ -52,6 +62,7 @@ const crearVentaEnTransaccion = async (datos, t) => {
     fecha_vencimiento: venc,
     documento: datos.documento || null,
     notas: datos.notas || null,
+    creado_por: datos.creado_por || null,
     items: itemsFinal,
     ...totales,
     costo_total,
@@ -61,14 +72,14 @@ const crearVentaEnTransaccion = async (datos, t) => {
   for (const item of itemsFinal) {
     await moverStock(productos.get(item.producto_id), -item.cantidad, {
       tipo: "salida", referencia_tipo: "venta", referencia_id: venta.id,
-      referencia_numero: venta.numero, costo_unitario: item.costo,
+      referencia_numero: venta.numero, costo_unitario: item.costo, creado_por: datos.creado_por,
     }, t);
   }
 
   if (datos.pagada_al_contado) {
     await Pago.create({
       tipo: "cobro", venta_id: venta.id, monto: totales.total,
-      medio: datos.medio_pago || "efectivo", nota: "Pago al contado",
+      medio: datos.medio_pago || "efectivo", nota: "Pago al contado", creado_por: datos.creado_por,
     }, { transaction: t });
     await venta.update({ monto_pagado: totales.total, estado_pago: "pagada" }, { transaction: t });
   }
@@ -87,7 +98,7 @@ const getVentas = handler(async (req, res) => {
     where[Op.or] = ["numero", "cliente_nombre", "documento"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
   const data = await Venta.findAll({ where, order: [["id", "DESC"]] });
-  res.json({ ok: true, data });
+  res.json({ ok: true, data: data.map((v) => verVenta(req, v)) });
 });
 
 // GET /api/ventas/:id  (incluye cobros)
@@ -95,13 +106,14 @@ const getVenta = handler(async (req, res) => {
   const venta = await Venta.findByPk(req.params.id);
   if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
   const pagos = await Pago.findAll({ where: { venta_id: venta.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
-  res.json({ ok: true, data: { ...venta.toJSON(), pagos } });
+  res.json({ ok: true, data: { ...verVenta(req, venta), pagos } });
 });
 
 // POST /api/ventas
 const crearVenta = handler(async (req, res) => {
-  const venta = await sequelize.transaction((t) => crearVentaEnTransaccion(req.body, t));
-  res.status(201).json({ ok: true, data: venta });
+  const venta = await sequelize.transaction((t) =>
+    crearVentaEnTransaccion({ ...req.body, creado_por: req.usuario.nombre }, t));
+  res.status(201).json({ ok: true, data: verVenta(req, venta) });
 });
 
 // POST /api/ventas/desde-cotizacion/:id   { dias_credito, documento, pagada_al_contado, medio_pago }
@@ -123,6 +135,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
       cliente_id,
       cliente_nombre: cot.cliente,
       cotizacion_id: cot.id,
+      creado_por: req.usuario.nombre,
       notas: req.body?.notas || cot.nombre_cotizacion,
       items: cot.items.map((i) => ({
         producto_id: i.producto_id ?? i.id, nombre: i.nombre, cantidad: i.cantidad, precio: i.precio,
@@ -131,7 +144,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
     await cot.update({ estado: "vendida", venta_id: nueva.id }, { transaction: t });
     return nueva;
   });
-  res.status(201).json({ ok: true, data: venta });
+  res.status(201).json({ ok: true, data: verVenta(req, venta) });
 });
 
 // POST /api/ventas/:id/anular   -> devuelve el stock
@@ -145,7 +158,7 @@ const anularVenta = handler(async (req, res) => {
     for (const item of v.items) {
       await moverStock(productos.get(item.producto_id), item.cantidad, {
         tipo: "entrada", referencia_tipo: "anulacion_venta", referencia_id: v.id,
-        referencia_numero: v.numero, costo_unitario: item.costo,
+        referencia_numero: v.numero, costo_unitario: item.costo, creado_por: req.usuario.nombre,
       }, t);
     }
     await v.update({ estado: "anulada" }, { transaction: t });
@@ -154,7 +167,7 @@ const anularVenta = handler(async (req, res) => {
     }
     return v;
   });
-  res.json({ ok: true, data: venta });
+  res.json({ ok: true, data: verVenta(req, venta) });
 });
 
 // POST /api/ventas/:id/cobros   { monto, fecha, medio, nota }
@@ -170,10 +183,11 @@ const registrarCobro = handler(async (req, res) => {
     const pago = await Pago.create({
       tipo: "cobro", venta_id: v.id, monto,
       fecha: req.body.fecha || new Date(), medio: req.body.medio || "transferencia", nota: req.body.nota,
+      creado_por: req.usuario.nombre,
     }, { transaction: t });
     const pagado = Number(v.monto_pagado) + monto;
     await v.update({ monto_pagado: pagado, estado_pago: estadoPago(pagado, v.total) }, { transaction: t });
-    return { venta: v, pago };
+    return { venta: verVenta(req, v), pago };
   });
   res.status(201).json({ ok: true, data: resultado });
 });

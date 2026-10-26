@@ -13,6 +13,7 @@ require("./src/models/OrdenCompra");
 require("./src/models/Venta");
 require("./src/models/Pago");
 require("./src/models/MovimientoStock");
+require("./src/models/Usuario");
 
 const productosRoutes = require("./src/routes/productos");
 const cotizacionesRoutes = require("./src/routes/cotizaciones");
@@ -22,6 +23,10 @@ const ordenesCompraRoutes = require("./src/routes/ordenesCompra");
 const ventasRoutes = require("./src/routes/ventas");
 const pagosRoutes = require("./src/routes/pagos");
 const dashboardRoutes = require("./src/routes/dashboard");
+const authRoutes = require("./src/routes/auth");
+const usuariosRoutes = require("./src/routes/usuarios");
+const { requiereAuth } = require("./src/middlewares/auth");
+const { crearAdminInicial } = require("./src/controllers/authController");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,11 +39,17 @@ app.use(cors({
 }));
 app.use(morgan("dev"));
 app.use(express.json());
+// Render está detrás de un proxy: así req.ip es la IP real del cliente
+app.set("trust proxy", 1);
 
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "InventarioSys API corriendo", version: "2.0.0-erp" });
+  res.json({ ok: true, message: "InventarioSys API corriendo", version: "2.1.0-auth" });
 });
 
+// Login es público; todo lo demás bajo /api exige sesión
+app.use("/api/auth", authRoutes);
+app.use("/api", requiereAuth);
+app.use("/api/usuarios", usuariosRoutes);
 app.use("/api/productos", productosRoutes);
 app.use("/api/cotizaciones", cotizacionesRoutes);
 app.use("/api/clientes", clientesRoutes);
@@ -63,6 +74,7 @@ const start = async () => {
     console.log("✓ Base de datos conectada");
     await sequelize.sync({ alter: true });
     console.log("✓ Modelos sincronizados");
+    await crearAdminInicial();
     app.listen(PORT, () => {
       console.log(`✓ Servidor corriendo en http://localhost:${PORT}`);
     });

@@ -61,6 +61,7 @@ const crearOrden = handler(async (req, res) => {
     const nueva = await OrdenCompra.create({
       ...prov, items: itemsOk, ...calcularTotales(itemsOk),
       fecha_vencimiento: fecha_vencimiento || null, documento, notas,
+      creado_por: req.usuario.nombre,
     }, { transaction: t });
     await nueva.update({ numero: numeroOC(nueva.id) }, { transaction: t });
     return nueva;
@@ -100,7 +101,7 @@ const recibirOrden = handler(async (req, res) => {
       const p = productos.get(item.producto_id);
       await moverStock(p, item.cantidad, {
         tipo: "entrada", referencia_tipo: "compra", referencia_id: orden.id,
-        referencia_numero: orden.numero, costo_unitario: item.precio,
+        referencia_numero: orden.numero, costo_unitario: item.precio, creado_por: req.usuario.nombre,
       }, t);
       const cambios = {};
       if (actualizar_costos) cambios.precio_compra = item.precio;
@@ -129,7 +130,7 @@ const anularOrden = handler(async (req, res) => {
       for (const item of orden.items) {
         await moverStock(productos.get(item.producto_id), -item.cantidad, {
           tipo: "salida", referencia_tipo: "anulacion_compra", referencia_id: orden.id,
-          referencia_numero: orden.numero, costo_unitario: item.precio,
+          referencia_numero: orden.numero, costo_unitario: item.precio, creado_por: req.usuario.nombre,
         }, t);
       }
     }
@@ -161,6 +162,7 @@ const registrarPago = handler(async (req, res) => {
     const pago = await Pago.create({
       tipo: "pago", orden_compra_id: orden.id, monto,
       fecha: req.body.fecha || new Date(), medio: req.body.medio || "transferencia", nota: req.body.nota,
+      creado_por: req.usuario.nombre,
     }, { transaction: t });
     const pagado = Number(orden.monto_pagado) + monto;
     await orden.update({ monto_pagado: pagado, estado_pago: estadoPago(pagado, orden.total) }, { transaction: t });

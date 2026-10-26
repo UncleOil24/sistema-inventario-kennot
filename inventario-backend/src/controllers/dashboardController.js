@@ -5,6 +5,7 @@ const Producto = require("../models/Producto");
 const Cotizacion = require("../models/Cotizacion");
 const Pago = require("../models/Pago");
 const { handler } = require("../services/erp");
+const { esAdmin } = require("../middlewares/auth");
 
 const n = (v) => Math.round(Number(v) || 0);
 const ymd = (d) => d.toISOString().slice(0, 10);
@@ -119,32 +120,43 @@ const getDashboard = handler(async (req, res) => {
     monto_pendiente: n(cotPend.reduce((s, c) => s + Number(c.total), 0)),
   };
 
-  res.json({
-    ok: true,
-    data: {
-      generado: new Date().toISOString(),
-      mes_actual: {
-        mes: mesActual.mes,
-        ventas: mesActual.ventas,
-        margen: mesActual.margen,
-        margen_pct: mesActual.ventas ? Math.round((mesActual.margen / mesActual.ventas) * 100) : 0,
-        cantidad: mesActual.cantidad,
-        ticket_promedio: mesActual.cantidad ? n(mesActual.ventas / mesActual.cantidad) : 0,
-        compras: mesActual.compras,
-      },
-      serie,
-      top_productos: topProductos,
-      inventario,
-      stock_critico: stockCritico.slice(0, 15),
-      cuentas_por_cobrar: cxc,
-      cuentas_por_pagar: cxp,
-      caja,
-      cotizaciones: cotizacionesKpi,
-      ultimas_ventas: ventasPeriodo.slice(0, 5).map((v) => ({
-        id: v.id, numero: v.numero, cliente: v.cliente_nombre, fecha: v.fecha, total: n(v.total), estado_pago: v.estado_pago,
-      })),
+  const data = {
+    generado: new Date().toISOString(),
+    mes_actual: {
+      mes: mesActual.mes,
+      ventas: mesActual.ventas,
+      margen: mesActual.margen,
+      margen_pct: mesActual.ventas ? Math.round((mesActual.margen / mesActual.ventas) * 100) : 0,
+      cantidad: mesActual.cantidad,
+      ticket_promedio: mesActual.cantidad ? n(mesActual.ventas / mesActual.cantidad) : 0,
+      compras: mesActual.compras,
     },
-  });
+    serie,
+    top_productos: topProductos,
+    inventario,
+    stock_critico: stockCritico.slice(0, 15),
+    cuentas_por_cobrar: cxc,
+    cuentas_por_pagar: cxp,
+    caja,
+    cotizaciones: cotizacionesKpi,
+    ultimas_ventas: ventasPeriodo.slice(0, 5).map((v) => ({
+      id: v.id, numero: v.numero, cliente: v.cliente_nombre, fecha: v.fecha, total: n(v.total), estado_pago: v.estado_pago,
+    })),
+  };
+
+  // Rol "usuario": sin costos, márgenes, compras, caja ni cuentas por pagar
+  if (!esAdmin(req)) {
+    delete data.mes_actual.margen;
+    delete data.mes_actual.margen_pct;
+    delete data.mes_actual.compras;
+    data.serie = data.serie.map(({ mes, ventas, cantidad }) => ({ mes, ventas, cantidad }));
+    data.top_productos = data.top_productos.map(({ margen, ...resto }) => resto);
+    delete data.inventario.valor_costo;
+    delete data.cuentas_por_pagar;
+    delete data.caja;
+    data.limitado = true;
+  }
+  res.json({ ok: true, data });
 });
 
 module.exports = { getDashboard };

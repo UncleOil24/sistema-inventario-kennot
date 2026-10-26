@@ -26,6 +26,8 @@ const ESTADOS = {
   parcial: ["Pago parcial", "info"],
   pagada: ["Pagada", "ok"],
   vendida: ["Vendida", "ok"],
+  activo: ["Activo", "ok"],
+  inactivo: ["Inactivo", "muted"],
 };
 export function Estado({ valor }) {
   const [txt, tono] = ESTADOS[valor] || [valor, "neutral"];
@@ -142,7 +144,8 @@ export function PagosPanel({ doc, tipo, onRegistrar, onEliminar }) {
                 <td className="mini">{fecha(p.fecha)}</td>
                 <td className="mini">{p.medio}{p.nota ? ` · ${p.nota}` : ""}</td>
                 <td className="price-cell">{fmt(p.monto)}</td>
-                <td><button className="btn btn-danger btn-sm" title={`Eliminar ${verbo}`} onClick={() => onEliminar(p)}>✕</button></td>
+                <td className="mini">{p.creado_por || ""}</td>
+                <td>{onEliminar && <button className="btn btn-danger btn-sm" title={`Eliminar ${verbo}`} onClick={() => onEliminar(p)}>✕</button>}</td>
               </tr>
             ))}
           </tbody>

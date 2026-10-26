@@ -17,6 +17,7 @@ const MovimientoStock = sequelize.define("MovimientoStock", {
   referencia_id: { type: DataTypes.INTEGER, allowNull: true },
   referencia_numero: { type: DataTypes.STRING(20), allowNull: true },
   nota: { type: DataTypes.STRING(255), allowNull: true },
+  creado_por: { type: DataTypes.STRING(100), allowNull: true }, // nombre del usuario que lo registró
 }, {
   tableName: "movimientos_stock",
   timestamps: true,

@@ -33,6 +33,7 @@ const exportarCotizacion = async (req, res) => {
         iva,
         total,
         items,
+        creado_por: req.usuario?.nombre || null,
       });
     }
 

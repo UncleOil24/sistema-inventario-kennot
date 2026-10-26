@@ -8,7 +8,7 @@ const ORIGEN = {
 };
 
 // Historial de movimientos de un producto + ajuste por conteo físico
-export default function Kardex({ producto, notify, onClose, onAjustado }) {
+export default function Kardex({ producto, esAdmin, notify, onClose, onAjustado }) {
   const [movs, setMovs] = useState(null);
   const [stockReal, setStockReal] = useState(producto.stock);
   const [nota, setNota] = useState("");
@@ -34,7 +34,7 @@ export default function Kardex({ producto, notify, onClose, onAjustado }) {
 
   return (
     <Modal titulo={`// Kardex · ${producto.nombre}`} onClose={onClose} ancho={720}>
-      <div className="panel">
+      {esAdmin && <div className="panel">
         <div className="panel-titulo">Ajustar por conteo físico <span className="mini">(stock en sistema: {producto.stock})</span></div>
         <div className="pago-form">
           <input type="number" min="0" value={stockReal} onChange={(e) => setStockReal(e.target.value)} title="Stock real contado" />
@@ -43,13 +43,13 @@ export default function Kardex({ producto, notify, onClose, onAjustado }) {
             Ajustar {diferencia !== 0 && !Number.isNaN(diferencia) ? `(${diferencia > 0 ? "+" : ""}${diferencia})` : ""}
           </button>
         </div>
-      </div>
+      </div>}
       {!movs ? <Cargando /> : movs.length === 0 ? (
         <div className="mini">Sin movimientos registrados todavía. Los productos creados antes del ERP empiezan su historial desde ahora.</div>
       ) : (
         <div className="table-wrap" style={{ maxHeight: 360, overflowY: "auto" }}>
           <table className="table table-compacta">
-            <thead><tr><th>Fecha</th><th>Origen</th><th>Mov.</th><th>Saldo</th><th>Costo</th><th>Nota</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Origen</th><th>Mov.</th><th>Saldo</th>{esAdmin && <th>Costo</th>}<th>Por</th><th>Nota</th></tr></thead>
             <tbody>
               {movs.map((m) => (
                 <tr key={m.id}>
@@ -57,7 +57,8 @@ export default function Kardex({ producto, notify, onClose, onAjustado }) {
                   <td>{ORIGEN[m.referencia_tipo] || m.tipo} {m.referencia_numero && <span className="id-cell">{m.referencia_numero}</span>}</td>
                   <td className={`stock-cell ${m.cantidad < 0 ? "stock-low" : "stock-ok"}`}>{m.cantidad > 0 ? "+" : ""}{m.cantidad}</td>
                   <td className="stock-cell">{m.stock_resultante}</td>
-                  <td className="price-cell compra">{m.costo_unitario != null ? fmt(m.costo_unitario) : "—"}</td>
+                  {esAdmin && <td className="price-cell compra">{m.costo_unitario != null ? fmt(m.costo_unitario) : "—"}</td>}
+                  <td className="mini">{m.creado_por || "—"}</td>
                   <td className="mini">{m.nota || ""}</td>
                 </tr>
               ))}
