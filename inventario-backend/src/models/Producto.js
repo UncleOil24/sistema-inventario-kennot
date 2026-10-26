@@ -33,6 +33,12 @@ precio_venta: {
     defaultValue: 0,
     validate: { min: 0 },
   },
+  stock_minimo: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 30,
+    validate: { min: 0 },
+  },
   unidad: {
     type: DataTypes.STRING(50),
     allowNull: false,

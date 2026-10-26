@@ -8,10 +8,20 @@ const sequelize = require("./config/database");
 require("./src/models/Producto");
 require("./src/models/Cotizacion");
 require("./src/models/Cliente");
+require("./src/models/Proveedor");
+require("./src/models/OrdenCompra");
+require("./src/models/Venta");
+require("./src/models/Pago");
+require("./src/models/MovimientoStock");
 
 const productosRoutes = require("./src/routes/productos");
 const cotizacionesRoutes = require("./src/routes/cotizaciones");
 const clientesRoutes = require("./src/routes/Clientes");
+const proveedoresRoutes = require("./src/routes/proveedores");
+const ordenesCompraRoutes = require("./src/routes/ordenesCompra");
+const ventasRoutes = require("./src/routes/ventas");
+const pagosRoutes = require("./src/routes/pagos");
+const dashboardRoutes = require("./src/routes/dashboard");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,12 +36,17 @@ app.use(morgan("dev"));
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.json({ ok: true, message: "InventarioSys API corriendo", version: "1.0.0" });
+  res.json({ ok: true, message: "InventarioSys API corriendo", version: "2.0.0-erp" });
 });
 
 app.use("/api/productos", productosRoutes);
 app.use("/api/cotizaciones", cotizacionesRoutes);
 app.use("/api/clientes", clientesRoutes);
+app.use("/api/proveedores", proveedoresRoutes);
+app.use("/api/ordenes-compra", ordenesCompraRoutes);
+app.use("/api/ventas", ventasRoutes);
+app.use("/api/pagos", pagosRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ ok: false, error: `Ruta no encontrada: ${req.method} ${req.path}` });
