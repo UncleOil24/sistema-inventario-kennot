@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Modal } from "./ui";
+import { Modal, Estado } from "./ui";
 import { api } from "./lib";
 
-const VACIO = { nombre: "", rut: "", telefono: "", email: "", direccion: "", rubro: "", notas: "" };
+const VACIO = { nombre: "", razon_social: "", rut: "", contacto: "", telefono: "", email: "", direccion: "", rubro: "", tipo: "proveedor", notas: "" };
 
 export default function Proveedores({ esAdmin, proveedores, loading, recargar, notify }) {
   const [form, setForm] = useState(null); // null | objeto en edición
@@ -11,7 +11,7 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
 
   const lista = proveedores.filter((p) => {
     const q = busqueda.toLowerCase();
-    return !q || [p.nombre, p.rut, p.rubro].some((v) => (v || "").toLowerCase().includes(q));
+    return !q || [p.nombre, p.razon_social, p.rut, p.rubro, p.contacto].some((v) => (v || "").toLowerCase().includes(q));
   });
 
   const guardar = async () => {
@@ -52,16 +52,16 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
       </div>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>ID</th><th>Nombre</th><th>RUT</th><th>Rubro</th><th>Teléfono</th><th>Email</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Nombre corto</th><th>Razón social / RUT</th><th>Tipo</th><th>Contacto</th><th>Teléfono</th><th>Email</th><th>Acciones</th></tr></thead>
           <tbody>
             {loading ? <tr className="empty-row"><td colSpan={7}><span className="spinner"></span>Cargando...</td></tr>
               : lista.length === 0 ? <tr className="empty-row"><td colSpan={7}>// sin proveedores</td></tr>
               : lista.map((p) => (
                 <tr key={p.id}>
-                  <td className="id-cell">#{String(p.id).padStart(4, "0")}</td>
-                  <td style={{ fontWeight: 500 }}>{p.nombre}</td>
-                  <td className="mini">{p.rut || "—"}</td>
-                  <td>{p.rubro ? <span className="cat-badge">{p.rubro}</span> : <span className="mini">—</span>}</td>
+                  <td style={{ fontWeight: 500 }}>{p.nombre}{p.rubro && <div className="mini">{p.rubro}</div>}</td>
+                  <td className="mini">{p.razon_social || "—"}{p.rut ? ` · ${p.rut}` : ""}</td>
+                  <td><Estado valor={p.tipo || "proveedor"} /></td>
+                  <td className="mini" style={{ maxWidth: 280 }}>{p.contacto || "—"}</td>
                   <td className="mini">{p.telefono || "No disponible"}</td>
                   <td className="mini">{p.email || "—"}</td>
                   <td>
@@ -82,8 +82,16 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
             <button className="btn btn-ghost" onClick={() => setForm(null)}>Cancelar</button>
             <button className="btn btn-primary" onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar"}</button>
           </>}>
-          {campo("nombre", "Nombre / razón social", "Ej: Chilemat")}
+          <div className="fields-row">{campo("nombre", "Nombre corto", "Ej: MADESUR")}{campo("razon_social", "Razón social", "Ferretería Madesur SpA")}</div>
           <div className="fields-row">{campo("rut", "RUT", "76.000.000-0")}{campo("rubro", "Rubro", "Ferretería, Eléctrico...")}</div>
+          <div className="field">
+            <label>Tipo</label>
+            <select value={form.tipo || "proveedor"} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
+              <option value="proveedor">Proveedor (cotización / factura)</option>
+              <option value="web">Tienda web (precio con IVA, se divide por 1,19)</option>
+            </select>
+          </div>
+          {campo("contacto", "Contacto / vendedor", "Nombre, teléfono, correo")}
           <div className="fields-row">{campo("telefono", "Teléfono", "+569...")}{campo("email", "Email", "ventas@...")}</div>
           {campo("direccion", "Dirección", "Calle, ciudad")}
           {campo("notas", "Notas", "Condiciones de pago, vendedor, etc.")}

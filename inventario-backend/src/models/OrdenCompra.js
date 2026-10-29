@@ -1,12 +1,13 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/database");
 
-// Estados: borrador -> recibida (suma stock) | anulada
+// Estados: borrador -> recibida | anulada  (sin control de stock)
 // Pago: pendiente | parcial | pagada
 const OrdenCompra = sequelize.define("OrdenCompra", {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   numero: { type: DataTypes.STRING(20), allowNull: true },
   proveedor_id: { type: DataTypes.INTEGER, allowNull: true },
+  venta_id: { type: DataTypes.INTEGER, allowNull: true }, // si nació del cuadro de compra de una venta
   proveedor_nombre: { type: DataTypes.STRING(255), allowNull: true },
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   fecha_recepcion: { type: DataTypes.DATE, allowNull: true },

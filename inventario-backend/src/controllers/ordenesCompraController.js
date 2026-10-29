@@ -4,10 +4,11 @@ const OrdenCompra = require("../models/OrdenCompra");
 const Proveedor = require("../models/Proveedor");
 const Producto = require("../models/Producto");
 const Pago = require("../models/Pago");
+const PrecioProveedor = require("../models/PrecioProveedor");
 const {
-  handler, ErrorNegocio, calcularTotales, normalizarItems, bloquearProductos,
-  moverStock, estadoPago,
+  handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago,
 } = require("../services/erp");
+const { recalcular, origenDe, normProv } = require("../services/precios");
 
 const numeroOC = (id) => `OC-${String(id).padStart(4, "0")}`;
 
@@ -19,7 +20,7 @@ const prepararItems = async (itemsBody, t) => {
   return items.map((i) => {
     const p = mapa.get(i.producto_id);
     if (!p) throw new ErrorNegocio(`Producto ${i.producto_id} no existe`, 404);
-    return { ...i, nombre: p.nombre, unidad: p.unidad };
+    return { producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: i.cantidad, precio: i.precio };
   });
 };
 
@@ -30,10 +31,11 @@ const datosProveedor = async (proveedor_id, t) => {
   return { proveedor_id: prov.id, proveedor_nombre: prov.nombre };
 };
 
-// GET /api/ordenes-compra?estado=&estado_pago=&proveedor_id=&busqueda=
+// GET /api/ordenes-compra?estado=&estado_pago=&proveedor_id=&venta_id=&busqueda=
 const getOrdenes = handler(async (req, res) => {
-  const { estado, estado_pago, proveedor_id, busqueda } = req.query;
+  const { estado, estado_pago, proveedor_id, venta_id, busqueda } = req.query;
   const where = {};
+  if (venta_id) where.venta_id = venta_id;
   if (estado) where.estado = estado;
   if (estado_pago) where.estado_pago = estado_pago;
   if (proveedor_id) where.proveedor_id = proveedor_id;
@@ -52,7 +54,7 @@ const getOrden = handler(async (req, res) => {
   res.json({ ok: true, data: { ...oc.toJSON(), pagos } });
 });
 
-// POST /api/ordenes-compra   -> queda en "borrador" (no mueve stock todavía)
+// POST /api/ordenes-compra   -> queda en "borrador"
 const crearOrden = handler(async (req, res) => {
   const { proveedor_id, items, fecha_vencimiento, documento, notas } = req.body;
   const oc = await sequelize.transaction(async (t) => {
@@ -88,52 +90,46 @@ const actualizarOrden = handler(async (req, res) => {
   res.json({ ok: true, data: oc });
 });
 
-// POST /api/ordenes-compra/:id/recibir   { actualizar_costos = true, documento }
-// Suma el stock de cada producto y (opcional) actualiza su precio de compra.
+// POST /api/ordenes-compra/:id/recibir   { registrar_precios = true, documento }
+// Marca la compra como recibida. Con registrar_precios, lo pagado real queda en el historial
+// de precios del proveedor (documento = factura) y se recalcula el precio vigente.
 const recibirOrden = handler(async (req, res) => {
-  const { actualizar_costos = true, documento } = req.body || {};
+  const { documento } = req.body || {};
+  const registrar = (req.body?.registrar_precios ?? req.body?.actualizar_costos) !== false;
   const oc = await sequelize.transaction(async (t) => {
     const orden = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!orden) throw new ErrorNegocio("Orden no encontrada", 404);
     if (orden.estado !== "borrador") throw new ErrorNegocio(`La orden ya está ${orden.estado}`);
-    const productos = await bloquearProductos(orden.items.map((i) => i.producto_id), t);
-    for (const item of orden.items) {
-      const p = productos.get(item.producto_id);
-      await moverStock(p, item.cantidad, {
-        tipo: "entrada", referencia_tipo: "compra", referencia_id: orden.id,
-        referencia_numero: orden.numero, costo_unitario: item.precio, creado_por: req.usuario.nombre,
-      }, t);
-      const cambios = {};
-      if (actualizar_costos) cambios.precio_compra = item.precio;
-      if (!p.proveedor) cambios.proveedor = orden.proveedor_nombre;
-      if (Object.keys(cambios).length) await p.update(cambios, { transaction: t });
-    }
     await orden.update({
       estado: "recibida", fecha_recepcion: new Date(),
       ...(documento ? { documento } : {}),
     }, { transaction: t });
+    if (registrar) {
+      const origen = await origenDe(orden.proveedor_nombre, t);
+      const doc = orden.documento ? `FACT. ${orden.documento}` : orden.numero;
+      for (const item of orden.items) {
+        const p = await Producto.findByPk(item.producto_id, { transaction: t, lock: t.LOCK.UPDATE });
+        if (!p || !(Number(item.precio) > 0)) continue;
+        await PrecioProveedor.create({
+          producto_id: p.id, proveedor: normProv(orden.proveedor_nombre), precio: Math.round(Number(item.precio)),
+          fecha: new Date(), documento: doc, cantidad: item.cantidad, unidad: item.unidad,
+          origen, creado_por: req.usuario.nombre,
+        }, { transaction: t });
+        await recalcular(p, { t, usuario: req.usuario.nombre, motivo: `Compra ${orden.numero}` });
+      }
+    }
     return orden;
   });
   res.json({ ok: true, data: oc });
 });
 
 // POST /api/ordenes-compra/:id/anular
-// Borrador: solo cambia estado. Recibida: devuelve (resta) el stock, si alcanza.
 const anularOrden = handler(async (req, res) => {
   const oc = await sequelize.transaction(async (t) => {
     const orden = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!orden) throw new ErrorNegocio("Orden no encontrada", 404);
     if (orden.estado === "anulada") throw new ErrorNegocio("La orden ya está anulada");
     if (Number(orden.monto_pagado) > 0) throw new ErrorNegocio("La orden tiene pagos registrados. Elimínalos antes de anular.");
-    if (orden.estado === "recibida") {
-      const productos = await bloquearProductos(orden.items.map((i) => i.producto_id), t);
-      for (const item of orden.items) {
-        await moverStock(productos.get(item.producto_id), -item.cantidad, {
-          tipo: "salida", referencia_tipo: "anulacion_compra", referencia_id: orden.id,
-          referencia_numero: orden.numero, costo_unitario: item.precio, creado_por: req.usuario.nombre,
-        }, t);
-      }
-    }
     await orden.update({ estado: "anulada" }, { transaction: t });
     return orden;
   });

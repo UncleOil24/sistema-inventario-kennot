@@ -10,6 +10,9 @@ const Proveedor = sequelize.define("Proveedor", {
   direccion: { type: DataTypes.STRING(255), allowNull: true },
   rubro: { type: DataTypes.STRING(100), allowNull: true },
   notas: { type: DataTypes.TEXT, allowNull: true },
+  razon_social: { type: DataTypes.STRING(255), allowNull: true },
+  contacto: { type: DataTypes.STRING(255), allowNull: true }, // vendedor / datos de contacto
+  tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "proveedor" }, // proveedor | web
 }, {
   tableName: "proveedores",
   timestamps: true,

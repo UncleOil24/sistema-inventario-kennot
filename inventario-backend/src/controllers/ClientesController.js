@@ -22,9 +22,10 @@ const getClientes = async (req, res) => {
 // POST /api/clientes
 const crearCliente = async (req, res) => {
   try {
-    const { nombre, rut, telefono, email, direccion } = req.body;
+    const { nombre, rut, telefono, email, direccion, contacto, comuna } = req.body;
     if (!nombre) return res.status(400).json({ ok: false, error: "Nombre requerido" });
-    const cliente = await Cliente.create({ nombre, rut, telefono, email, direccion });
+    const tipo = req.body.tipo === "particular" ? "particular" : "convenio";
+    const cliente = await Cliente.create({ nombre, rut, telefono, email, direccion, contacto, comuna, tipo });
     res.status(201).json({ ok: true, data: cliente });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -36,8 +37,9 @@ const actualizarCliente = async (req, res) => {
   try {
     const cliente = await Cliente.findByPk(req.params.id);
     if (!cliente) return res.status(404).json({ ok: false, error: "Cliente no encontrado" });
-    const { nombre, rut, telefono, email, direccion } = req.body;
-    await cliente.update({ nombre, rut, telefono, email, direccion });
+    const { nombre, rut, telefono, email, direccion, contacto, comuna } = req.body;
+    const tipo = req.body.tipo === undefined ? cliente.tipo : (req.body.tipo === "particular" ? "particular" : "convenio");
+    await cliente.update({ nombre, rut, telefono, email, direccion, contacto, comuna, tipo });
     res.json({ ok: true, data: cliente });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });

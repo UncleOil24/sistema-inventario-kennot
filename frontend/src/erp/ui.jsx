@@ -1,6 +1,6 @@
 // Piezas compartidas por las vistas del ERP
 import { useState, useMemo } from "react";
-import { fmt, fecha, hoyISO } from "./lib";
+import { fmt, fecha, hoyISO, sinTildes } from "./lib";
 
 export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
   return (
@@ -26,6 +26,14 @@ const ESTADOS = {
   parcial: ["Pago parcial", "info"],
   pagada: ["Pagada", "ok"],
   vendida: ["Vendida", "ok"],
+  cotizacion: ["Cotización", "info"],
+  aceptada: ["Aceptada · venta", "ok"],
+  rechazada: ["Rechazada", "muted"],
+  vencida: ["Vencida", "warn"],
+  convenio: ["Convenio", "info"],
+  particular: ["Particular", "neutral"],
+  web: ["Tienda web", "neutral"],
+  proveedor: ["Proveedor", "info"],
   activo: ["Activo", "ok"],
   inactivo: ["Inactivo", "muted"],
 };
@@ -35,23 +43,20 @@ export function Estado({ valor }) {
 }
 
 // Editor de líneas: buscar producto, agregar, editar cantidad y precio.
-// campoPrecio: "precio_venta" (ventas) o "precio_compra" (compras)
-export function ItemsEditor({ items, setItems, productos, campoPrecio, mostrarStock = true }) {
+// precioDe(producto) -> precio sugerido para la línea (venta según tipo de cliente, o compra)
+export function ItemsEditor({ items, setItems, productos, precioDe, etiquetaPrecio = "Precio neto" }) {
   const [q, setQ] = useState("");
   const sugerencias = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return [];
+    const palabras = sinTildes(q).trim().split(/\s+/).filter(Boolean);
+    if (!palabras.length) return [];
     return productos
-      .filter((p) => p.nombre.toLowerCase().includes(t) || String(p.id) === t)
+      .filter((p) => { const t = sinTildes(`${p.codigo ?? ""} ${p.nombre}`); return palabras.every((w) => t.includes(w)); })
       .filter((p) => !items.some((i) => i.producto_id === p.id))
-      .slice(0, 8);
+      .slice(0, 10);
   }, [q, productos, items]);
 
   const agregar = (p) => {
-    setItems([...items, {
-      producto_id: p.id, nombre: p.nombre, unidad: p.unidad, stock: p.stock,
-      cantidad: 1, precio: Number(p[campoPrecio]) || 0,
-    }]);
+    setItems([...items, { producto_id: p.id, nombre: p.nombre, unidad: p.unidad, cantidad: 1, precio: Number(precioDe(p)) || 0 }]);
     setQ("");
   };
   const set = (id, campo, val) => setItems(items.map((i) => (i.producto_id === id ? { ...i, [campo]: val } : i)));
@@ -61,13 +66,13 @@ export function ItemsEditor({ items, setItems, productos, campoPrecio, mostrarSt
     <div className="items-editor">
       <div className="field" style={{ position: "relative" }}>
         <label>Agregar producto</label>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Escribe nombre o ID..." />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Palabras en cualquier orden o N°..." />
         {sugerencias.length > 0 && (
           <div className="sugerencias">
             {sugerencias.map((p) => (
               <button key={p.id} className="sugerencia" onClick={() => agregar(p)}>
                 <span>{p.nombre}</span>
-                <span className="sug-meta">stock {p.stock} · {fmt(p[campoPrecio])}</span>
+                <span className="sug-meta">{p.unidad} · {fmt(precioDe(p))}</span>
               </button>
             ))}
           </div>
@@ -76,23 +81,17 @@ export function ItemsEditor({ items, setItems, productos, campoPrecio, mostrarSt
       {items.length > 0 && (
         <div className="table-wrap">
           <table className="table table-compacta">
-            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio neto</th><th>Total</th><th></th></tr></thead>
+            <thead><tr><th>Producto</th><th>Cant.</th><th>{etiquetaPrecio}</th><th>Total</th><th></th></tr></thead>
             <tbody>
-              {items.map((i) => {
-                const sinStock = mostrarStock && Number(i.cantidad) > Number(i.stock);
-                return (
-                  <tr key={i.producto_id}>
-                    <td>
-                      {i.nombre}
-                      {mostrarStock && <div className={`mini ${sinStock ? "stock-low" : ""}`}>stock: {i.stock}{sinStock ? " — insuficiente" : ""}</div>}
-                    </td>
-                    <td><input className="qty-input" type="number" min="1" value={i.cantidad} onChange={(e) => set(i.producto_id, "cantidad", e.target.value)} /></td>
-                    <td><input className="qty-input" style={{ width: 90 }} type="number" min="0" value={i.precio} onChange={(e) => set(i.producto_id, "precio", e.target.value)} /></td>
-                    <td className="price-cell">{fmt(Number(i.precio) * Number(i.cantidad))}</td>
-                    <td><button className="btn btn-danger btn-sm" onClick={() => setItems(items.filter((x) => x.producto_id !== i.producto_id))}>✕</button></td>
-                  </tr>
-                );
-              })}
+              {items.map((i) => (
+                <tr key={i.producto_id} className={!(Number(i.precio) > 0) ? "fila-alerta" : ""}>
+                  <td>{i.nombre}<div className="mini">{i.unidad}{!(Number(i.precio) > 0) ? " — sin precio" : ""}</div></td>
+                  <td><input className="qty-input" type="number" min="0" step="any" value={i.cantidad} onChange={(e) => set(i.producto_id, "cantidad", e.target.value)} /></td>
+                  <td><input className="qty-input" style={{ width: 90 }} type="number" min="0" value={i.precio} onChange={(e) => set(i.producto_id, "precio", e.target.value)} /></td>
+                  <td className="price-cell">{fmt(Number(i.precio) * Number(i.cantidad))}</td>
+                  <td><button className="btn btn-danger btn-sm" onClick={() => setItems(items.filter((x) => x.producto_id !== i.producto_id))}>✕</button></td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

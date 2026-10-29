@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
 import { api, fmt, fecha, useProductos } from "./lib";
 
-export default function Compras({ notify, esAdmin, proveedores, onStockCambio }) {
+export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState("");
@@ -30,6 +30,12 @@ export default function Compras({ notify, esAdmin, proveedores, onStockCambio })
     try { setDetalle(await api(`/ordenes-compra/${id}`)); } catch (e) { notify(e.message, "danger"); }
   };
   const refrescar = (id) => { cargar(); if (id) verDetalle(id); };
+
+  // Permite abrir una orden desde otra vista (p.ej. el cuadro de compra de una venta)
+  useEffect(() => {
+    if (abrirOrdenId) { verDetalle(abrirOrdenId); onAbierta?.(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirOrdenId]);
 
   const activas = ordenes.filter((o) => o.estado === "recibida");
   const porPagar = activas.reduce((s, o) => s + Number(o.total) - Number(o.monto_pagado), 0);
@@ -91,7 +97,7 @@ export default function Compras({ notify, esAdmin, proveedores, onStockCambio })
       {detalle && (
         <DetalleOrden orden={detalle} esAdmin={esAdmin} notify={notify} onClose={() => setDetalle(null)}
           onEditar={() => { setEditando(detalle); setDetalle(null); }}
-          onCambio={(stock) => { refrescar(detalle.id); if (stock) onStockCambio?.(); }}
+          onCambio={(precios) => { refrescar(detalle.id); if (precios) onPreciosCambio?.(); }}
           onEliminada={() => { setDetalle(null); cargar(); }} />
       )}
     </>
@@ -100,7 +106,7 @@ export default function Compras({ notify, esAdmin, proveedores, onStockCambio })
 
 function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
   const productos = useProductos();
-  const [items, setItems] = useState(() => (orden?.items || []).map((i) => ({ ...i, stock: undefined })));
+  const [items, setItems] = useState(() => orden?.items || []);
   const [form, setForm] = useState({
     proveedor_id: orden?.proveedor_id || proveedores[0]?.id || "",
     documento: orden?.documento || "",
@@ -146,7 +152,7 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
           <input value={form.documento} onChange={(e) => setForm({ ...form, documento: e.target.value })} placeholder="Ej: 88123" />
         </div>
       </div>
-      <ItemsEditor items={items} setItems={setItems} productos={productos} campoPrecio="precio_compra" mostrarStock={false} />
+      <ItemsEditor items={items} setItems={setItems} productos={productos} precioDe={(p) => p.precio_compra} etiquetaPrecio="Costo neto" />
       <div className="fields-row">
         <div className="field">
           <label>Vencimiento del pago</label>
@@ -157,24 +163,24 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
           <input value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })} />
         </div>
       </div>
-      <div className="mini">La orden queda como borrador. El stock sube recién cuando la marques como <strong>recibida</strong>.</div>
+      <div className="mini">La orden queda como borrador hasta que la marques como <strong>recibida</strong>.</div>
     </Modal>
   );
 }
 
 function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onEliminada }) {
-  const [actualizarCostos, setActualizarCostos] = useState(true);
+  const [registrarPrecios, setRegistrarPrecios] = useState(true);
+  const [factura, setFactura] = useState(orden.documento || "");
 
-  const accion = async (fn, ok, stock = false) => {
-    try { await fn(); notify(ok); onCambio(stock); } catch (e) { notify(e.message, "danger"); }
+  const accion = async (fn, ok, precios = false) => {
+    try { await fn(); notify(ok); onCambio(precios); } catch (e) { notify(e.message, "danger"); }
   };
   const recibir = () => accion(
-    () => api(`/ordenes-compra/${orden.id}/recibir`, { method: "POST", body: { actualizar_costos: actualizarCostos } }),
-    "✓ Mercadería recibida — stock actualizado", true
+    () => api(`/ordenes-compra/${orden.id}/recibir`, { method: "POST", body: { registrar_precios: registrarPrecios, documento: factura || undefined } }),
+    registrarPrecios ? "✓ Compra recibida — precios registrados" : "✓ Compra recibida", registrarPrecios
   );
   const anular = () => {
-    const extra = orden.estado === "recibida" ? " Se descontará del stock lo que ingresó." : "";
-    if (confirm(`¿Anular ${orden.numero}?${extra}`)) accion(() => api(`/ordenes-compra/${orden.id}/anular`, { method: "POST" }), "Orden anulada", true);
+    if (confirm(`¿Anular ${orden.numero}?`)) accion(() => api(`/ordenes-compra/${orden.id}/anular`, { method: "POST" }), "Orden anulada");
   };
   const eliminar = async () => {
     if (!confirm(`¿Eliminar el borrador ${orden.numero}?`)) return;
@@ -197,13 +203,14 @@ function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onE
       <div className="hist-meta">
         <span>{fecha(orden.fecha)}</span>
         <span>{orden.proveedor_nombre}</span>
+        {orden.notas && orden.venta_id && <span>{orden.notas}</span>}
         {orden.documento && <span>Factura {orden.documento}</span>}
         {orden.fecha_recepcion && <span>Recibida {fecha(orden.fecha_recepcion)}</span>}
         {orden.fecha_vencimiento && <span>Vence {fecha(orden.fecha_vencimiento)}</span>}
         {orden.creado_por && <span>Por {orden.creado_por}</span>}
         <Estado valor={orden.estado} />
       </div>
-      {orden.notas && <div className="mini">{orden.notas}</div>}
+      {orden.notas && !orden.venta_id && <div className="mini">{orden.notas}</div>}
       <div className="table-wrap">
         <table className="table table-compacta">
           <thead><tr><th>Producto</th><th>Cant.</th><th>Costo unit.</th><th>Total</th></tr></thead>
@@ -221,10 +228,16 @@ function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onE
       </div>
       <Totales subtotal={orden.subtotal} iva={orden.iva} total={orden.total} />
       {orden.estado === "borrador" && (
-        <label className="check">
-          <input type="checkbox" checked={actualizarCostos} onChange={(e) => setActualizarCostos(e.target.checked)} />
-          Al recibir, actualizar el precio de compra de los productos con estos costos
-        </label>
+        <>
+          <div className="field">
+            <label>N° factura del proveedor</label>
+            <input value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej: 88123" />
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={registrarPrecios} onChange={(e) => setRegistrarPrecios(e.target.checked)} />
+            Al recibir, guardar lo pagado en el historial de precios del proveedor (recalcula el precio vigente)
+          </label>
+        </>
       )}
       {orden.estado === "recibida" && (
         <PagosPanel

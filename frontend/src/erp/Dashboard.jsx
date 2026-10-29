@@ -22,7 +22,7 @@ export default function Dashboard({ notify, irA, esAdmin }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   if (!data) return <Cargando />;
-  const { mes_actual: m, cuentas_por_cobrar: cxc, cuentas_por_pagar: cxp, caja, inventario, cotizaciones } = data;
+  const { mes_actual: m, cuentas_por_cobrar: cxc, cuentas_por_pagar: cxp, caja, catalogo, cotizaciones, por_comprar: porComprar } = data;
 
   return (
     <>
@@ -39,12 +39,13 @@ export default function Dashboard({ notify, irA, esAdmin }) {
       <div className="kpis">
         <Kpi label="Ventas del mes (neto)" valor={fmt(m.ventas)} sub={`${m.cantidad} ventas · ticket ${fmt(m.ticket_promedio)}`} acento />
         {esAdmin && <Kpi label="Margen del mes" valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
+        {esAdmin && <Kpi label="Utilidad del mes" valor={fmt(m.utilidad)} sub={`margen − gastos (${fmt(m.gastos)})`} alerta={m.utilidad < 0} onClick={() => irA("gastos")} />}
+        <Kpi label="Cotizaciones abiertas" valor={fmt(cotizaciones.monto_abierto)} sub={`${cotizaciones.abiertas} por responder · neto`} onClick={() => irA("cotizaciones")} />
+        {esAdmin && <Kpi label="Ventas por comprar" valor={porComprar.cantidad} sub="sin órdenes de compra" alerta={porComprar.cantidad > 0} onClick={() => irA("ventas")} />}
         <Kpi label="Por cobrar" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
         {esAdmin && <Kpi label="Por pagar" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
         {esAdmin && <Kpi label="Caja del mes" valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />}
-        {esAdmin
-          ? <Kpi label="Inventario (a costo)" valor={fmt(inventario.valor_costo)} sub={`${inventario.productos} productos · a venta ${fmt(inventario.valor_venta)}`} />
-          : <Kpi label="Inventario (a precio venta)" valor={fmt(inventario.valor_venta)} sub={`${inventario.productos} productos · ${inventario.criticos} bajo el mínimo`} />}
+        <Kpi label="Catálogo" valor={catalogo.productos.toLocaleString("es-CL")} sub={`${catalogo.sin_precio} sin precio · ${catalogo.con_aviso} por revisar`} onClick={() => irA("catalogo")} />
       </div>
 
       <div className="panel">
@@ -53,27 +54,23 @@ export default function Dashboard({ notify, irA, esAdmin }) {
       </div>
 
       <div className="dash-grid">
-        <div className="panel">
-          <div className="panel-titulo">
-            Stock crítico <span className="mini">({inventario.criticos} bajo el mínimo)</span>
-            <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => irA("compras")}>Crear orden de compra →</button>
+        {esAdmin && (
+          <div className="panel">
+            <div className="panel-titulo">Ventas por comprar <span className="mini">({porComprar.cantidad} sin órdenes de compra)</span></div>
+            {porComprar.detalle.length === 0 ? <div className="mini">✓ Todas las ventas tienen sus órdenes de compra</div> : (
+              <table className="table table-compacta">
+                <thead><tr><th>Venta</th><th>Cliente</th><th>Fecha</th><th>Neto</th></tr></thead>
+                <tbody>
+                  {porComprar.detalle.map((v) => (
+                    <tr key={v.id} className="clickable" onClick={() => irA("ventas", v.id)}>
+                      <td className="id-cell">{v.numero}</td><td>{v.cliente || "—"}</td><td className="mini">{fecha(v.fecha)}</td><td className="price-cell">{fmt(v.neto)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-          {data.stock_critico.length === 0 ? <div className="mini">✓ Todo el stock sobre el mínimo</div> : (
-            <table className="table table-compacta">
-              <thead><tr><th>Producto</th><th>Stock</th><th>Mín.</th><th>Proveedor</th></tr></thead>
-              <tbody>
-                {data.stock_critico.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.nombre}</td>
-                    <td className="stock-cell stock-low">{p.stock}</td>
-                    <td className="mini">{p.stock_minimo}</td>
-                    <td className="mini">{p.proveedor || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        )}
 
         <div className="panel">
           <div className="panel-titulo">Cuentas por cobrar</div>
@@ -114,11 +111,14 @@ export default function Dashboard({ notify, irA, esAdmin }) {
         </div>
 
         <div className="panel">
-          <div className="panel-titulo">Cotizaciones <span className="mini">(período)</span></div>
+          <div className="panel-titulo">Cotizaciones <span className="mini">(período, montos netos)</span></div>
           <div className="cot-kpis">
-            <div><div className="stat-label">Emitidas</div><div className="stat-value">{cotizaciones.total}</div></div>
-            <div><div className="stat-label">Convertidas</div><div className="stat-value">{cotizaciones.conversion}%</div></div>
-            <div><div className="stat-label">Pendientes</div><div className="stat-value accent">{fmt(cotizaciones.monto_pendiente)}</div></div>
+            <div><div className="stat-label">Emitidas</div><div className="stat-value">{cotizaciones.emitidas}</div><div className="mini">{fmt(cotizaciones.monto_emitido)}</div></div>
+            <div><div className="stat-label">Ganadas</div><div className="stat-value" style={{ color: "var(--success)" }}>{cotizaciones.ganadas}</div><div className="mini">{fmt(cotizaciones.monto_ganado)}</div></div>
+            <div><div className="stat-label">Tasa de cierre</div><div className="stat-value">{cotizaciones.conversion}%</div><div className="mini">de las cerradas</div></div>
+            <div><div className="stat-label">Rechazadas</div><div className="stat-value">{cotizaciones.rechazadas}</div><div className="mini">{fmt(cotizaciones.monto_rechazado)}</div></div>
+            <div><div className="stat-label">Vencidas</div><div className="stat-value">{cotizaciones.vencidas}</div><div className="mini">{fmt(cotizaciones.monto_vencido)}</div></div>
+            <div><div className="stat-label">Abiertas</div><div className="stat-value accent">{cotizaciones.abiertas}</div><div className="mini">{fmt(cotizaciones.monto_abierto)}</div></div>
           </div>
           <div className="panel-titulo" style={{ marginTop: 14 }}>Últimas ventas</div>
           {data.ultimas_ventas.length === 0 ? <div className="mini">Sin ventas</div> : (
@@ -185,7 +185,9 @@ function GraficoMeses({ serie, conCompras = true }) {
                   <strong>{nombreMes(s.mes)}</strong>
                   <div><i style={{ background: "var(--serie-1)" }} />Ventas {fmt(s.ventas)}</div>
                   {conCompras && <div><i style={{ background: "var(--serie-2)" }} />Compras {fmt(s.compras)}</div>}
-                  <div className="mini">{conCompras ? `Margen ${fmt(s.margen)} · ` : ""}{s.cantidad} ventas</div>
+                  {conCompras && <div className="mini">Margen {fmt(s.margen)} · gastos {fmt(s.gastos)}</div>}
+                  {conCompras && <div className="mini">Utilidad {fmt(s.utilidad)}</div>}
+                  <div className="mini">{s.cantidad} ventas</div>
                 </div>
               )}
             </div>

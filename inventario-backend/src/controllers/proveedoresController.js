@@ -2,15 +2,20 @@ const { Op } = require("sequelize");
 const Proveedor = require("../models/Proveedor");
 const { handler, ErrorNegocio } = require("../services/erp");
 
-const CAMPOS = ["nombre", "rut", "telefono", "email", "direccion", "rubro", "notas"];
-const pick = (body) => Object.fromEntries(CAMPOS.filter((c) => c in body).map((c) => [c, body[c]]));
+const CAMPOS = ["nombre", "razon_social", "rut", "contacto", "telefono", "email", "direccion", "rubro", "tipo", "notas"];
+const pick = (body) => {
+  const d = Object.fromEntries(CAMPOS.filter((c) => c in body).map((c) => [c, body[c]]));
+  if (d.nombre) d.nombre = String(d.nombre).trim().toUpperCase(); // nombre corto: MADESUR, CYC...
+  if ("tipo" in d) d.tipo = d.tipo === "web" ? "web" : "proveedor";
+  return d;
+};
 
 // GET /api/proveedores
 const getProveedores = handler(async (req, res) => {
   const { busqueda } = req.query;
   const where = {};
   if (busqueda) {
-    where[Op.or] = ["nombre", "rut", "rubro"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
+    where[Op.or] = ["nombre", "razon_social", "rut", "rubro", "contacto"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
   const data = await Proveedor.findAll({ where, order: [["nombre", "ASC"]] });
   res.json({ ok: true, data });

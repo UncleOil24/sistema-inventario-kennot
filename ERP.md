@@ -1,4 +1,102 @@
-# Sistema Kennot — ERP fase 1
+# Sistema Kenott — Ventas y cotizaciones (fase 2)
+
+El sistema deja de llevar inventario: **primero se vende y después se compra al proveedor**.
+La base es la planilla LISTADO_CONSOLIDADO (v61, 2.178 productos).
+
+## Flujo
+
+Lista del cliente → **Cotizar** (precio convenio o particular según el cliente) → cotización guardada
+(*borrador* → *cotización*) → ¿cliente acepta? → **Venta** (con N° OC del cliente) → **Cuadro de compra**
+por proveedor → órdenes de compra → recepción (lo pagado real entra al historial de precios) → cobro.
+Rechazadas y vencidas no se borran: sirven para medir cuánto se cotiza y cuánto se gana.
+
+## Qué cambió
+
+| Módulo | Qué hace ahora |
+|---|---|
+| **Catálogo** | N° de la planilla, descripción estándar, precio compra vigente, proveedor principal, opción 2 y 3, REVISAR, confirmado. Precios convenio/particular calculados con los márgenes de Configuración. Buscador por palabras en cualquier orden y sin tildes. Filtros: con aviso, sin precio, sin confirmar, confirmados. |
+| **Precios** (botón en Catálogo, solo admin) | Historial por proveedor (nunca se borra un precio). Cargar precio: con IVA (web) se divide por 1,19; si solo hay total de línea se divide por la cantidad. Confirmar, descartar con motivo, restaurar, usar un precio del historial. Registro de cambios. |
+| **Cotizar** | Cliente → tipo de precio (convenio / particular). El precio de cada línea se puede corregir. Admin ve costo y margen por línea (no se imprime). Guarda borrador o cotización, descarga Excel con el formato Kenott. |
+| **Cotizaciones** | Estados: borrador, cotización, aceptada, rechazada (con motivo), vencida (automático al pasar la validez). Editar, reabrir, aceptar → venta. El precio y el costo se copian al cotizar: si el catálogo cambia después, la cotización y su margen no se mueven. |
+| **Ventas** | N° OC del cliente, factura, cobros. **Cuadro de compra** agrupado por proveedor con margen por línea, alternativas (opción 2 y 3), cambio de proveedor de una línea y botón para generar las órdenes de compra. Utilidad = margen − gastos de la venta. |
+| **Compras** | Al recibir, lo pagado real se guarda como precio del proveedor (documento = factura) y se recalcula el precio vigente. |
+| **Gastos** (admin) | Flete, combustible, comisión, general. Asociados a una venta o al mes. |
+| **Reportes** (admin) | Utilidad por cliente, compras por proveedor y ahorro vs. opción 2, precio cotizado vs. pagado real. |
+| **Configuración** (admin) | Márgenes convenio / particular, último N° de cotización (correlativo), validez por defecto, **importar planilla**. |
+| **Inicio** | Ventas, margen, gastos y utilidad del mes; cotizaciones abiertas, ganadas, rechazadas y vencidas; ventas por comprar; productos sin precio y por revisar. |
+
+Se eliminó el control de stock (kardex, stock mínimo, descuento al vender). Las columnas antiguas
+`stock`, `stock_minimo` y `precio_venta` quedan en la base sin uso, para no borrar datos.
+
+## Reglas de precios (services/precios.js)
+
+1. Precio de compra siempre **neto** (web/tienda ÷ 1,19).
+2. Precio **unitario** (si solo viene el total, ÷ cantidad).
+3. Particular = compra × (1 + margen particular). Convenio = compra × (1 + margen convenio). Márgenes en Configuración.
+4. Gana el más barato. De cada proveedor vale su precio más reciente.
+5. Opción 2 y 3 = segundo y tercer proveedor más baratos, nunca el mismo del principal.
+6. Un precio **confirmado** solo lo reemplaza un precio nuevo más barato ("MÁS BARATA que tu confirmado $X"). Si el nuevo es más caro, se mantiene y se avisa.
+7. Si gana un precio web y hay cotización de proveedor más cara, se avisa en REVISAR.
+
+"Por revisar" cuenta los avisos reales (revisar, verificar, más barata, más cara, antes $...).
+El resto del texto de REVISAR es solo el origen del precio (ej. "WEB SODIMAC").
+
+## Importar la planilla
+
+Configuración → Importar planilla, o por consola:
+
+```
+cd inventario-backend
+node scripts/importar-planilla.js LISTADO_CONSOLIDADO_FERRETERIA_v61.xlsx [--desactivar-otros]
+```
+
+| Hoja | Va a |
+|---|---|
+| LISTADO CONSOLIDADO | productos (precio vigente, opciones, REVISAR; "OK CONFIRM." o 0 = confirmado) |
+| COTIZACIONES | precios_proveedor (historia con fecha y documento) |
+| EXTRAS PROVEEDORES | precios_proveedor (descripción del proveedor, marca, calce) |
+| PROVEEDOR / CONTACTO | proveedores ("precio web" = tienda web) |
+| REGISTRO DE CAMBIOS | registro_cambios (una sola vez) |
+
+- Calza productos por descripción exacta y, si no, por N° (solo los que ya vinieron de la planilla).
+- Se puede repetir: no duplica precios. Sí reemplaza precio vigente, opciones y REVISAR con lo que diga la planilla.
+- Los precios más baratos que la planilla no aplicó quedan **descartados** con motivo, para partir con el mismo precio vigente que la planilla (se pueden restaurar en Precios).
+
+## Base de datos
+
+Igual que antes, no hay que correr SQL: al arrancar, `sequelize.sync({ alter: true })` crea
+`precios_proveedor`, `parametros`, `gastos`, `registro_cambios` y las columnas nuevas, y
+`services/migracion.js` pasa las cotizaciones antiguas a los estados nuevos
+(pendiente → cotización, vendida → aceptada). Nueva dependencia: `multer` (subir la planilla).
+
+## Endpoints nuevos o cambiados
+
+```
+GET  /api/productos?busqueda=&categoria=&revision=aviso|sin_precio|sin_confirmar|confirmados
+GET  /api/productos/categorias | /api/productos/resumen
+GET  /api/productos/:id/precios                 POST /api/productos/:id/precios
+POST /api/productos/:id/confirmar  { precio_id? }   POST /api/productos/:id/desconfirmar
+POST /api/precios/:id/descartar { motivo }      POST /api/precios/:id/restaurar
+POST /api/precios/importar-planilla  (multipart: archivo, desactivar_otros)
+GET/POST /api/cotizaciones   PUT /:id   POST /:id/estado { estado, motivo }   GET /:id/excel
+POST /api/ventas/desde-cotizacion/:id { orden_compra_cliente, dias_credito | pagada_al_contado }
+PUT  /api/ventas/:id/datos       GET /api/ventas/:id/cuadro-compra
+POST /api/ventas/:id/cambiar-proveedor { indice, proveedor, costo }
+POST /api/ventas/:id/generar-ordenes { proveedores? }
+GET/POST/PUT/DELETE /api/gastos
+GET/PUT /api/parametros          GET /api/dashboard/reportes?desde=&hasta=
+```
+
+## Pendiente (próximas etapas)
+
+- Calce con Claude (API de Anthropic): subir la lista del cliente o la cotización del proveedor y que proponga el producto por línea.
+- PDF de la cotización con formato Kenott (hoy se descarga en Excel con la plantilla).
+- Roles separados (ventas, compras, administración, gerencia); hoy hay Admin y Usuario.
+- Kenott y Tactics como empresas separadas, si se decide.
+
+---
+
+# Fase 1 (referencia)
 
 ## Qué se agregó
 

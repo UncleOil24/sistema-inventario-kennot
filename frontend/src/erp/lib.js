@@ -40,13 +40,56 @@ export async function api(path, { method = "GET", body } = {}) {
   return data.data ?? data;
 }
 
-// Carga productos una vez para los selectores de items
-export function useProductos(deps = []) {
-  const [productos, setProductos] = useState([]);
-  useEffect(() => {
-    api("/productos?sort=nombre&dir=ASC").then(setProductos).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+export const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+export const pct = (n) => `${Math.round(Number(n) || 0)}%`;
+export const TIPOS_GASTO = { flete: "Flete", combustible: "Combustible", comision: "Comisión", general: "General" };
+
+// Catálogo completo en memoria (≈2.200 productos) para buscar al cotizar o comprar.
+// Se comparte entre vistas y se recarga cuando cambian los precios.
+let cacheProductos = null;
+let promesaProductos = null;
+export const invalidarProductos = () => { cacheProductos = null; promesaProductos = null; };
+export function cargarProductos() {
+  if (cacheProductos) return Promise.resolve(cacheProductos);
+  if (!promesaProductos) {
+    promesaProductos = api("/productos?sort=nombre&dir=ASC")
+      .then((d) => { cacheProductos = d; return d; })
+      .catch((e) => { promesaProductos = null; throw e; });
+  }
+  return promesaProductos;
+}
+export function useProductos() {
+  const [productos, setProductos] = useState(cacheProductos || []);
+  useEffect(() => { cargarProductos().then(setProductos).catch(() => {}); }, []);
   return productos;
 }
+
+// Descarga un archivo (Excel) desde la API con el token de sesión
+export async function descargar(path, nombre) {
+  const res = await authFetch(`${API_URL}/api${path}`);
+  if (!res.ok) {
+    let msg = `Error ${res.status}`;
+    try { msg = (await res.json()).error || msg; } catch { /* binario */ }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Parámetros (márgenes) para calcular precios de venta en pantalla
+export const precioSegun = (p, tipo) => Number(tipo === "particular" ? p.precio_particular : p.precio_convenio) || 0;
+
+
+// Línea de cotización a partir de un producto del catálogo
+export const lineaDesdeProducto = (p, tipo) => ({
+  producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: 1,
+  precio: precioSegun(p, tipo), auto: true, // auto: el precio sigue al tipo de cliente
+  convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
+  costo: p.precio_compra !== undefined ? Number(p.precio_compra) || 0 : undefined, proveedor: p.proveedor,
+});
 
