@@ -59,16 +59,16 @@ export default function Dashboard({ notify, irA, esAdmin }) {
         {lic.nuevas > 0 && (
           <div className="panel">
             <div className="panel-titulo">
-              Licitaciones nuevas <span className="mini">({lic.nuevas} sin revisar · se buscan cada tarde a las 18:00)</span>
+              Mercado Público: nuevas <span className="mini">({lic.nuevas} sin revisar · Compra Ágil y licitaciones · se buscan cada tarde a las 18:00)</span>
               <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => irA("licitaciones")}>Ver todas →</button>
             </div>
             <table className="table table-compacta">
-              <thead><tr><th className="col-desc">Licitación</th><th>Organismo</th><th>Cierra</th><th>Monto</th></tr></thead>
+              <thead><tr><th className="col-desc">Proceso</th><th>Organismo</th><th>Cierra</th><th>Monto</th></tr></thead>
               <tbody>
                 {lic.detalle.map((l) => (
                   <tr key={l.codigo} className="clickable" onClick={() => irA("licitaciones")}>
-                    <td>{l.nombre}<div className="mini">{l.codigo}{l.productos ? ` · ${l.productos} productos` : ""}</div></td>
-                    <td className="mini">{l.organismo || "—"}{l.comuna ? `, ${l.comuna}` : ""}</td>
+                    <td>{l.prioridad && <span title="Organismo prioritario">★ </span>}{l.nombre}<div className="mini">{l.fuente === "compra_agil" ? "Compra Ágil" : "Licitación"} · {l.codigo}{l.productos ? ` · ${l.productos} productos` : ""}{l.relevancia != null ? ` · calce ${l.relevancia}%` : ""}</div></td>
+                    <td className="mini">{l.organismo || "—"}</td>
                     <td className="mini">{l.cierre ? new Date(l.cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
                     <td className="price-cell">{l.monto ? fmt(l.monto) : "—"}</td>
                   </tr>

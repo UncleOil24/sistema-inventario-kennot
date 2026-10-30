@@ -57,6 +57,7 @@ const listaCliente = handler(async (req, res) => {
 const licitacion = handler(async (req, res) => {
   const l = await Licitacion.findByPk(req.params.codigo);
   if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
+  if (!l.detalle_cargado) await require("../services/mercadoPublico").cargarDetalle(l);
   if (!l.items?.length) throw new ErrorNegocio("Esta licitación no trae productos detallados: cotízala a mano");
   const lineas = l.items.map((i) => {
     const extra = i.descripcion && sinTildes(i.descripcion) !== sinTildes(i.producto) ? ` - ${String(i.descripcion).slice(0, 160)}` : "";

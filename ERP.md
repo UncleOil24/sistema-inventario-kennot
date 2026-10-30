@@ -134,7 +134,7 @@ Nuevas dependencias del backend: `@anthropic-ai/sdk`, `pdfkit`, `mammoth` (leer 
 |---|---|---|
 | **Clientes por llamar** | Inicio y Cotizaciones → "Por llamar" | Cotización abierta sin contacto en `dias_seguimiento` días (5) o cuya fecha de "volver a llamar" llegó. Botón **☎ Seguimiento**: nota de lo que dijo el cliente + cuándo volver a llamar. Queda el historial. |
 | **Precios antiguos** | Catálogo (filtro y ⏱), Cotizar, lista del cliente, Inicio | Precio de compra con fecha de más de `meses_precio_antiguo` meses (6). Se avisa para pedir cotización nueva. |
-| **Licitaciones** | Menú Licitaciones | Cada mañana (o con "Buscar nuevas") se piden las licitaciones activas a Mercado Público, se filtran por palabras clave (`mp_palabras`) y se pide el detalle de las nuevas (organismo, región, productos). Se muestran las de las regiones de `mp_regiones` (Maule). **Cotizar** calza los productos con Claude y los pasa al cotizador. |
+| **Licitaciones y Compra Ágil** | Menú Licitaciones | Cada tarde (o con "Buscar nuevas") se revisan las **Compras Ágiles** publicadas de la región (API v2, `api2.mercadopublico.cl`) y las **licitaciones** activas que calzan con `mp_palabras` (API v1). Filtros: región (`mp_regiones`), monto mínimo (`mp_monto_minimo`, 1.000.000), organismos excluidos (`mp_excluir_organismos`, Municipalidad de Talca) y palabras que descartan (`mp_excluir_palabras`). Claude puntúa de 0 a 100 qué tanto calza cada proceso con el catálogo; bajo 40 queda en "Descartadas" (auto, recuperable). Los organismos de `mp_prioridad` (municipalidades de Yerbas Buenas, Linares, San Javier, Curicó y Longaví, Ejército, Gendarmería, U. de Talca, etc.) salen primero con ★. **Cotizar** calza los productos con Claude y los pasa al cotizador. |
 | **Respaldo** | Config → Respaldo | Excel con todas las tablas. Descarga manual siempre; envío semanal por correo si hay SMTP configurado. |
 
 Variables nuevas en Render (todas opcionales; sin ellas esa función avisa y el resto sigue igual):
@@ -150,6 +150,8 @@ envía por correo el resumen de licitaciones nuevas (las que aún no se avisaron
 actúa cuando corresponde y acepta una llamada cada 10 minutos. También despierta el servidor de Render. Se puede lanzar
 a mano en GitHub → Actions → "Tareas diarias" → Run workflow. Las fechas de la API (hora de Chile sin zona) se interpretan
 como hora de Chile.
+
+Notas de la API de Compra Ágil: el ticket va en el encabezado `ticket` (el mismo de las licitaciones); es lenta (10-30 s por consulta, a veces 504), por eso se piden páginas de 50 (si falla, de 10), solo lo publicado desde la revisión anterior (`mp_ca_ultima`) y el detalle (productos) solo de lo que calza, con tope de 40 por revisión. Sus fechas vienen en hora de Chile aunque traigan "Z". Ficha pública: `https://buscador.mercadopublico.cl/ficha?code=CODIGO`.
 
 Notas de la API de Mercado Público: el listado de activas trae solo código, nombre y cierre, por eso el filtro por palabras
 es sobre el nombre; el detalle cuesta una consulta por licitación (máx. 80 por vuelta, de a una, con pausa) y el ticket tiene

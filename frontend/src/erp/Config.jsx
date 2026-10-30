@@ -131,7 +131,7 @@ export default function Config({ notify }) {
       </div>
 
       <div className="panel">
-        <div className="panel-titulo">Licitaciones de Mercado Público</div>
+        <div className="panel-titulo">Mercado Público (Compra Ágil y licitaciones)</div>
         {mpTicket === null ? <span className="mini">—</span> : mpTicket
           ? <div className="mini"><span className="estado estado-ok">✓ Conectado</span> Se revisan solas cada tarde a las 18:00 y las nuevas aparecen en el Inicio; si el correo está configurado, llega un resumen cada mañana. También puedes pulsar "Buscar nuevas" en Licitaciones.</div>
           : <div className="aviso" style={{ marginBottom: 0 }}>Falta el ticket. Pídelo gratis en <strong>chilecompra.cl/api</strong> (botón "Pide tu ticket", con Clave Única). Llega por correo; agrégalo en Render → backend → Environment como <strong>MERCADOPUBLICO_TICKET</strong>.</div>}
@@ -139,9 +139,26 @@ export default function Config({ notify }) {
           <div className="field">
             <label>Palabras clave (separadas por coma)</label>
             <textarea className="textarea" rows={4} value={params.mp_palabras || ""} onChange={(e) => setParams({ ...params, mp_palabras: e.target.value })} />
-            <span className="mini">Se busca cualquiera de estas palabras en el nombre de la licitación (sin importar tildes).</span>
+            <span className="mini">Licitaciones: se busca cualquiera de estas palabras en el nombre (sin importar tildes). En Compra Ágil se revisan todas las de la región y Claude decide cuáles calzan con el catálogo.</span>
           </div>
           {texto("mp_regiones", "Regiones (separadas por coma; vacío = todo Chile)")}
+          <div className="field">
+            <label className="check"><input type="checkbox" checked={params.mp_compra_agil !== "0"} onChange={(e) => setParams({ ...params, mp_compra_agil: e.target.checked ? "1" : "0" })} />Revisar también Compra Ágil</label>
+          </div>
+          {texto("mp_monto_minimo", "Monto mínimo ($): se ignoran los procesos con monto menor")}
+          <div className="field">
+            <label>Organismos prioritarios (salen primero con ★; basta una parte del nombre)</label>
+            <textarea className="textarea" rows={3} value={params.mp_prioridad || ""} onChange={(e) => setParams({ ...params, mp_prioridad: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Organismos excluidos (no se muestran)</label>
+            <textarea className="textarea" rows={2} value={params.mp_excluir_organismos || ""} onChange={(e) => setParams({ ...params, mp_excluir_organismos: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Palabras que descartan un proceso (si están en el nombre)</label>
+            <textarea className="textarea" rows={3} value={params.mp_excluir_palabras || ""} onChange={(e) => setParams({ ...params, mp_excluir_palabras: e.target.value })} />
+            <span className="mini">Lo descartado así queda en Licitaciones → "Descartadas" por si quieres recuperarlo.</span>
+          </div>
           <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
         </>}
       </div>
