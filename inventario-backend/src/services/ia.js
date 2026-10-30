@@ -407,17 +407,19 @@ No inventes: juzga solo con lo que dice el proceso. El motivo debe decir qué se
 // procesos: [{ codigo, nombre, descripcion, organismo, productos: [texto] }]
 // resumenCatalogo: texto con las categorías y ejemplos del catálogo
 async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistema" } = {}) {
-  const BLOQUE = 25;
+  const BLOQUE = 40;      // procesos por consulta
+  const PARALELO = 3;     // consultas a la vez
   const salida = new Map();
   let uso = { input_tokens: 0, output_tokens: 0 };
-  for (let i = 0; i < procesos.length; i += BLOQUE) {
-    const parte = procesos.slice(i, i + BLOQUE);
+  const bloques = [];
+  for (let i = 0; i < procesos.length; i += BLOQUE) bloques.push(procesos.slice(i, i + BLOQUE));
+  const unBloque = async (parte) => {
     const texto = parte.map((p) => {
       const prods = (p.productos || []).filter(Boolean).slice(0, 12).map((x) => String(x).slice(0, 140));
       return [
         `### ${p.codigo}`,
         `Nombre: ${String(p.nombre || "").slice(0, 300)}`,
-        p.descripcion ? `Descripción: ${String(p.descripcion).replace(/\s+/g, " ").slice(0, 500)}` : "",
+        p.descripcion ? `Descripción: ${String(p.descripcion).replace(/\s+/g, " ").slice(0, 400)}` : "",
         p.organismo ? `Organismo: ${p.organismo}` : "",
         prods.length ? `Productos: ${prods.join(" | ")}` : "",
       ].filter(Boolean).join("\n");
@@ -426,7 +428,7 @@ async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistem
       system: SYSTEM_RELEVANCIA,
       contenido: [{ type: "text", text: `CATÁLOGO DE KENOTT (categorías con ejemplos):\n${resumenCatalogo}\n\nPROCESOS A CLASIFICAR (${parte.length}):\n\n${texto}` }],
       herramienta: HERR_RELEVANCIA,
-      maxTokens: 4000,
+      maxTokens: 6000,
     });
     uso = { input_tokens: uso.input_tokens + (u.input_tokens || 0), output_tokens: uso.output_tokens + (u.output_tokens || 0) };
     for (const r of datos.resultados || []) {
@@ -434,8 +436,17 @@ async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistem
       if (!parte.some((p) => p.codigo === codigo)) continue;
       salida.set(codigo, { puntaje: Math.max(0, Math.min(100, Math.round(Number(r.puntaje) || 0))), motivo: String(r.motivo || "").slice(0, 250) });
     }
-  }
+  };
+  let error = null;
+  const cola = [...bloques];
+  await Promise.all(Array.from({ length: Math.min(PARALELO, bloques.length) }, async () => {
+    while (cola.length) {
+      const parte = cola.shift();
+      try { await unBloque(parte); } catch (e) { error = e; }
+    }
+  }));
   if (procesos.length) await auditar({ tipo: "relevancia_mercado_publico", archivo: `${procesos.length} procesos`, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: Object.fromEntries(salida) });
+  if (error && !salida.size) throw error;
   return salida;
 }
 

@@ -11,7 +11,7 @@ function iniciar(tipo, fn) {
   trabajos.set(id, t);
   enCurso.set(tipo, id);
   Promise.resolve()
-    .then(() => fn((paso) => { t.paso = paso; }))
+    .then(() => fn((paso, actual = null, total = null) => { Object.assign(t, { paso, actual, total }); }))
     .then((resumen) => Object.assign(t, { estado: "listo", paso: "Terminado", resumen, fin: Date.now() }))
     .catch((e) => { console.error(`${tipo}:`, e.message); Object.assign(t, { estado: "error", error: e.message, fin: Date.now() }); });
   // limpieza de trabajos viejos

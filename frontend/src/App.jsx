@@ -232,6 +232,8 @@ const styles = `
   tfoot td { border-top: 1px solid var(--border2); background: var(--surface2); }
   tr.clickable { cursor: pointer; }
   @media (max-width: 768px) { .vigente { grid-template-columns: 1fr 1fr; } .fields-row.tres { grid-template-columns: 1fr; } }
+  .progreso { height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .progreso > div { height: 100%; background: var(--accent); transition: width 0.4s; }
   @media print {
     body * { visibility: hidden; }
     .cuadro-imprimible, .cuadro-imprimible * { visibility: visible; color: #000 !important; background: #fff !important; }

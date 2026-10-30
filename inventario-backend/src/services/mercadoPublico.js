@@ -216,41 +216,51 @@ function desdeDetalle(l) {
 
 async function sincronizarLicitaciones(params, avisar) {
   const palabras = lista(params.mp_palabras);
-  avisar("Pidiendo licitaciones activas a Mercado Público...");
+  avisar("Licitaciones: pidiendo las activas a Mercado Público...");
   const data = await pedir({ estado: "activas" });
   const activas = data.Listado || [];
   const candidatas = activas
     .map((l) => ({ codigo: l.CodigoExterno, nombre: l.Nombre || "", cierre: fecha(l.FechaCierre), palabras: calzan(l.Nombre, palabras) }))
     .filter((l) => l.codigo && l.palabras.length);
-  avisar(`${activas.length} licitaciones activas, ${candidatas.length} calzan con las palabras clave. Revisando cuáles son nuevas...`);
+  avisar(`Licitaciones: ${activas.length} activas en Chile, ${candidatas.length} calzan con las palabras clave...`);
 
-  const existentes = await Licitacion.findAll({ where: { codigo: candidatas.map((c) => c.codigo) }, attributes: ["codigo", "detalle_cargado"], raw: true });
-  const conDetalle = new Set(existentes.filter((e) => e.detalle_cargado).map((e) => e.codigo));
-  const conocidas = new Set(existentes.map((e) => e.codigo));
+  const conocidas = new Set((await Licitacion.findAll({ where: { codigo: candidatas.map((c) => c.codigo) }, attributes: ["codigo"], raw: true })).map((e) => e.codigo));
   const nuevas = candidatas.filter((c) => !conocidas.has(c.codigo));
   if (nuevas.length) {
-    await Licitacion.bulkCreate(nuevas.map((c) => ({ codigo: c.codigo, nombre: c.nombre, fecha_cierre: c.cierre, palabras: c.palabras.join(", "), estado: "Publicada", fuente: "licitacion" })), { ignoreDuplicates: true });
+    await Licitacion.bulkCreate(nuevas.map((c) => {
+      const prohibida = palabraProhibida(c.nombre, params);
+      return { codigo: c.codigo, nombre: c.nombre, fecha_cierre: c.cierre, palabras: c.palabras.join(", "), estado: "Publicada", fuente: "licitacion",
+        ...(prohibida ? { estado_interno: "descartada", descarte_auto: true, relevancia: 0, motivo_relevancia: `No es del rubro ("${prohibida}")` } : {}) };
+    }), { ignoreDuplicates: true });
   }
-  const pendientes = candidatas.filter((c) => !conDetalle.has(c.codigo)).sort((a, b) => (a.cierre || 0) - (b.cierre || 0)).slice(0, MAX_DETALLES);
+  // Antes de gastar consultas en el detalle, Claude descarta por el nombre lo que no es del rubro
+  try { await puntuarPendientes(avisar, params); } catch (e) { console.error("Claude relevancia:", e.message); }
+
+  // Detalle (organismo, región, productos) solo de las que siguen en carrera. Las de otra región o de un
+  // organismo excluido quedan guardadas como descartadas, para no volver a pedirlas en cada revisión.
+  const pendientes = await Licitacion.findAll({
+    where: { codigo: candidatas.map((c) => c.codigo), detalle_cargado: false, estado_interno: { [Op.in]: ["nueva", "revisada"] } },
+    order: [["fecha_cierre", "ASC"]], limit: MAX_DETALLES,
+  });
   let detalles = 0;
-  for (const c of pendientes) {
-    avisar(`Leyendo licitación ${detalles + 1} de ${pendientes.length}: ${c.codigo}`);
+  for (const [k, reg] of pendientes.entries()) {
+    avisar(`Licitaciones: leyendo detalle ${k + 1} de ${pendientes.length} (${reg.codigo})`, k, pendientes.length);
     try {
-      const d = await pedir({ codigo: c.codigo });
+      const d = await pedir({ codigo: reg.codigo });
       const l = (d.Listado || [])[0];
       if (l) {
         const datos = desdeDetalle(l);
-        // De otra región, de un organismo excluido o con monto bajo: no se guarda
-        if (!visible(datos, params)) { await Licitacion.destroy({ where: { codigo: c.codigo, estado_interno: "nueva" } }); continue; }
         const desc = calzan(`${l.Nombre} ${l.Descripcion || ""} ${(l.Items?.Listado || []).map((i) => i.NombreProducto).join(" ")}`, palabras);
-        await Licitacion.update({ ...datos, palabras: [...new Set([...c.palabras, ...desc])].join(", ") }, { where: { codigo: c.codigo } });
+        const fuera = !enRegiones(datos.region, params) ? "Otra región" : organismoExcluido(datos, params) ? "Organismo excluido en Config." : montoBajo(datos, params) ? "Monto bajo el mínimo" : null;
+        await reg.update({ ...datos, palabras: [...new Set([...(reg.palabras || "").split(", ").filter(Boolean), ...desc])].join(", "),
+          ...(fuera ? { estado_interno: "descartada", descarte_auto: true, motivo_relevancia: fuera } : {}) });
         detalles++;
       }
     } catch (e) {
       if (e.status === 502 && /ticket/i.test(e.message)) throw e;
-      console.error("MP detalle", c.codigo, e.message);
+      console.error("MP detalle", reg.codigo, e.message);
     }
-    await pausa(1200);
+    await pausa(500);
   }
   return { activas: activas.length, calzan: candidatas.length, nuevas: nuevas.length, detalles };
 }
@@ -292,10 +302,10 @@ async function listarCA(params, avisar) {
   if (regiones.length) base.region = regiones.join(",");
   // Después de la primera vez se piden solo las publicadas desde la revisión anterior (con margen)
   if (params.mp_ca_ultima) base.publicado_desde = new Date(new Date(params.mp_ca_ultima).getTime() - 2 * 864e5).toISOString().slice(0, 19) + "Z";
-  let tamano = 50;
+  let tamano = 50, totalPaginas = 0;
   const items = [];
   for (let pagina = 1; pagina <= MAX_PAGINAS_CA; pagina++) {
-    avisar(`Compra Ágil: leyendo página ${pagina}${items.length ? ` (${items.length} encontradas)` : ""}...`);
+    avisar(`Compra Ágil: leyendo página ${pagina}${items.length ? ` (${items.length} encontradas)` : ""}...`, pagina - 1, totalPaginas || null);
     let r;
     try {
       r = await pedirCA("", { ...base, tamano_pagina: tamano, numero_pagina: pagina });
@@ -308,6 +318,7 @@ async function listarCA(params, avisar) {
     }
     items.push(...(r?.items || []));
     const total = r?.paginacion?.total_paginas || 0;
+    totalPaginas = total;
     if (!r?.items?.length || pagina >= total) break;
     await pausa(600);
   }
@@ -337,18 +348,27 @@ async function sincronizarCompraAgil(params, avisar) {
     where: { fuente: "compra_agil", detalle_cargado: false, estado_interno: { [Op.in]: ["nueva", "revisada"] }, fecha_cierre: { [Op.gte]: new Date() } },
     order: [["prioridad", "DESC"], ["fecha_cierre", "ASC"]], limit: MAX_DETALLES_CA,
   });
-  let detalles = 0;
-  for (const l of sinDetalle) {
-    avisar(`Compra Ágil: leyendo productos ${detalles + 1} de ${sinDetalle.length} (${l.codigo})...`);
-    try {
-      const p = await pedirCA(`/${encodeURIComponent(l.codigo)}`);
-      if (p) { await l.update(desdeDetalleCA(p)); detalles++; }
-    } catch (e) {
-      if (/ticket|cuota/i.test(e.message)) throw e;
-      console.error("Compra Ágil detalle", l.codigo, e.message);
+  let detalles = 0, hechos = 0, grave = null;
+  const cola = [...sinDetalle];
+  const trabajador = async (n) => {
+    await pausa(n * 400);
+    while (cola.length && !grave) {
+      const l = cola.shift();
+      try {
+        const p = await pedirCA(`/${encodeURIComponent(l.codigo)}`);
+        if (p) { await l.update(desdeDetalleCA(p)); detalles++; }
+      } catch (e) {
+        if (/ticket|cuota/i.test(e.message)) grave = e;
+        else console.error("Compra Ágil detalle", l.codigo, e.message);
+      }
+      hechos++;
+      avisar(`Compra Ágil: productos leídos ${hechos} de ${sinDetalle.length}`, hechos, sinDetalle.length);
+      await pausa(400);
     }
-    await pausa(600);
-  }
+  };
+  avisar(`Compra Ágil: leyendo productos de ${sinDetalle.length} procesos...`, 0, sinDetalle.length);
+  await Promise.all([0, 1, 2].map(trabajador));
+  if (grave) throw grave;
   await setParametros({ mp_ca_ultima: inicio.toISOString() });
   return { publicadas: items.length, cumplen: datos.length, nuevas: nuevas.length, detalles };
 }
