@@ -8,6 +8,7 @@ const Proveedor = require("../models/Proveedor");
 const OrdenCompra = require("../models/OrdenCompra");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
+const Proyecto = require("../models/Proyecto");
 const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago, sumarDias, redondear,
 } = require("../services/erp");
@@ -106,13 +107,21 @@ const getVentas = handler(async (req, res) => {
   if (busqueda) {
     where[Op.or] = ["numero", "cliente_nombre", "documento", "orden_compra_cliente"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
+  if (req.query.proyecto_id === "ninguno") where.proyecto_id = null;
+  else if (req.query.proyecto_id) where.proyecto_id = req.query.proyecto_id;
   const data = await Venta.findAll({ where, order: [["id", "DESC"]] });
-  // Cuántas órdenes de compra tiene cada venta (para saber cuáles faltan por comprar)
+  // Cuántas órdenes de compra tiene cada venta (para saber cuáles faltan por comprar).
+  // Una compra consolidada del proyecto cuenta para todas sus ventas.
+  const proyIds = [...new Set(data.map((v) => v.proyecto_id).filter(Boolean))];
   const ocs = data.length ? await OrdenCompra.findAll({
-    where: { venta_id: data.map((v) => v.id), estado: { [Op.ne]: "anulada" } }, attributes: ["venta_id"], raw: true,
+    where: { estado: { [Op.ne]: "anulada" }, [Op.or]: [{ venta_id: data.map((v) => v.id) }, ...(proyIds.length ? [{ proyecto_id: proyIds }] : [])] },
+    attributes: ["venta_id", "proyecto_id"], raw: true,
   }) : [];
-  const conOC = new Set(ocs.map((o) => o.venta_id));
-  res.json({ ok: true, data: data.map((v) => ({ ...verVenta(req, v), tiene_compras: conOC.has(v.id) })) });
+  const conOC = new Set(ocs.map((o) => o.venta_id).filter(Boolean));
+  const proyConOC = new Set(ocs.map((o) => o.proyecto_id).filter(Boolean));
+  const proyectos = proyIds.length ? await Proyecto.findAll({ where: { id: proyIds }, attributes: ["id", "numero", "nombre"], raw: true }) : [];
+  const proy = new Map(proyectos.map((p) => [p.id, p]));
+  res.json({ ok: true, data: data.map((v) => ({ ...verVenta(req, v), tiene_compras: conOC.has(v.id) || (!!v.proyecto_id && proyConOC.has(v.proyecto_id)), proyecto: proy.get(v.proyecto_id) || null })) });
 });
 
 // Gastos y utilidad de una venta
@@ -144,7 +153,8 @@ const getVenta = handler(async (req, res) => {
   if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
   const pagos = await Pago.findAll({ where: { venta_id: venta.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
   const extra = esAdmin(req) ? await resumenVenta(venta) : {};
-  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, ...extra } });
+  const proyecto = venta.proyecto_id ? await Proyecto.findByPk(venta.proyecto_id, { attributes: ["id", "numero", "nombre"] }) : null;
+  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, proyecto, ...extra } });
 });
 
 // POST /api/ventas   (venta directa, sin cotización)
@@ -255,7 +265,9 @@ const getCuadroCompra = handler(async (req, res) => {
   ]);
   const prodMap = new Map(productos.map((p) => [p.id, p]));
   const provMap = new Map(proveedores.map((p) => [normProv(p.nombre), p]));
-  const ocPorProv = new Map(extra.ordenes.map((o) => [normProv(o.proveedor_nombre), o]));
+  const delProyecto = venta.proyecto_id ? await OrdenCompra.findAll({ where: { proyecto_id: venta.proyecto_id, estado: { [Op.ne]: "anulada" } } }) : [];
+  const ocPorProv = new Map([...delProyecto.map((o) => ({ id: o.id, numero: `${o.numero} (proyecto)`, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: o.subtotal, estado_pago: o.estado_pago })), ...extra.ordenes]
+    .map((o) => [normProv(o.proveedor_nombre), o]));
 
   const grupos = new Map();
   venta.items.forEach((i, indice) => {
@@ -335,7 +347,8 @@ const generarOrdenes = handler(async (req, res) => {
     const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
     if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
-    const existentes = await OrdenCompra.findAll({ where: { venta_id: v.id, estado: { [Op.ne]: "anulada" } }, transaction: t });
+    // También cuentan las compras consolidadas del proyecto (para no comprar dos veces)
+    const existentes = await OrdenCompra.findAll({ where: { estado: { [Op.ne]: "anulada" }, [Op.or]: [{ venta_id: v.id }, ...(v.proyecto_id ? [{ proyecto_id: v.proyecto_id }] : [])] }, transaction: t });
     const yaTiene = new Set(existentes.map((o) => normProv(o.proveedor_nombre)));
     const filtro = Array.isArray(req.body?.proveedores) ? new Set(req.body.proveedores.map(normProv)) : null;
 
@@ -350,7 +363,7 @@ const generarOrdenes = handler(async (req, res) => {
     for (const [prov, items] of grupos) {
       if (filtro && !filtro.has(prov)) continue;
       if (prov === SIN_PROVEEDOR) { omitidos.push(`${items.length} producto(s) sin proveedor`); continue; }
-      if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden`); continue; }
+      if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden${v.proyecto_id ? " (en la venta o en el proyecto)" : ""}`); continue; }
       let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
       if (!ficha) ficha = await Proveedor.create({ nombre: prov }, { transaction: t });
       const lineas = items.map((i) => ({
@@ -372,6 +385,7 @@ const generarOrdenes = handler(async (req, res) => {
 });
 
 module.exports = {
+  verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
   getCuadroCompra, cambiarProveedorLinea, generarOrdenes,
 };

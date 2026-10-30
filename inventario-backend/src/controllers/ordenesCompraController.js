@@ -36,6 +36,7 @@ const getOrdenes = handler(async (req, res) => {
   const { estado, estado_pago, proveedor_id, venta_id, busqueda } = req.query;
   const where = {};
   if (venta_id) where.venta_id = venta_id;
+  if (req.query.proyecto_id) where.proyecto_id = req.query.proyecto_id;
   if (estado) where.estado = estado;
   if (estado_pago) where.estado_pago = estado_pago;
   if (proveedor_id) where.proveedor_id = proveedor_id;

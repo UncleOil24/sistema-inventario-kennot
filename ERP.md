@@ -251,3 +251,19 @@ DB_SSL=false
 ## Próximas fases sugeridas
 
 Importación masiva desde Excel, emisión de documento tributario (SII), reportes exportables.
+
+## Proyectos (licitaciones ganadas con varias órdenes de compra)
+
+Un organismo suele mandar **varias órdenes de compra** por una sola licitación. Cada OC del organismo se registra como una
+venta (con su factura y su cobro) y el **proyecto** las une (menú Ventas → "Proyectos / licitaciones"):
+
+- **Unir:** en la lista de ventas se marcan las OC de la misma licitación y se pulsa "Unir en proyecto" (nuevo o existente).
+  Si la cotización vino de Licitaciones, el código de la licitación se completa solo.
+- **Ficha del proyecto:** todas las OC del organismo (neto, cobrado, por cobrar), todas las compras a proveedores y la
+  utilidad del conjunto.
+- **Compra consolidada:** suma lo de todas las ventas del proyecto y genera **una OC por proveedor** (`proyecto_id`).
+  No repite proveedores que ya tienen orden en el proyecto o en una de sus ventas; el cuadro de compra de cada venta
+  tampoco duplica lo que ya se compró para el proyecto.
+- **Unir órdenes:** órdenes en borrador del mismo proveedor se juntan en una (suma cantidades); las otras quedan anuladas
+  con la nota "Unida a OC-xxxx".
+- **Deshacer proyecto:** las ventas y órdenes no se borran, solo quedan sueltas.
