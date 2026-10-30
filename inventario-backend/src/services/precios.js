@@ -28,8 +28,9 @@ const precioNetoUnitario = ({ precio, total_linea, cantidad, con_iva }) => {
 // El precio más reciente de cada proveedor (sin descartados), ordenado del más barato al más caro
 const vigentesPorProveedor = (precios) => {
   const porProv = new Map();
+  // Más reciente primero; si el mismo proveedor tiene dos precios el mismo día, vale el más barato
   const orden = [...precios].sort((a, b) =>
-    String(b.fecha).localeCompare(String(a.fecha)) || new Date(b.createdAt) - new Date(a.createdAt) || b.id - a.id);
+    String(b.fecha).localeCompare(String(a.fecha)) || Number(a.precio) - Number(b.precio) || b.id - a.id);
   for (const p of orden) {
     if (p.descartado) continue;
     const k = normProv(p.proveedor);

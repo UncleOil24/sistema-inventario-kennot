@@ -81,7 +81,8 @@ const calceDe = (v) => {
 };
 
 // --- Importación -------------------------------------------------------------
-async function importarPlanilla(buffer, { usuario = "importación", desactivarOtros = false } = {}) {
+async function importarPlanilla(buffer, { usuario = "importación", desactivarOtros = false, onProgreso } = {}) {
+  const avisar = (texto) => { try { onProgreso?.(texto); } catch { /* sin aviso */ } };
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
@@ -188,7 +189,14 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
     }
   }
 
+  avisar(`Planilla leída: ${filas.length} productos, ${cotizaciones.length} cotizaciones, ${extras.length} extras. Guardando...`);
+
+  // Todo en pocas consultas grandes: la base puede estar lejos del servidor y cada consulta suma latencia.
   return sequelize.transaction(async (t) => {
+    // Evita dos importaciones al mismo tiempo (se duplicarían productos)
+    const [[lock]] = await sequelize.query("SELECT pg_try_advisory_xact_lock(424242) AS ok", { transaction: t });
+    if (!lock.ok) throw Object.assign(new Error("Ya hay una importación en curso. Espera a que termine."), { status: 409 });
+
     const resumen = { productos_nuevos: 0, productos_actualizados: 0, precios_agregados: 0, proveedores_nuevos: 0, registro_cambios: 0, desactivados: 0 };
 
     // --- Proveedores (nombre corto + contacto + tipo) ---
@@ -206,29 +214,36 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
     extras.forEach((x) => anotar(x.proveedor));
 
     const existentes = await Proveedor.findAll({ transaction: t });
-    const porNombre = new Map(existentes.map((p) => [normProv(p.nombre), p]));
+    const porNombre = new Map(existentes.map((p) => [normProv(p.nombre), p.toJSON()]));
+    const provNuevos = [];
+    const provCambios = [];
     for (const i of provInfo.values()) {
       const p = porNombre.get(i.nombre);
       if (!p) {
-        const nuevo = await Proveedor.create({ nombre: i.nombre, contacto: i.contacto, tipo: i.web ? "web" : "proveedor" }, { transaction: t });
+        const nuevo = { nombre: i.nombre, contacto: i.contacto, tipo: i.web ? "web" : "proveedor" };
+        provNuevos.push(nuevo);
         porNombre.set(i.nombre, nuevo);
-        resumen.proveedores_nuevos++;
-      } else {
-        const cambios = {};
-        if (!p.contacto && i.contacto) cambios.contacto = i.contacto;
-        if (i.web && p.tipo !== "web") cambios.tipo = "web";
-        if (Object.keys(cambios).length) await p.update(cambios, { transaction: t });
+      } else if ((!p.contacto && i.contacto) || (i.web && p.tipo !== "web")) {
+        if (!p.contacto && i.contacto) p.contacto = i.contacto;
+        if (i.web) p.tipo = "web";
+        provCambios.push(p);
       }
     }
+    if (provNuevos.length) await Proveedor.bulkCreate(provNuevos, { transaction: t });
+    if (provCambios.length) await Proveedor.bulkCreate(provCambios, { transaction: t, updateOnDuplicate: ["contacto", "tipo", "updatedAt"] });
+    resumen.proveedores_nuevos = provNuevos.length;
     const webs = new Set([...porNombre.values()].filter((p) => p.tipo === "web").map((p) => normProv(p.nombre)));
+    avisar("Proveedores listos. Guardando productos...");
 
     // --- Productos: por descripción exacta; si no, por N° (solo productos que ya vinieron de la planilla) ---
-    const actuales = await Producto.findAll({ transaction: t });
+    const actuales = await Producto.findAll({ attributes: ["id", "codigo", "nombre", "en_planilla"], raw: true, transaction: t });
     const porCodigo = new Map(actuales.filter((p) => p.codigo && p.en_planilla).map((p) => [Number(p.codigo), p]));
     const porDesc = new Map(actuales.map((p) => [sinTildes(p.nombre), p]));
     const idPorCodigo = new Map();
     const tocados = new Set();
-    const confirmar = [];
+    const actualizar = [];
+    const crear = [];
+    const confirmadosCodigos = new Set();
 
     for (const f of filas) {
       let p = porDesc.get(sinTildes(f.nombre)) || porCodigo.get(f.codigo);
@@ -240,32 +255,45 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
         contacto: f.contacto, fecha_precio: f.fecha,
         opcion2_proveedor: f.op2.proveedor ? normProv(f.op2.proveedor) : null, opcion2_precio: f.op2.precio, opcion2_fecha: f.op2.fecha,
         opcion3_proveedor: f.op3.proveedor ? normProv(f.op3.proveedor) : null, opcion3_precio: f.op3.precio, opcion3_fecha: f.op3.fecha,
-        confirmado: f.confirmado && f.compra > 0,
+        confirmado: !!(f.confirmado && f.compra > 0),
         revisar: f.confirmado ? null : f.revisar,
         fecha_confirmado: null,
       };
-      if (p) { await p.update(datos, { transaction: t }); resumen.productos_actualizados++; }
-      else { p = await Producto.create(datos, { transaction: t }); resumen.productos_nuevos++; }
-      idPorCodigo.set(f.codigo, p.id);
-      tocados.add(p.id);
-      if (datos.confirmado) confirmar.push(p);
+      if (datos.confirmado) confirmadosCodigos.add(f.codigo);
+      if (p) { actualizar.push({ ...datos, id: p.id }); tocados.add(p.id); idPorCodigo.set(f.codigo, p.id); }
+      else crear.push(datos);
     }
+    const CAMPOS_PRODUCTO = ["codigo", "categoria", "nombre", "unidad", "activo", "en_planilla", "precio_compra", "proveedor", "contacto",
+      "fecha_precio", "opcion2_proveedor", "opcion2_precio", "opcion2_fecha", "opcion3_proveedor", "opcion3_precio", "opcion3_fecha",
+      "confirmado", "revisar", "fecha_confirmado", "updatedAt"];
+    for (let i = 0; i < actualizar.length; i += 500) {
+      await Producto.bulkCreate(actualizar.slice(i, i + 500), { transaction: t, updateOnDuplicate: CAMPOS_PRODUCTO });
+    }
+    for (let i = 0; i < crear.length; i += 500) {
+      const creados = await Producto.bulkCreate(crear.slice(i, i + 500), { transaction: t, returning: ["id", "codigo"] });
+      creados.forEach((p, k) => { const c = crear[i + k].codigo; idPorCodigo.set(c, p.id); tocados.add(p.id); });
+    }
+    resumen.productos_actualizados = actualizar.length;
+    resumen.productos_nuevos = crear.length;
+    avisar("Productos guardados. Cargando historial de precios...");
 
     // --- Precios: historia sin duplicar ---
-    const previos = await PrecioProveedor.findAll({ where: { producto_id: [...tocados] }, transaction: t });
+    const previos = await PrecioProveedor.findAll({ where: { producto_id: [...tocados] }, raw: true, transaction: t });
     const clave = (x) => [x.producto_id, normProv(x.proveedor), x.fecha || "", Math.round(Number(x.precio)), sinTildes(x.documento || "")].join("|");
     const claveSuelta = (x) => [x.producto_id, normProv(x.proveedor), Math.round(Number(x.precio))].join("|");
     const vistos = new Map(previos.map((p) => [clave(p), p]));
     const vistosSueltos = new Set(previos.map(claveSuelta));
+    const completados = new Map(); // precios existentes a los que EXTRAS agrega marca / calce / descripción
     const nuevos = [];
     const hoy = new Date().toISOString().slice(0, 10);
     const agregar = (x) => {
       const reg = { ...x, fecha: x.fecha || hoy, creado_por: usuario };
       const k = clave(reg);
       if (vistos.has(k)) {
-        // ya existe: completar marca / calce / descripción si vienen de EXTRAS
         const e = vistos.get(k);
-        ["marca", "calce", "descripcion_proveedor"].forEach((c2) => { if (reg[c2] && !e[c2]) e[c2] = reg[c2]; });
+        let cambio = false;
+        ["marca", "calce", "descripcion_proveedor"].forEach((c2) => { if (reg[c2] && !e[c2]) { e[c2] = reg[c2]; cambio = true; } });
+        if (cambio && e.id) completados.set(e.id, e);
         return;
       }
       vistos.set(k, reg);
@@ -296,19 +324,24 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
         agregar({ ...reg, documento: DOC_PLANILLA, origen: webs.has(prov) || /precio web/i.test(l.contacto || "") ? "web" : "proveedor" });
       }
     }
-    for (const e of vistos.values()) if (e.changed && e.changed()) await e.save({ transaction: t });
+    if (completados.size) {
+      await PrecioProveedor.bulkCreate([...completados.values()], { transaction: t, updateOnDuplicate: ["marca", "calce", "descripcion_proveedor", "updatedAt"] });
+    }
+    const creadosPrecio = [];
     for (let i = 0; i < nuevos.length; i += 1000) {
-      await PrecioProveedor.bulkCreate(nuevos.slice(i, i + 1000), { transaction: t });
+      const r = await PrecioProveedor.bulkCreate(nuevos.slice(i, i + 1000), { transaction: t, returning: ["id"] });
+      r.forEach((x, k) => creadosPrecio.push({ ...nuevos[i + k], id: x.id, createdAt: new Date() }));
     }
     resumen.precios_agregados = nuevos.length;
+    avisar("Historial de precios cargado. Revisando precios no aplicados...");
 
     // Precios más baratos que la planilla no aplicó (otro formato, medida, etc.): quedan descartados
     // con motivo, así el sistema parte con el mismo precio vigente que la planilla.
     const filaPorId = new Map(filas.map((f) => [idPorCodigo.get(f.codigo), f]));
-    const todos = await PrecioProveedor.findAll({ where: { producto_id: [...tocados] }, transaction: t });
+    const todos = [...previos, ...creadosPrecio];
     const porProd = new Map();
     todos.forEach((x) => { if (!porProd.has(x.producto_id)) porProd.set(x.producto_id, []); porProd.get(x.producto_id).push(x); });
-    resumen.precios_descartados = 0;
+    const descartar = [];
     for (const [pid, lista] of porProd) {
       const f = filaPorId.get(pid);
       if (!f || f.confirmado || !(f.compra > 0)) continue;
@@ -317,37 +350,45 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
         const v = vigentesPorProveedor(lista)[0];
         if (!v || Math.round(Number(v.precio)) >= compra) break;
         v.descartado = true;
-        v.motivo = "No aplicado en la planilla (más barato pero no se usó): revisar";
-        await v.save({ transaction: t });
-        resumen.precios_descartados++;
+        descartar.push(v.id);
       }
     }
+    if (descartar.length) {
+      await PrecioProveedor.update(
+        { descartado: true, motivo: "No aplicado en la planilla (más barato pero no se usó): revisar" },
+        { where: { id: descartar }, transaction: t }
+      );
+    }
+    resumen.precios_descartados = descartar.length;
 
     // Confirmados: la fecha de confirmación es posterior a todos los precios cargados
-    const ahora = new Date();
-    if (confirmar.length) {
-      await Producto.update({ fecha_confirmado: ahora }, { where: { id: confirmar.map((p) => p.id) }, transaction: t });
+    const confirmarIds = [...confirmadosCodigos].map((c) => idPorCodigo.get(c)).filter(Boolean);
+    if (confirmarIds.length) {
+      await Producto.update({ fecha_confirmado: new Date(Date.now() + 1000) }, { where: { id: confirmarIds }, transaction: t });
     }
 
     // Productos que no están en la planilla: si su N° choca con uno de la planilla, se renumeran al final
     const codigosPlanilla = new Set(filas.map((f) => f.codigo));
     const otros = await Producto.findAll({ where: { id: { [Op.notIn]: [...tocados] } }, order: [["id", "ASC"]], transaction: t });
     let siguiente = Math.max(0, ...filas.map((f) => f.codigo), ...otros.map((p) => Number(p.codigo) || 0)) + 1;
+    const renumerar = [];
     for (const p of otros) {
-      if (!p.codigo || codigosPlanilla.has(Number(p.codigo))) await p.update({ codigo: siguiente++, en_planilla: false }, { transaction: t });
+      if (!p.codigo || codigosPlanilla.has(Number(p.codigo))) renumerar.push({ ...p.toJSON(), codigo: siguiente++, en_planilla: false });
     }
+    if (renumerar.length) await Producto.bulkCreate(renumerar, { transaction: t, updateOnDuplicate: ["codigo", "en_planilla", "updatedAt"] });
 
     // Productos antiguos que no están en la planilla
     if (desactivarOtros) {
       const [n] = await Producto.update({ activo: false }, { where: { id: { [Op.notIn]: [...tocados] }, activo: true }, transaction: t });
       resumen.desactivados = n;
     } else {
-      resumen.fuera_de_planilla = await Producto.count({ where: { id: { [Op.notIn]: [...tocados] }, activo: true }, transaction: t });
+      resumen.fuera_de_planilla = otros.filter((p) => p.activo).length;
     }
 
     // Registro de cambios (una sola vez)
     const yaImportado = await RegistroCambio.count({ where: { motivo: MOTIVO_REGISTRO }, transaction: t });
     if (!yaImportado && registro.length) {
+      avisar("Guardando el registro de cambios de la planilla...");
       const filasReg = registro.map((r) => ({
         usuario: "planilla", tabla: "productos", registro_id: r.n ? idPorCodigo.get(r.n) || null : null,
         campo: r.campo, antes: r.antes, despues: r.despues, motivo: MOTIVO_REGISTRO,
@@ -363,7 +404,7 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
 
     resumen.productos_en_planilla = filas.length;
     resumen.con_precio = filas.filter((f) => f.compra > 0).length;
-    resumen.confirmados = confirmar.length;
+    resumen.confirmados = confirmarIds.length;
     resumen.cotizaciones_leidas = cotizaciones.length;
     resumen.extras_leidos = extras.length;
     return resumen;
