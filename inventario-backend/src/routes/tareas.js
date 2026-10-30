@@ -19,9 +19,9 @@ const horaChile = () => Number(new Date().toLocaleString("en-US", { timeZone: "A
 async function nuevasSinAvisar(params) {
   const filas = await Licitacion.findAll({
     where: { avisada: false, estado_interno: "nueva", [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] },
-    order: [["fecha_cierre", "ASC"]],
+    order: [["prioridad", "DESC"], ["fecha_cierre", "ASC"]],
   });
-  return filas.filter((l) => mp.enRegiones(l.region, params));
+  return filas.filter((l) => mp.visible(l, params));
 }
 
 async function enviarResumenLicitaciones() {
@@ -29,14 +29,18 @@ async function enviarResumenLicitaciones() {
   const nuevas = await nuevasSinAvisar(params);
   if (!nuevas.length) return { enviadas: 0 };
   const para = params.respaldo_email || process.env.SMTP_USER;
+  const pesos = (v) => `$${Math.round(Number(v)).toLocaleString("es-CL")}`;
   const linea = (l) => {
     const cierre = l.fecha_cierre ? new Date(l.fecha_cierre).toLocaleString("es-CL", { timeZone: "America/Santiago", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "sin fecha";
-    return `• ${l.codigo} — ${l.nombre}\n  ${l.organismo || ""}${l.comuna ? `, ${l.comuna}` : ""} · cierra ${cierre}${l.items?.length ? ` · ${l.items.length} productos` : ""}\n  https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${encodeURIComponent(l.codigo)}`;
+    const tipo = l.fuente === "compra_agil" ? "Compra Ágil" : "Licitación";
+    return `${l.prioridad ? "★ " : "• "}[${tipo}] ${l.codigo} — ${l.nombre}\n  ${l.organismo || ""} · cierra ${cierre}${l.monto_estimado ? ` · ${pesos(l.monto_estimado)}` : ""}${l.items?.length ? ` · ${l.items.length} productos` : ""}`
+      + `${l.motivo_relevancia ? `\n  ${l.relevancia != null ? `Calce ${l.relevancia}%: ` : ""}${l.motivo_relevancia}` : ""}\n  ${mp.fichaUrl(l)}`;
   };
+  const ca = nuevas.filter((l) => l.fuente === "compra_agil").length;
   await enviarCorreo({
     para,
-    asunto: `${nuevas.length} licitación(es) nueva(s) en Mercado Público`,
-    texto: `Buenos días. Estas son las licitaciones nuevas que calzan con nuestras palabras clave (${params.mp_regiones || "todo Chile"}):\n\n${nuevas.map(linea).join("\n\n")}\n\nRevísalas y cotízalas en el sistema, menú Licitaciones.`,
+    asunto: `${nuevas.length} oportunidad(es) nueva(s) en Mercado Público${ca ? ` (${ca} Compra Ágil)` : ""}`,
+    texto: `Buenos días. Estos son los procesos nuevos de ${params.mp_regiones || "todo Chile"} que calzan con lo que vendemos (★ = organismo prioritario):\n\n${nuevas.map(linea).join("\n\n")}\n\nRevísalos y cotízalos en el sistema, menú Licitaciones.`,
   });
   await Licitacion.update({ avisada: true }, { where: { codigo: nuevas.map((l) => l.codigo) } });
   return { enviadas: nuevas.length, para };

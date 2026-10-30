@@ -371,7 +371,76 @@ async function leerDocumentoProveedor(file, indice, usuario) {
   };
 }
 
+// --- Relevancia de procesos de Mercado Público ----------------------------------------
+const HERR_RELEVANCIA = {
+  name: "clasificar_procesos",
+  description: "Entrega, para cada proceso de compra, qué tanto calza con lo que vende la empresa.",
+  input_schema: {
+    type: "object",
+    properties: {
+      resultados: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            codigo: { type: "string" },
+            puntaje: { type: "integer", description: "0 a 100" },
+            motivo: { type: "string", description: "Máximo 12 palabras, en español" },
+          },
+          required: ["codigo", "puntaje", "motivo"],
+        },
+      },
+    },
+    required: ["resultados"],
+  },
+};
+
+const SYSTEM_RELEVANCIA = `Eres el encargado comercial de Inversiones Kenott, una empresa de la Región del Maule (Chile) que VENDE productos de ferretería y afines al Estado vía Mercado Público (Compra Ágil y licitaciones). No presta servicios técnicos especializados: vende y despacha productos.
+Recibirás el resumen de su catálogo y una lista de procesos de compra. Para cada proceso da un puntaje de 0 a 100 según qué parte de lo pedido podría vender Kenott con su catálogo o con productos del mismo rubro:
+- 80-100: casi todo lo pedido son productos del rubro (ferretería, construcción, eléctricos, gasfitería, pinturas, herramientas, maderas, fijaciones, EPP, aseo o similares del catálogo).
+- 50-79: una parte importante son productos del rubro, o productos parecidos que se consiguen con proveedores habituales de ferretería.
+- 20-49: poco relacionado; solo algún producto suelto del rubro.
+- 0-19: no es del rubro. Ej.: reparación o mantención de equipos médicos, industriales o vehículos; servicios profesionales; alimentos; medicamentos e insumos clínicos; computación; pasajes; arriendos; capacitaciones.
+Ojo: "reparación", "mantención" o "mejoramiento" de un EDIFICIO o recinto que pide MATERIALES sí puede ser del rubro; la reparación de un EQUIPO (médico, computacional, vehículo) no lo es.
+No inventes: juzga solo con lo que dice el proceso. El motivo debe decir qué se pide y por qué calza o no.`;
+
+// procesos: [{ codigo, nombre, descripcion, organismo, productos: [texto] }]
+// resumenCatalogo: texto con las categorías y ejemplos del catálogo
+async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistema" } = {}) {
+  const BLOQUE = 25;
+  const salida = new Map();
+  let uso = { input_tokens: 0, output_tokens: 0 };
+  for (let i = 0; i < procesos.length; i += BLOQUE) {
+    const parte = procesos.slice(i, i + BLOQUE);
+    const texto = parte.map((p) => {
+      const prods = (p.productos || []).filter(Boolean).slice(0, 12).map((x) => String(x).slice(0, 140));
+      return [
+        `### ${p.codigo}`,
+        `Nombre: ${String(p.nombre || "").slice(0, 300)}`,
+        p.descripcion ? `Descripción: ${String(p.descripcion).replace(/\s+/g, " ").slice(0, 500)}` : "",
+        p.organismo ? `Organismo: ${p.organismo}` : "",
+        prods.length ? `Productos: ${prods.join(" | ")}` : "",
+      ].filter(Boolean).join("\n");
+    }).join("\n\n");
+    const { datos, uso: u } = await llamar({
+      system: SYSTEM_RELEVANCIA,
+      contenido: [{ type: "text", text: `CATÁLOGO DE KENOTT (categorías con ejemplos):\n${resumenCatalogo}\n\nPROCESOS A CLASIFICAR (${parte.length}):\n\n${texto}` }],
+      herramienta: HERR_RELEVANCIA,
+      maxTokens: 4000,
+    });
+    uso = { input_tokens: uso.input_tokens + (u.input_tokens || 0), output_tokens: uso.output_tokens + (u.output_tokens || 0) };
+    for (const r of datos.resultados || []) {
+      const codigo = String(r.codigo || "").trim();
+      if (!parte.some((p) => p.codigo === codigo)) continue;
+      salida.set(codigo, { puntaje: Math.max(0, Math.min(100, Math.round(Number(r.puntaje) || 0))), motivo: String(r.motivo || "").slice(0, 250) });
+    }
+  }
+  if (procesos.length) await auditar({ tipo: "relevancia_mercado_publico", archivo: `${procesos.length} procesos`, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: Object.fromEntries(salida) });
+  return salida;
+}
+
 module.exports = {
+  clasificarProcesos,
   calzarLineas,
   iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, crearIndice, candidatos, normalizar, contenidoArchivo,
 };

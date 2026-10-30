@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/database");
 
-// Licitaciones de Mercado Público que calzan con nuestras palabras clave.
+// Procesos de Mercado Público (licitaciones y Compra Ágil) que pueden interesarnos.
 // estado_interno: nueva | revisada | descartada | cotizada
 const Licitacion = sequelize.define("Licitacion", {
   codigo: { type: DataTypes.STRING(40), primaryKey: true }, // CodigoExterno, ej. 2401-55-LE26
@@ -24,6 +24,11 @@ const Licitacion = sequelize.define("Licitacion", {
   nota: { type: DataTypes.TEXT, allowNull: true },
   cotizacion_id: { type: DataTypes.INTEGER, allowNull: true },
   avisada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // ya salió en el resumen de la mañana
+  fuente: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "licitacion" }, // licitacion | compra_agil
+  prioridad: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // organismo de la lista de prioridad
+  relevancia: { type: DataTypes.INTEGER, allowNull: true }, // 0-100: qué tanto calza con lo que vendemos (Claude)
+  motivo_relevancia: { type: DataTypes.STRING(255), allowNull: true },
+  descarte_auto: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // la descartó el sistema, no una persona
 }, {
   tableName: "licitaciones",
   timestamps: true,

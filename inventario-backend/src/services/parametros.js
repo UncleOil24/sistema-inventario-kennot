@@ -12,6 +12,14 @@ const DEFAULTS = {
   ultimo_respaldo: "",
   mp_palabras: "ferreteria, materiales de construccion, materiales construccion, cemento, pintura, gasfiteria, electricidad, electrico, herramientas, maderas, madera, fierro, mantencion, mantenimiento, reparacion, aseo y ornato, articulos de ferreteria, insumos de construccion, candados, cerrajeria, tuberia, pvc, ceramica, sanitario",
   mp_regiones: "Maule",             // separadas por coma; vacío = todo Chile
+  mp_compra_agil: "1",              // revisar también Compra Ágil (además de licitaciones)
+  mp_monto_minimo: "1000000",       // se ignoran procesos con monto informado menor a esto
+  // Organismos que van primero (basta con una parte del nombre, sin tildes)
+  mp_prioridad: "municipalidad de yerbas buenas, municipalidad de linares, municipalidad de san javier, municipalidad de curico, municipalidad de longavi, ejercito, regimiento, gendarmeria, carabineros, universidad de talca, universidad catolica del maule, gobierno regional del maule, serviu, vialidad, direccion de arquitectura, delegacion presidencial",
+  mp_excluir_organismos: "municipalidad de talca",
+  // Si el NOMBRE del proceso tiene alguna de estas, se descarta sola (se puede recuperar en "Descartadas")
+  mp_excluir_palabras: "multiparametro, equipo medico, equipos medicos, insumos medicos, insumos clinicos, medicamento, farmaco, dental, odontolog, laboratorio clinico, alimento, alimentacion, colacion, pasaje, alojamiento, hospedaje, capacitacion, curso, consultoria, asesoria, publicidad, arriendo de vehiculo, transporte de pasajeros, combustible, coffee, banqueteria",
+  mp_ca_ultima: "",                 // última revisión de Compra Ágil (para pedir solo lo nuevo)
   mp_ultima_sincronizacion: "",
   ultimo_resumen_licitaciones: "",
   // Datos de la empresa para el PDF de la cotización
