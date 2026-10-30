@@ -14,9 +14,8 @@ const PLANTILLA = path.join(__dirname, "../../plantillas/plantilla_cotizacion.xl
 const ESTADOS = ["borrador", "cotizacion", "aceptada", "rechazada", "vencida"];
 const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const sumarDias = (iso, dias) => {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + Number(dias));
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + Number(dias))).toISOString().slice(0, 10);
 };
 
 // El rol "usuario" no ve costos, proveedores ni márgenes

@@ -38,10 +38,10 @@ const estadoPago = (pagado, total) => {
   return "parcial";
 };
 
+// Hoy (en Chile) + días, como "AAAA-MM-DD"
 const sumarDias = (dias) => {
-  const d = new Date();
-  d.setDate(d.getDate() + Number(dias));
-  return d.toISOString().slice(0, 10);
+  const [y, m, d] = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + Number(dias))).toISOString().slice(0, 10);
 };
 
 // Wrapper para que cada handler responda errores de forma uniforme
