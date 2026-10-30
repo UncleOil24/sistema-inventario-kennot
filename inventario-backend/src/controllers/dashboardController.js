@@ -12,7 +12,7 @@ const { SQL_AVISO } = require("../services/precios");
 const { getParametros } = require("../services/parametros");
 const { wherePorSeguir } = require("./cotizacionesController");
 const Licitacion = require("../models/Licitacion");
-const { visible, fichaUrl } = require("../services/mercadoPublico");
+const { visible, fichaUrl, aplicarRelevanciaMinima } = require("../services/mercadoPublico");
 
 const n = (v) => Math.round(Number(v) || 0);
 const ymd = (d) => d.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
@@ -35,6 +35,7 @@ const getDashboard = handler(async (req, res) => {
 
   await Cotizacion.update({ estado: "vencida", motivo_estado: "Venció su validez" }, { where: { estado: "cotizacion", fecha_validez: { [Op.lt]: hoyStr } } });
   const params = await getParametros();
+  await aplicarRelevanciaMinima(params).catch((e) => console.error("relevancia mínima:", e.message));
   const limAntiguo = new Date(); limAntiguo.setMonth(limAntiguo.getMonth() - (Number(params.meses_precio_antiguo) || 6));
   const licNuevas = (await Licitacion.findAll({
     where: { estado_interno: "nueva", [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] },

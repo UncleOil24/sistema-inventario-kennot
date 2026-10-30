@@ -23,7 +23,6 @@ const BASE_CA = "https://api2.mercadopublico.cl/v2/compra-agil";
 const MAX_DETALLES = 80;      // licitaciones: detalles por revisión
 const MAX_DETALLES_CA = 40;   // Compra Ágil: detalles por revisión (cada uno tarda ~15 s)
 const MAX_PAGINAS_CA = 60;
-const UMBRAL_RELEVANCIA = 40;
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 const ticketConfigurado = () => !!process.env.MERCADOPUBLICO_TICKET;
 const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -133,6 +132,21 @@ const montoMinimo = (params) => Number(params.mp_monto_minimo) || 0;
 const montoBajo = (l, params) => l.monto_estimado != null && Number(l.monto_estimado) > 0 && Number(l.monto_estimado) < montoMinimo(params);
 const palabraProhibida = (nombre, params) => calzan(nombre, lista(params.mp_excluir_palabras))[0] || null;
 
+const relevanciaMinima = (params) => { const v = Number(params.mp_relevancia_minima); return Number.isFinite(v) ? v : 65; };
+
+// Aplica el % mínimo de calce a lo abierto: las "nuevas" bajo el mínimo pasan a descartadas automáticas, y si se bajó
+// el mínimo, las descartadas por calce que ahora lo cumplen vuelven a "nueva". Lo que decidió una persona no se toca.
+async function aplicarRelevanciaMinima(params) {
+  const min = relevanciaMinima(params);
+  const abierta = { [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] };
+  await Licitacion.update({ estado_interno: "descartada", descarte_auto: true },
+    { where: { estado_interno: "nueva", relevancia: { [Op.lt]: min }, ...abierta } });
+  const candidatas = await Licitacion.findAll({ where: { estado_interno: "descartada", descarte_auto: true, relevancia: { [Op.gte]: min }, ...abierta } });
+  for (const l of candidatas) {
+    if (visible(l, params) && !palabraProhibida(l.nombre, params)) await l.update({ estado_interno: "nueva", descarte_auto: false });
+  }
+}
+
 // ¿Se muestra en la lista y en el resumen? (los criterios se aplican también a lo que ya estaba guardado)
 const visible = (l, params) => enRegiones(l.region, params) && !organismoExcluido(l, params) && !montoBajo(l, params);
 
@@ -187,7 +201,7 @@ async function puntuarPendientes(avisar, params) {
     const n = notas.get(l.codigo);
     if (!n) continue;
     const cambios = { relevancia: n.puntaje, motivo_relevancia: n.motivo };
-    if (n.puntaje < UMBRAL_RELEVANCIA && l.estado_interno === "nueva") Object.assign(cambios, { estado_interno: "descartada", descarte_auto: true });
+    if (n.puntaje < relevanciaMinima(params) && l.estado_interno === "nueva") Object.assign(cambios, { estado_interno: "descartada", descarte_auto: true });
     await l.update(cambios);
   }
   return notas.size;
@@ -403,6 +417,7 @@ async function sincronizar({ onProgreso } = {}) {
   const abiertas = await Licitacion.findAll({ where: { [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] } });
   for (const l of abiertas) { const c = criterios(l, params); if (c) await l.update(c); }
   try { resumen.puntuadas = await puntuarPendientes(avisar, params); } catch (e) { errores.push(`Claude: ${e.message}`); }
+  await aplicarRelevanciaMinima(params);
 
   // Las que ya cerraron dejan de mostrarse como abiertas; las descartadas solas y cerradas hace un mes se borran
   await Licitacion.update({ estado: "Cerrada" }, { where: { fecha_cierre: { [Op.lt]: new Date() }, estado: { [Op.notIn]: ["Cerrada", "Adjudicada", "Desierta", "Revocada"] } } });
@@ -432,5 +447,5 @@ const fichaUrl = (l) => (l.fuente === "compra_agil"
 
 module.exports = {
   fecha, fechaCA, sincronizar, ticketConfigurado, enRegiones, visible, pedir, pedirCA, desdeDetalle, desdeDetalleCA, desdeListadoCA,
-  cargarDetalle, fichaUrl, codigosRegion, criterios, calzan,
+  cargarDetalle, fichaUrl, aplicarRelevanciaMinima, codigosRegion, criterios, calzan,
 };

@@ -146,6 +146,7 @@ export default function Config({ notify }) {
             <label className="check"><input type="checkbox" checked={params.mp_compra_agil !== "0"} onChange={(e) => setParams({ ...params, mp_compra_agil: e.target.checked ? "1" : "0" })} />Revisar también Compra Ágil</label>
           </div>
           {texto("mp_monto_minimo", "Monto mínimo ($): se ignoran los procesos con monto menor")}
+          {texto("mp_relevancia_minima", "Calce mínimo con el catálogo (%): lo que Claude puntúa más bajo va a \"Descartadas\"")}
           <div className="field">
             <label>Organismos prioritarios (salen primero con ★; basta una parte del nombre)</label>
             <textarea className="textarea" rows={3} value={params.mp_prioridad || ""} onChange={(e) => setParams({ ...params, mp_prioridad: e.target.value })} />

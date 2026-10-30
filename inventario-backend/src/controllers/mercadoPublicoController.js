@@ -8,6 +8,7 @@ const { getParametros } = require("../services/parametros");
 // GET /api/mercado-publico/licitaciones?vista=nuevas|abiertas|cotizadas|descartadas|todas&fuente=compra_agil|licitacion&busqueda=&todas_regiones=1
 const listar = handler(async (req, res) => {
   const params = await getParametros();
+  await mp.aplicarRelevanciaMinima(params);
   const { vista = "abiertas", busqueda, fuente } = req.query;
   const where = {};
   if (fuente === "compra_agil" || fuente === "licitacion") where.fuente = fuente;
@@ -34,6 +35,7 @@ const listar = handler(async (req, res) => {
       ultima_sincronizacion: params.mp_ultima_sincronizacion || null,
       regiones: params.mp_regiones,
       monto_minimo: Number(params.mp_monto_minimo) || 0,
+      relevancia_minima: Number(params.mp_relevancia_minima) || 0,
       compra_agil: params.mp_compra_agil !== "0",
       sincronizando: trabajos.ultimo("mercado_publico"),
     },

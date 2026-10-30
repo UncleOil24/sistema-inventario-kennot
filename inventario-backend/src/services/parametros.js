@@ -13,7 +13,8 @@ const DEFAULTS = {
   mp_palabras: "ferreteria, materiales de construccion, materiales construccion, cemento, pintura, gasfiteria, electricidad, electrico, herramientas, maderas, madera, fierro, mantencion, mantenimiento, reparacion, aseo y ornato, articulos de ferreteria, insumos de construccion, candados, cerrajeria, tuberia, pvc, ceramica, sanitario",
   mp_regiones: "Maule",             // separadas por coma; vacío = todo Chile
   mp_compra_agil: "1",              // revisar también Compra Ágil (además de licitaciones)
-  mp_monto_minimo: "1000000",       // se ignoran procesos con monto informado menor a esto
+  mp_monto_minimo: "1000000",
+  mp_relevancia_minima: "65",       // % de calce con el catálogo (Claude) para mostrar un proceso       // se ignoran procesos con monto informado menor a esto
   // Organismos que van primero (basta con una parte del nombre, sin tildes)
   mp_prioridad: "municipalidad de yerbas buenas, municipalidad de linares, municipalidad de san javier, municipalidad de curico, municipalidad de longavi, ejercito, regimiento, gendarmeria, carabineros, universidad de talca, universidad catolica del maule, gobierno regional del maule, serviu, vialidad, direccion de arquitectura, delegacion presidencial",
   mp_excluir_organismos: "municipalidad de talca",
