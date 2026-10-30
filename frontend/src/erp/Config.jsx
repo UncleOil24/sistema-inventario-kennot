@@ -22,23 +22,39 @@ export default function Config({ notify }) {
     finally { setGuardando(false); }
   };
 
+  const [avance, setAvance] = useState(null);
+
+  // Consulta el avance de una importación en segundo plano hasta que termine
+  const seguir = async (id) => {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      let t;
+      try { t = await api(`/precios/importar-planilla/${id}`); }
+      catch (e) { notify(e.message, "danger"); setImportando(false); setAvance(null); return; }
+      setAvance(t);
+      if (t.estado === "listo") { setResultado(t.resumen); invalidarProductos(); notify("✓ Planilla importada"); break; }
+      if (t.estado === "error") { notify(`Error al importar: ${t.error}`, "danger"); break; }
+    }
+    setImportando(false);
+  };
+
   const importar = async () => {
     if (!archivo) return;
     if (!confirm("La importación reemplaza el precio vigente, opciones y REVISAR de cada producto de la planilla. El historial de precios no se duplica. ¿Continuar?")) return;
     setImportando(true);
     setResultado(null);
+    setAvance({ estado: "corriendo", paso: "Subiendo el archivo...", segundos: 0 });
     try {
       const fd = new FormData();
       fd.append("archivo", archivo);
       if (desactivar) fd.append("desactivar_otros", "1");
       const res = await authFetch(`${API_URL}/api/precios/importar-planilla`, { method: "POST", body: fd });
       const data = await res.json();
+      // Si ya había una importación corriendo, se sigue esa
+      if (res.status === 409 && data.data?.id) { notify(data.error, "danger"); return seguir(data.data.id); }
       if (!data.ok) throw new Error(data.error || "Error al importar");
-      setResultado(data.data);
-      invalidarProductos();
-      notify("✓ Planilla importada");
-    } catch (e) { notify(e.message, "danger"); }
-    finally { setImportando(false); }
+      await seguir(data.data.id);
+    } catch (e) { notify(e.message, "danger"); setImportando(false); setAvance(null); }
   };
 
   const campo = (k, label, ayuda, tipo = "number") => (
@@ -111,6 +127,12 @@ export default function Config({ notify }) {
           Desactivar los productos que no están en la planilla (no se borran)
         </label>
         <div><button className="btn btn-primary" disabled={!archivo || importando} onClick={importar}>{importando ? <><span className="spinner"></span>Importando...</> : "Importar"}</button></div>
+        {avance && avance.estado !== "listo" && (
+          <div className={avance.estado === "error" ? "login-error" : "aviso"} style={{ marginBottom: 0 }}>
+            {avance.estado === "error" ? `Error: ${avance.error}` : <><span className="spinner"></span>{avance.paso} ({avance.segundos || 0} s)</>}
+          </div>
+        )}
+        {resultado && avance?.segundos != null && <div className="mini">Terminó en {avance.segundos} segundos.</div>}
         {resultado && (
           <table className="table table-compacta">
             <tbody>
