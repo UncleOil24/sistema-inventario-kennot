@@ -3,16 +3,17 @@ import Dashboard from "./erp/Dashboard";
 import Ventas from "./erp/Ventas";
 import Compras from "./erp/Compras";
 import Proveedores from "./erp/Proveedores";
-import Kardex from "./erp/Kardex";
-import { Estado } from "./erp/ui";
-import { api, authFetch, getToken, setToken } from "./erp/lib";
+import Catalogo from "./erp/Catalogo";
+import Cotizador from "./erp/Cotizador";
+import Cotizaciones from "./erp/Cotizaciones";
+import Clientes from "./erp/Clientes";
+import Gastos from "./erp/Gastos";
+import Reportes from "./erp/Reportes";
+import Config from "./erp/Config";
+import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
 import Usuarios from "./erp/Usuarios";
 import CambiarPassword from "./erp/CambiarPassword";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
-const CATEGORIAS = ["Todas", "Ferretería", "Plomería", "Construcción", "Eléctrico", "Pintura", "Jardín"];
-const fmt = (n) => `$${Number(n).toLocaleString("es-CL")}`;
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
@@ -199,6 +200,39 @@ const styles = `
     .main { padding: 1rem; }
     .fields-row { grid-template-columns: 1fr; }
   }
+
+  /* ---------- Ventas y cotizaciones ---------- */
+  .col-desc { min-width: 300px; }
+  .textarea { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; font-family: var(--sans); font-size: 12px; color: var(--text); outline: none; width: 100%; resize: vertical; }
+  .select-linea { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-family: var(--mono); font-size: 11px; color: var(--text); max-width: 340px; width: 100%; }
+  .nav-btn { padding: 6px 10px; }
+  .fila-alerta td { background: rgba(232,197,71,0.13); }
+  .link { background: none; border: none; color: var(--info); cursor: pointer; font-family: var(--mono); font-size: 11px; padding: 2px 4px; text-align: left; }
+  .link:hover:not(:disabled) { text-decoration: underline; }
+  .link:disabled { color: var(--text3); cursor: not-allowed; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 5px 12px; font-family: var(--mono); font-size: 11px; color: var(--text2); cursor: pointer; }
+  .chip:hover { border-color: var(--border2); color: var(--text); }
+  .chip.activo { border-color: var(--accent); color: var(--accent); background: rgba(232,197,71,0.08); }
+  .chip strong { margin-left: 4px; color: var(--text); }
+  .resumen-utilidad { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .resumen-utilidad > div, .vigente > div { display: flex; flex-direction: column; gap: 2px; }
+  .resumen-utilidad strong, .vigente strong { font-family: var(--mono); font-size: 16px; color: var(--text); }
+  .vigente { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .vigente-principal strong { font-size: 20px; color: var(--accent); }
+  .vigente-principal .estado { align-self: flex-start; margin-top: 4px; }
+  .ok-confirm { color: var(--success); margin-left: 4px; font-size: 11px; }
+  .revisar-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fields-row.tres { grid-template-columns: 1fr 1fr 1fr; }
+  tfoot td { border-top: 1px solid var(--border2); background: var(--surface2); }
+  tr.clickable { cursor: pointer; }
+  @media (max-width: 768px) { .vigente { grid-template-columns: 1fr 1fr; } .fields-row.tres { grid-template-columns: 1fr; } }
+  @media print {
+    body * { visibility: hidden; }
+    .cuadro-imprimible, .cuadro-imprimible * { visibility: visible; color: #000 !important; background: #fff !important; }
+    .cuadro-imprimible { position: absolute; left: 0; top: 0; width: 100%; }
+    .cuadro-imprimible button.link, .cuadro-imprimible .btn { display: none; }
+  }
 `;
 
 // Raíz: decide entre pantalla de login y el sistema
@@ -239,320 +273,88 @@ export default function Root() {
   );
 }
 
+const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] };
+
 function App({ usuario, onLogout }) {
   const esAdmin = usuario.rol === "admin";
   const [menuUsuario, setMenuUsuario] = useState(false);
   const [cambiarPass, setCambiarPass] = useState(false);
   const [view, setView] = useState("dashboard");
-  const [productos, setProductos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [guardando, setGuardando] = useState(false);
-  const [exportando, setExportando] = useState(false);
-  const [busqueda, setBusqueda] = useState("");
-  const [categoriaFiltro, setCategoriaFiltro] = useState("Todas");
-  const [sortField, setSortField] = useState("id");
-  const [sortDir, setSortDir] = useState("asc");
-  const [modal, setModal] = useState(null);
-  const [productoActual, setProductoActual] = useState(null);
-  const [form, setForm] = useState({});
-  const [cotizacion, setCotizacion] = useState([]);
-  const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
-  const [nombreCotizacion, setNombreCotizacion] = useState("");
+  const [notif, setNotif] = useState(null);
   const [clientes, setClientes] = useState([]);
   const [loadingClientes, setLoadingClientes] = useState(false);
-  const [formCliente, setFormCliente] = useState({});
-  const [clienteActual, setClienteActual] = useState(null);
-  const [modalCliente, setModalCliente] = useState(null);
-  const [historial, setHistorial] = useState([]);
-  const [loadingHistorial, setLoadingHistorial] = useState(false);
-  const [busquedaHistorial, setBusquedaHistorial] = useState("");
-  const [historialDetalle, setHistorialDetalle] = useState(null);
-  const [notif, setNotif] = useState(null);
   const [proveedores, setProveedores] = useState([]);
   const [loadingProveedores, setLoadingProveedores] = useState(false);
-  const [kardexProducto, setKardexProducto] = useState(null);
+  const [borrador, setBorrador] = useState(BORRADOR_VACIO); // cotización en armado
   const [ventaAbrir, setVentaAbrir] = useState(null);
+  const [ordenAbrir, setOrdenAbrir] = useState(null);
 
-  // useCallback: las vistas del ERP la usan como dependencia
   const showNotif = useCallback((msg, type = "success") => {
     setNotif({ msg, type });
-    setTimeout(() => setNotif(null), type === "danger" ? 4000 : 2500);
+    setTimeout(() => setNotif(null), type === "danger" ? 4500 : 2800);
   }, []);
 
+  const fetchClientes = useCallback(async () => {
+    setLoadingClientes(true);
+    try { setClientes(await api("/clientes")); }
+    catch { showNotif("Error al cargar clientes", "danger"); }
+    finally { setLoadingClientes(false); }
+  }, [showNotif]);
   const fetchProveedores = useCallback(async () => {
     setLoadingProveedores(true);
     try { setProveedores(await api("/proveedores")); }
     catch { showNotif("Error al cargar proveedores", "danger"); }
     finally { setLoadingProveedores(false); }
   }, [showNotif]);
+  useEffect(() => { fetchClientes(); fetchProveedores(); }, [fetchClientes, fetchProveedores]);
 
-  useEffect(() => { fetchProveedores(); }, [fetchProveedores]);
-
-  const fetchProductos = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (busqueda) params.append("busqueda", busqueda);
-      if (categoriaFiltro !== "Todas") params.append("categoria", categoriaFiltro);
-      params.append("sort", sortField);
-      params.append("dir", sortDir);
-      const res = await authFetch(`${API_URL}/api/productos?${params}`);
-      const data = await res.json();
-      if (data.ok) setProductos(data.data);
-    } catch { showNotif("Error al cargar productos", "danger"); }
-    finally { setLoading(false); }
-  }, [busqueda, categoriaFiltro, sortField, sortDir, showNotif]);
-
-  useEffect(() => {
-    const delay = setTimeout(fetchProductos, 300);
-    return () => clearTimeout(delay);
-  }, [fetchProductos]);
-
-  const fetchClientes = useCallback(async () => {
-    setLoadingClientes(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/clientes`);
-      const data = await res.json();
-      if (data.ok) setClientes(data.data);
-    } catch { showNotif("Error al cargar clientes", "danger"); }
-    finally { setLoadingClientes(false); }
-  }, [showNotif]);
-
-  useEffect(() => { fetchClientes(); }, [fetchClientes]);
-
-  const fetchHistorial = useCallback(async () => {
-    setLoadingHistorial(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/cotizaciones`);
-      const data = await res.json();
-      if (data.ok) setHistorial(data.data);
-    } catch { showNotif("Error al cargar historial", "danger"); }
-    finally { setLoadingHistorial(false); }
-  }, [showNotif]);
-
-  useEffect(() => {
-    if (view === "historial") fetchHistorial();
-  }, [view, fetchHistorial]);
-
-  const totalProductos = productos.length;
-  const totalStock = productos.reduce((s, p) => s + Number(p.stock), 0);
-  const valorInventario = productos.reduce((s, p) => s + Number(p.precio_venta) * Number(p.stock), 0);
-  const bajoMinimo = (p) => Number(p.stock) <= Number(p.stock_minimo ?? 30);
-  const stockBajo = productos.filter(bajoMinimo).length;
-
-  const toggleSort = (field) => {
-    if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortField(field); setSortDir("asc"); }
-  };
-  const sortIcon = (field) => sortField === field ? (sortDir === "asc" ? " ↑" : " ↓") : "";
-
-  const abrirNuevo = () => {
-    setForm({ nombre: "", categoria: "Ferretería", precio_compra: "", precio_venta: "", stock: "", stock_minimo: 30, unidad: "unidad", proveedor: "", contacto: "" });
-    setModal("nuevo");
-  };
-  const abrirEditar = (p) => { setProductoActual(p); setForm({ ...p }); setModal("editar"); };
-  const abrirEliminar = (p) => { setProductoActual(p); setModal("eliminar"); };
-  const cerrarModal = () => { setModal(null); setProductoActual(null); };
-
-  const guardarNuevo = async () => {
-    if (!form.nombre || !form.precio_venta || !form.stock) return;
-    setGuardando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/productos`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock), stock_minimo: Number(form.stock_minimo ?? 30) }),
-      });
-      const data = await res.json();
-      if (data.ok) { cerrarModal(); fetchProductos(); showNotif("✓ Producto agregado"); }
-    } catch { showNotif("Error al agregar producto", "danger"); }
-    finally { setGuardando(false); }
+  // Agregar al cotizador desde el catálogo
+  const enCotizacion = (id) => borrador.items.some((i) => i.producto_id === id);
+  const cotizarProducto = (p) => {
+    if (enCotizacion(p.id)) { showNotif("Ya está en la cotización"); return; }
+    const cliente = clientes.find((c) => String(c.id) === String(borrador.cliente_id));
+    const tipo = borrador.tipo_precio || cliente?.tipo || "convenio";
+    setBorrador((b) => ({ ...b, items: [...b.items, lineaDesdeProducto(p, tipo)] }));
+    showNotif("✓ Agregado a la cotización");
   };
 
-  const guardarEditar = async () => {
-    setGuardando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/productos/${productoActual.id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, precio_compra: Number(form.precio_compra), precio_venta: Number(form.precio_venta), stock: Number(form.stock), stock_minimo: Number(form.stock_minimo ?? 30) }),
-      });
-      const data = await res.json();
-      if (data.ok) { cerrarModal(); fetchProductos(); showNotif("✓ Producto actualizado"); }
-    } catch { showNotif("Error al actualizar", "danger"); }
-    finally { setGuardando(false); }
+  const irA = (vista, id) => {
+    if (vista === "ventas" && id) setVentaAbrir(id);
+    setView(vista);
   };
+  const verVenta = (id) => { setVentaAbrir(id); setView("ventas"); };
+  const verOrden = (id) => { setOrdenAbrir(id); setView("compras"); };
 
-  const confirmarEliminar = async () => {
-    setGuardando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/productos/${productoActual.id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.ok) { setCotizacion(prev => prev.filter(c => c.id !== productoActual.id)); cerrarModal(); fetchProductos(); showNotif("Producto eliminado", "danger"); }
-    } catch { showNotif("Error al eliminar", "danger"); }
-    finally { setGuardando(false); }
-  };
-
-  const abrirNuevoCliente = () => { setFormCliente({ nombre: "", rut: "", telefono: "", email: "", direccion: "" }); setModalCliente("nuevo"); };
-  const abrirEditarCliente = (c) => { setClienteActual(c); setFormCliente({ ...c }); setModalCliente("editar"); };
-  const abrirEliminarCliente = (c) => { setClienteActual(c); setModalCliente("eliminar"); };
-  const cerrarModalCliente = () => { setModalCliente(null); setClienteActual(null); };
-
-  const guardarNuevoCliente = async () => {
-    if (!formCliente.nombre) return;
-    setGuardando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/clientes`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formCliente),
-      });
-      const data = await res.json();
-      if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("✓ Cliente agregado"); }
-    } catch { showNotif("Error al agregar cliente", "danger"); }
-    finally { setGuardando(false); }
-  };
-
-  const guardarEditarCliente = async () => {
-    setGuardando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/clientes/${clienteActual.id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formCliente),
-      });
-      const data = await res.json();
-      if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("✓ Cliente actualizado"); }
-    } catch { showNotif("Error al actualizar", "danger"); }
-    finally { setGuardando(false); }
-  };
-
-  const confirmarEliminarCliente = async () => {
-    setGuardando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/clientes/${clienteActual.id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.ok) { cerrarModalCliente(); fetchClientes(); showNotif("Cliente eliminado", "danger"); }
-    } catch { showNotif("Error al eliminar", "danger"); }
-    finally { setGuardando(false); }
-  };
-
-  const agregarCotizacion = (p) => {
-    setCotizacion(prev => {
-      if (prev.find(c => c.id === p.id)) { showNotif("Ya está en la cotización"); return prev; }
-      showNotif("✓ Agregado a cotización");
-      return [...prev, { ...p, cantidad: 1 }];
-    });
-  };
-  const setCantidad = (id, val) => {
-    const n = Math.max(1, Number(val) || 1);
-    setCotizacion(prev => prev.map(c => c.id === id ? { ...c, cantidad: n } : c));
-  };
-  const quitarCotizacion = (id) => setCotizacion(prev => prev.filter(c => c.id !== id));
-  const limpiarCotizacion = () => { setCotizacion([]); setClienteSeleccionado(null); setNombreCotizacion(""); };
-
-  const subtotal = cotizacion.reduce((s, c) => s + Number(c.precio_venta) * c.cantidad, 0);
-  const iva = Math.round(subtotal * 0.19);
-  const total = subtotal + iva;
-
-  const exportarExcel = async () => {
-    if (cotizacion.length === 0) return;
-    setExportando(true);
-    try {
-      const res = await authFetch(`${API_URL}/api/cotizaciones/export`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cliente: clienteSeleccionado ? clienteSeleccionado.nombre : "",
-          nombre_cotizacion: nombreCotizacion || `Cotización ${new Date().toLocaleDateString("es-CL")}`,
-          items: cotizacion.map(c => ({ id: c.id, nombre: c.nombre, unidad: c.unidad, precio: Number(c.precio_venta), cantidad: c.cantidad })),
-          guardar: true,
-        }),
-      });
-      if (!res.ok) throw new Error("Error en el servidor");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${nombreCotizacion || "cotizacion"}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showNotif("✓ Excel descargado");
-      limpiarCotizacion();
-    } catch { showNotif("Error al exportar Excel", "danger"); }
-    finally { setExportando(false); }
-  };
-
-  const historialFiltrado = historial.filter(h => {
-    const q = busquedaHistorial.toLowerCase();
-    return !q ||
-      (h.nombre_cotizacion || "").toLowerCase().includes(q) ||
-      (h.cliente || "").toLowerCase().includes(q) ||
-      (h.numero || "").includes(q);
-  });
-
-  const reexportarCotizacion = async (id, nombre) => {
-    try {
-      const res = await authFetch(`${API_URL}/api/cotizaciones/reexport/${id}`, { method: "POST" });
-      if (!res.ok) throw new Error("Error");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${nombre || "cotizacion"}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showNotif("✓ Excel descargado");
-    } catch { showNotif("Error al descargar", "danger"); }
-  };
-
-  const eliminarCotizacionHistorial = async (id) => {
-    if (!confirm("¿Eliminar esta cotización?")) return;
-    try {
-      const res = await authFetch(`${API_URL}/api/cotizaciones/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.ok) { fetchHistorial(); showNotif("Cotización eliminada", "danger"); }
-    } catch { showNotif("Error al eliminar", "danger"); }
-  };
-
-  const convertirEnVenta = async (h) => {
-    const dias = prompt(`Convertir "${h.nombre_cotizacion || h.numero}" en venta.\nSe descontará el stock.\n\nDías de crédito (0 = contado):`, "30");
-    if (dias === null) return;
-    try {
-      const venta = await api(`/ventas/desde-cotizacion/${h.id}`, {
-        method: "POST",
-        body: Number(dias) > 0 ? { dias_credito: Number(dias) } : { pagada_al_contado: true },
-      });
-      showNotif(`✓ Venta ${venta.numero} creada — stock descontado`);
-      fetchHistorial();
-      fetchProductos();
-      setVentaAbrir(venta.id);
-      setView("ventas");
-    } catch (e) { showNotif(e.message, "danger"); }
-  };
-
-  const inCot = (id) => cotizacion.some(c => c.id === id);
+  const nav = (id, texto, extra) => (
+    <button className={`nav-btn ${view === id ? "active" : ""}`} onClick={() => setView(id)}>{texto}{extra}</button>
+  );
 
   return (
     <>
       <div className="app">
         <header className="header">
-          <div className="header-brand"><span>▣</span> INVENTARIO <span>/</span> KENNOT</div>
+          <div className="header-brand"><span>▣</span> KENOTT <span>/</span> VENTAS</div>
           <nav className="header-nav">
-            <button className={`nav-btn ${view === "dashboard" ? "active" : ""}`} onClick={() => setView("dashboard")}>Dashboard</button>
-            <button className={`nav-btn ${view === "inventario" ? "active" : ""}`} onClick={() => setView("inventario")}>Inventario</button>
+            {nav("dashboard", "Inicio")}
+            {nav("catalogo", "Catálogo")}
             <span className="nav-sep" />
-            <button className={`nav-btn ${view === "ventas" ? "active" : ""}`} onClick={() => setView("ventas")}>Ventas</button>
-            <button className={`nav-btn ${view === "cotizacion" ? "active" : ""}`} onClick={() => setView("cotizacion")}>
-              Cotización {cotizacion.length > 0 && <span className="badge">{cotizacion.length}</span>}
-            </button>
-            <button className={`nav-btn ${view === "historial" ? "active" : ""}`} onClick={() => setView("historial")}>Historial</button>
-            <button className={`nav-btn ${view === "clientes" ? "active" : ""}`} onClick={() => setView("clientes")}>Clientes</button>
+            {nav("cotizar", "Cotizar", borrador.items.length > 0 && <span className="badge">{borrador.items.length}</span>)}
+            {nav("cotizaciones", "Cotizaciones")}
+            {nav("ventas", "Ventas")}
+            {nav("clientes", "Clientes")}
             <span className="nav-sep" />
-            <button className={`nav-btn ${view === "compras" ? "active" : ""}`} onClick={() => setView("compras")}>Compras</button>
-            <button className={`nav-btn ${view === "proveedores" ? "active" : ""}`} onClick={() => setView("proveedores")}>Proveedores</button>
+            {nav("compras", "Compras")}
+            {nav("proveedores", "Proveedores")}
+            {esAdmin && nav("gastos", "Gastos")}
             {esAdmin && <>
               <span className="nav-sep" />
-              <button className={`nav-btn ${view === "usuarios" ? "active" : ""}`} onClick={() => setView("usuarios")}>Usuarios</button>
+              {nav("reportes", "Reportes")}
+              {nav("config", "Config.")}
+              {nav("usuarios", "Usuarios")}
             </>}
           </nav>
           <div className="user-menu">
-            <button className="user-btn" onClick={() => setMenuUsuario(m => !m)}>
+            <button className="user-btn" onClick={() => setMenuUsuario((m) => !m)}>
               <span className="user-avatar">{usuario.nombre.trim().charAt(0).toUpperCase()}</span>
               <span className="user-nombre">{usuario.nombre.split(" ")[0]}</span>
               <span className={`rol-badge rol-${usuario.rol}`}>{usuario.rol}</span>
@@ -574,421 +376,38 @@ function App({ usuario, onLogout }) {
         </header>
 
         <main className="main">
-
-          {view === "inventario" && (
-            <>
-              <div className="stats">
-                <div className="stat-card"><div className="stat-label">Productos</div><div className="stat-value">{totalProductos}</div></div>
-                <div className="stat-card"><div className="stat-label">Unidades totales</div><div className="stat-value">{totalStock.toLocaleString("es-CL")}</div></div>
-                <div className="stat-card"><div className="stat-label">Valor inventario</div><div className="stat-value accent">{fmt(valorInventario)}</div></div>
-                <div className="stat-card"><div className="stat-label">Bajo stock mínimo</div><div className="stat-value" style={{color: stockBajo > 0 ? "var(--danger)" : "var(--success)"}}>{stockBajo}</div></div>
-              </div>
-              <div className="toolbar">
-                <div className="search-wrap">
-                  <span className="search-icon">⌕</span>
-                  <input className="search-input" placeholder="Buscar por nombre, ID o categoría..." value={busqueda} onChange={e => setBusqueda(e.target.value)} />
-                </div>
-                <select className="filter-select" value={categoriaFiltro} onChange={e => setCategoriaFiltro(e.target.value)}>
-                  {CATEGORIAS.map(c => <option key={c}>{c}</option>)}
-                </select>
-                <button className="btn btn-primary" onClick={abrirNuevo}>+ Nuevo producto</button>
-              </div>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th onClick={() => toggleSort("id")}>ID{sortIcon("id")}</th>
-                      <th onClick={() => toggleSort("nombre")}>Nombre{sortIcon("nombre")}</th>
-                      <th onClick={() => toggleSort("categoria")}>Categoría{sortIcon("categoria")}</th>
-                      {esAdmin && <th onClick={() => toggleSort("precio_compra")}>P. Compra{sortIcon("precio_compra")}</th>}
-                      <th onClick={() => toggleSort("precio_venta")}>P. Venta{sortIcon("precio_venta")}</th>
-                      <th onClick={() => toggleSort("stock")}>Stock{sortIcon("stock")}</th>
-                      <th>Unidad</th>
-                      <th onClick={() => toggleSort("proveedor")}>Proveedor{sortIcon("proveedor")}</th>
-                      <th>Contacto</th>
-                      <th>Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr className="empty-row"><td colSpan={esAdmin ? 10 : 9}><span className="spinner"></span>Cargando...</td></tr>
-                    ) : productos.length === 0 ? (
-                      <tr className="empty-row"><td colSpan={esAdmin ? 10 : 9}>// sin resultados</td></tr>
-                    ) : productos.map(p => (
-                      <tr key={p.id}>
-                        <td className="id-cell">#{String(p.id).padStart(4, "0")}</td>
-                        <td>{p.nombre}</td>
-                        <td><span className="cat-badge">{p.categoria}</span></td>
-                        {esAdmin && <td className="price-cell compra">{fmt(p.precio_compra)}</td>}
-                        <td className="price-cell">{fmt(p.precio_venta)}</td>
-                        <td className={`stock-cell ${bajoMinimo(p) ? "stock-low" : "stock-ok"}`} title={`Mínimo: ${p.stock_minimo ?? 30}`}>{p.stock}</td>
-                        <td style={{color:"var(--text3)", fontFamily:"var(--mono)", fontSize:"11px"}}>{p.unidad}</td>
-                        <td style={{fontSize:"12px"}}>{p.proveedor || <span style={{color:"var(--text3)"}}>—</span>}</td>
-                        <td style={{fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text2)"}}>{p.contacto || <span style={{color:"var(--text3)"}}>—</span>}</td>
-                        <td>
-                          <div className="actions">
-                            <button className="btn btn-ghost btn-sm" onClick={() => abrirEditar(p)}>Editar</button>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setKardexProducto(p)} title="Movimientos y ajuste de stock">Kardex</button>
-                            <button className={`btn btn-sm ${inCot(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => agregarCotizacion(p)}>
-                              {inCot(p.id) ? "✓ En cot." : "+ Cotizar"}
-                            </button>
-                            {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => abrirEliminar(p)}>✕</button>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{marginTop:"10px", fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text3)"}}>{productos.length} productos</div>
-            </>
+          {view === "dashboard" && <Dashboard notify={showNotif} irA={irA} esAdmin={esAdmin} />}
+          {view === "catalogo" && (
+            <Catalogo esAdmin={esAdmin} notify={showNotif} enCotizacion={enCotizacion} onCotizar={cotizarProducto} proveedores={proveedores} />
           )}
-
-          {view === "clientes" && (
-            <>
-              <div className="toolbar">
-                <div style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)"}}>{clientes.length} clientes registrados</div>
-                <button className="btn btn-primary" onClick={abrirNuevoCliente}>+ Nuevo cliente</button>
-              </div>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr><th>ID</th><th>Nombre</th><th>RUT</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Acciones</th></tr>
-                  </thead>
-                  <tbody>
-                    {loadingClientes ? (
-                      <tr className="empty-row"><td colSpan={7}><span className="spinner"></span>Cargando...</td></tr>
-                    ) : clientes.length === 0 ? (
-                      <tr className="empty-row"><td colSpan={7}>// sin clientes registrados</td></tr>
-                    ) : clientes.map(c => (
-                      <tr key={c.id}>
-                        <td className="id-cell">#{String(c.id).padStart(4, "0")}</td>
-                        <td style={{fontWeight:"500"}}>{c.nombre}</td>
-                        <td style={{fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text2)"}}>{c.rut || "—"}</td>
-                        <td style={{fontFamily:"var(--mono)", fontSize:"11px", color:"var(--text2)"}}>{c.telefono || "—"}</td>
-                        <td style={{fontSize:"12px", color:"var(--text2)"}}>{c.email || "—"}</td>
-                        <td style={{fontSize:"12px", color:"var(--text3)"}}>{c.direccion || "—"}</td>
-                        <td>
-                          <div className="actions">
-                            <button className="btn btn-ghost btn-sm" onClick={() => abrirEditarCliente(c)}>Editar</button>
-                            {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => abrirEliminarCliente(c)}>✕</button>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+          {view === "cotizar" && (
+            <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={esAdmin} notify={showNotif}
+              irAClientes={() => setView("clientes")} onGuardada={() => setView("cotizaciones")} />
           )}
-
-          {view === "cotizacion" && (
-            <>
-              <div className="toolbar">
-                <div className="field" style={{flex:1, minWidth:"200px"}}>
-                  <label style={{fontFamily:"var(--mono)", fontSize:"10px", color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em"}}>Cliente</label>
-                  <select className="filter-select" style={{width:"100%"}} value={clienteSeleccionado?.id || ""}
-                    onChange={e => { const c = clientes.find(c => c.id === Number(e.target.value)); setClienteSeleccionado(c || null); }}>
-                    <option value="">— Seleccionar cliente —</option>
-                    {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                  </select>
-                </div>
-                <div className="field" style={{flex:1, minWidth:"200px"}}>
-                  <label style={{fontFamily:"var(--mono)", fontSize:"10px", color:"var(--text3)", textTransform:"uppercase", letterSpacing:"0.08em"}}>Nombre cotización</label>
-                  <input className="search-input" placeholder="Ej: Cotización 1 Regimiento Linares" value={nombreCotizacion} onChange={e => setNombreCotizacion(e.target.value)} style={{paddingLeft:"12px"}} />
-                </div>
-                <button className="btn btn-ghost" onClick={limpiarCotizacion}>Limpiar</button>
-                <button className="btn btn-primary" onClick={exportarExcel} disabled={cotizacion.length === 0 || exportando}>
-                  {exportando ? <><span className="spinner"></span>Generando...</> : "↓ Exportar Excel"}
-                </button>
-              </div>
-              {cotizacion.length === 0 ? (
-                <div className="cot-empty">// cotización vacía — agrega productos desde Inventario</div>
-              ) : (
-                <>
-                  <div className="cot-table-wrap">
-                    <table className="table">
-                      <thead><tr><th>ID</th><th>Producto</th><th>Precio venta</th><th>Cantidad</th><th>Subtotal</th><th></th></tr></thead>
-                      <tbody>
-                        {cotizacion.map(c => (
-                          <tr key={c.id}>
-                            <td className="id-cell">#{String(c.id).padStart(4,"0")}</td>
-                            <td>{c.nombre}</td>
-                            <td className="price-cell">{fmt(c.precio_venta)}</td>
-                            <td><input className="qty-input" type="number" min="1" value={c.cantidad} onChange={e => setCantidad(c.id, e.target.value)} /></td>
-                            <td className="price-cell">{fmt(Number(c.precio_venta) * c.cantidad)}</td>
-                            <td><button className="btn btn-danger btn-sm" onClick={() => quitarCotizacion(c.id)}>✕</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="cot-totals">
-                    <div className="total-row"><span className="total-label">Subtotal</span><span className="total-value">{fmt(subtotal)}</span></div>
-                    <div className="total-row"><span className="total-label">IVA (19%)</span><span className="total-value">{fmt(iva)}</span></div>
-                    <hr className="divider" />
-                    <div className="total-row grand"><span className="total-label">Total</span><span className="total-value">{fmt(total)}</span></div>
-                  </div>
-                </>
-              )}
-            </>
+          {view === "cotizaciones" && (
+            <Cotizaciones esAdmin={esAdmin} notify={showNotif} verVenta={verVenta}
+              onEditar={(b) => { setBorrador(b); setView("cotizar"); }}
+              onVenta={(v) => verVenta(v.id)} />
           )}
-
-          {view === "historial" && (
-            <>
-              <div className="toolbar">
-                <div className="search-wrap">
-                  <span className="search-icon">⌕</span>
-                  <input className="search-input" placeholder="Buscar por nombre, cliente o número..." value={busquedaHistorial} onChange={e => setBusquedaHistorial(e.target.value)} />
-                </div>
-                <div style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)"}}>{historialFiltrado.length} cotizaciones</div>
-              </div>
-              {loadingHistorial ? (
-                <div style={{textAlign:"center", padding:"3rem", color:"var(--text3)", fontFamily:"var(--mono)", fontSize:"12px"}}>
-                  <span className="spinner"></span>Cargando...
-                </div>
-              ) : historialFiltrado.length === 0 ? (
-                <div className="cot-empty">// sin cotizaciones guardadas</div>
-              ) : (
-                <div className="hist-list">
-                  {historialFiltrado.map(h => (
-                    <div key={h.id} className="hist-card">
-                      <div className="hist-info">
-                        <div className="hist-nombre">{h.nombre_cotizacion || `Cotización #${h.numero}`}</div>
-                        <div className="hist-meta">
-                          <span>#{h.numero}</span>
-                          <span>{h.cliente || "Sin cliente"}</span>
-                          <span>{new Date(h.createdAt).toLocaleDateString("es-CL")}</span>
-                          <span>{h.items?.length || 0} productos</span>
-                          <Estado valor={h.estado || "pendiente"} />
-                        </div>
-                        {historialDetalle === h.id && (
-                          <div className="hist-detalle">
-                            <table className="table" style={{fontSize:"11px", marginBottom:"10px"}}>
-                              <thead>
-                                <tr><th>Producto</th><th>Unidad</th><th>Cant.</th><th>P. Unitario</th><th>Subtotal</th></tr>
-                              </thead>
-                              <tbody>
-                                {h.items?.map((item, idx) => (
-                                  <tr key={idx}>
-                                    <td>{item.nombre}</td>
-                                    <td style={{fontFamily:"var(--mono)", fontSize:"10px"}}>{item.unidad}</td>
-                                    <td style={{fontFamily:"var(--mono)", fontSize:"10px", textAlign:"center"}}>{item.cantidad}</td>
-                                    <td className="price-cell">{fmt(item.precio)}</td>
-                                    <td className="price-cell">{fmt(item.precio * item.cantidad)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            <div className="cot-totals">
-                              <div className="total-row"><span className="total-label">Subtotal</span><span className="total-value">{fmt(h.subtotal)}</span></div>
-                              <div className="total-row"><span className="total-label">IVA (19%)</span><span className="total-value">{fmt(h.iva)}</span></div>
-                              <hr className="divider" />
-                              <div className="total-row grand"><span className="total-label">Total</span><span className="total-value">{fmt(h.total)}</span></div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:"8px"}}>
-                        <div className="hist-total">{fmt(h.total)}</div>
-                        <div style={{display:"flex", gap:"6px", flexWrap:"wrap", justifyContent:"flex-end"}}>
-                          <button className="btn btn-ghost btn-sm" onClick={() => setHistorialDetalle(historialDetalle === h.id ? null : h.id)}>
-                            {historialDetalle === h.id ? "Ocultar" : "Ver detalle"}
-                          </button>
-                          <button className="btn btn-ghost btn-sm" onClick={() => reexportarCotizacion(h.id, h.nombre_cotizacion)}>↓ Excel</button>
-                          {h.estado === "vendida"
-                            ? <button className="btn btn-ghost btn-sm" onClick={() => { setVentaAbrir(h.venta_id); setView("ventas"); }}>Ver venta</button>
-                            : <button className="btn btn-success btn-sm" onClick={() => convertirEnVenta(h)}>→ Venta</button>}
-                          {esAdmin && <button className="btn btn-danger btn-sm" onClick={() => eliminarCotizacionHistorial(h.id)}>✕</button>}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {view === "dashboard" && <Dashboard notify={showNotif} irA={setView} esAdmin={esAdmin} />}
           {view === "ventas" && (
-            <Ventas notify={showNotif} esAdmin={esAdmin} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />
+            <Ventas notify={showNotif} esAdmin={esAdmin} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />
           )}
-          {view === "compras" && <Compras notify={showNotif} esAdmin={esAdmin} proveedores={proveedores} onStockCambio={fetchProductos} />}
+          {view === "clientes" && <Clientes esAdmin={esAdmin} clientes={clientes} loading={loadingClientes} recargar={fetchClientes} notify={showNotif} />}
+          {view === "compras" && (
+            <Compras notify={showNotif} esAdmin={esAdmin} proveedores={proveedores} onPreciosCambio={invalidarProductos}
+              abrirOrdenId={ordenAbrir} onAbierta={() => setOrdenAbrir(null)} />
+          )}
           {view === "proveedores" && (
             <Proveedores esAdmin={esAdmin} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
+          {view === "gastos" && esAdmin && <Gastos notify={showNotif} />}
+          {view === "reportes" && esAdmin && <Reportes notify={showNotif} />}
+          {view === "config" && esAdmin && <Config notify={showNotif} />}
           {view === "usuarios" && esAdmin && <Usuarios notify={showNotif} yo={usuario} />}
-
         </main>
       </div>
 
-      {(modal === "nuevo" || modal === "editar") && (
-        <div className="modal-overlay" onClick={cerrarModal}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">{modal === "nuevo" ? "// Nuevo producto" : "// Editar producto"}</span>
-              <button className="modal-close" onClick={cerrarModal}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="field">
-                <label>Nombre del producto</label>
-                <input value={form.nombre || ""} onChange={e => setForm(f => ({...f, nombre: e.target.value}))} placeholder="Ej: Tornillo hexagonal 1/2&quot;" />
-              </div>
-              <div className="field">
-                <label>Categoría</label>
-                <select value={form.categoria || "Ferretería"} onChange={e => setForm(f => ({...f, categoria: e.target.value}))}>
-                  {CATEGORIAS.filter(c => c !== "Todas").map(c => <option key={c}>{c}</option>)}
-                </select>
-              </div>
-              <div className="fields-row">
-                {esAdmin && (
-                  <div className="field">
-                    <label>Precio compra (CLP)</label>
-                    <input type="number" value={form.precio_compra || ""} onChange={e => setForm(f => ({...f, precio_compra: e.target.value}))} placeholder="0" />
-                  </div>
-                )}
-                <div className="field">
-                  <label>Precio venta (CLP)</label>
-                  <input type="number" value={form.precio_venta || ""} onChange={e => setForm(f => ({...f, precio_venta: e.target.value}))} placeholder="0" />
-                </div>
-              </div>
-              <div className="fields-row">
-                <div className="field">
-                  <label>{modal === "editar" ? "Stock" : "Stock inicial"}</label>
-                  <input type="number" value={form.stock ?? ""} disabled={modal === "editar" && !esAdmin}
-                    title={modal === "editar" && !esAdmin ? "El stock cambia con ventas y compras. Para corregirlo, pide un ajuste al administrador." : ""}
-                    onChange={e => setForm(f => ({...f, stock: e.target.value}))} placeholder="0" />
-                </div>
-                <div className="field">
-                  <label>Stock mínimo (alerta)</label>
-                  <input type="number" value={form.stock_minimo ?? 30} onChange={e => setForm(f => ({...f, stock_minimo: e.target.value}))} placeholder="30" />
-                </div>
-              </div>
-              <div className="fields-row">
-                <div className="field">
-                  <label>Unidad de medida</label>
-                  <select value={form.unidad || "unidad"} onChange={e => setForm(f => ({...f, unidad: e.target.value}))}>
-                    {["unidad","metro","kilo","saco","litro","galón","caja","rollo"].map(u => <option key={u}>{u}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="fields-row">
-                <div className="field">
-                  <label>Proveedor</label>
-                  <input value={form.proveedor || ""} onChange={e => setForm(f => ({...f, proveedor: e.target.value}))} placeholder="Nombre del proveedor" />
-                </div>
-                <div className="field">
-                  <label>N° de contacto</label>
-                  <input value={form.contacto || ""} onChange={e => setForm(f => ({...f, contacto: e.target.value}))} placeholder="+569..." />
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={cerrarModal}>Cancelar</button>
-              <button className="btn btn-primary" onClick={modal === "nuevo" ? guardarNuevo : guardarEditar} disabled={guardando}>
-                {guardando ? "Guardando..." : modal === "nuevo" ? "Agregar" : "Guardar cambios"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {modal === "eliminar" && (
-        <div className="modal-overlay" onClick={cerrarModal}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">// Confirmar eliminación</span>
-              <button className="modal-close" onClick={cerrarModal}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)", lineHeight:"1.6"}}>
-                ¿Eliminar <strong style={{color:"var(--text)"}}>{productoActual?.nombre}</strong>?<br/>Esta acción no se puede deshacer.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={cerrarModal}>Cancelar</button>
-              <button className="btn btn-danger" onClick={confirmarEliminar} disabled={guardando}>
-                {guardando ? "Eliminando..." : "Eliminar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {(modalCliente === "nuevo" || modalCliente === "editar") && (
-        <div className="modal-overlay" onClick={cerrarModalCliente}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">{modalCliente === "nuevo" ? "// Nuevo cliente" : "// Editar cliente"}</span>
-              <button className="modal-close" onClick={cerrarModalCliente}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="field">
-                <label>Nombre</label>
-                <input value={formCliente.nombre || ""} onChange={e => setFormCliente(f => ({...f, nombre: e.target.value}))} placeholder="Nombre o razón social" />
-              </div>
-              <div className="fields-row">
-                <div className="field">
-                  <label>RUT</label>
-                  <input value={formCliente.rut || ""} onChange={e => setFormCliente(f => ({...f, rut: e.target.value}))} placeholder="76.000.000-0" />
-                </div>
-                <div className="field">
-                  <label>Teléfono</label>
-                  <input value={formCliente.telefono || ""} onChange={e => setFormCliente(f => ({...f, telefono: e.target.value}))} placeholder="+569..." />
-                </div>
-              </div>
-              <div className="field">
-                <label>Email</label>
-                <input value={formCliente.email || ""} onChange={e => setFormCliente(f => ({...f, email: e.target.value}))} placeholder="correo@ejemplo.com" />
-              </div>
-              <div className="field">
-                <label>Dirección</label>
-                <input value={formCliente.direccion || ""} onChange={e => setFormCliente(f => ({...f, direccion: e.target.value}))} placeholder="Calle, ciudad" />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={cerrarModalCliente}>Cancelar</button>
-              <button className="btn btn-primary" onClick={modalCliente === "nuevo" ? guardarNuevoCliente : guardarEditarCliente} disabled={guardando}>
-                {guardando ? "Guardando..." : modalCliente === "nuevo" ? "Agregar" : "Guardar cambios"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {modalCliente === "eliminar" && (
-        <div className="modal-overlay" onClick={cerrarModalCliente}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">// Confirmar eliminación</span>
-              <button className="modal-close" onClick={cerrarModalCliente}>×</button>
-            </div>
-            <div className="modal-body">
-              <p style={{fontFamily:"var(--mono)", fontSize:"12px", color:"var(--text2)", lineHeight:"1.6"}}>
-                ¿Eliminar cliente <strong style={{color:"var(--text)"}}>{clienteActual?.nombre}</strong>?<br/>Esta acción no se puede deshacer.
-              </p>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={cerrarModalCliente}>Cancelar</button>
-              <button className="btn btn-danger" onClick={confirmarEliminarCliente} disabled={guardando}>
-                {guardando ? "Eliminando..." : "Eliminar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {kardexProducto && (
-        <Kardex producto={kardexProducto} esAdmin={esAdmin} notify={showNotif} onClose={() => setKardexProducto(null)}
-          onAjustado={async () => {
-            await fetchProductos();
-            const p = await api(`/productos/${kardexProducto.id}`).catch(() => null);
-            if (p) setKardexProducto(p);
-          }} />
-      )}
-
       {cambiarPass && <CambiarPassword notify={showNotif} onClose={() => setCambiarPass(false)} />}
-
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
     </>
   );

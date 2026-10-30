@@ -27,6 +27,10 @@ const Cliente = sequelize.define("Cliente", {
     type: DataTypes.STRING(255),
     allowNull: true,
   },
+  // convenio (instituciones: compra x 1,30) | particular (compra x 1,50)
+  tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "convenio" },
+  contacto: { type: DataTypes.STRING(150), allowNull: true },
+  comuna: { type: DataTypes.STRING(100), allowNull: true },
 }, {
   tableName: "clientes",
   timestamps: true,
