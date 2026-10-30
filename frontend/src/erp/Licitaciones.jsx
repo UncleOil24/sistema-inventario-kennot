@@ -3,7 +3,7 @@ import { Modal } from "./ui";
 import ImportarLista from "./ImportarLista";
 import { api, fmt, fecha, sinTildes } from "./lib";
 
-const VISTAS = [["abiertas", "Abiertas"], ["cotizadas", "Cotizadas"], ["descartadas", "Descartadas"], ["todas", "Todas"]];
+const VISTAS = [["nuevas", "Nuevas"], ["abiertas", "Abiertas"], ["cotizadas", "Cotizadas"], ["descartadas", "Descartadas"], ["todas", "Todas"]];
 const fichaMP = (codigo) => `https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${encodeURIComponent(codigo)}`;
 const diasPara = (d) => (d ? Math.ceil((new Date(d) - new Date()) / 864e5) : null);
 
@@ -68,7 +68,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
       {!data.ticket && (
         <div className="aviso">
           Falta conectar Mercado Público. Pide el ticket gratuito en chilecompra.cl/api con tu Clave Única y agrégalo en Render como
-          <strong> MERCADOPUBLICO_TICKET</strong>. Después las licitaciones se revisan solas cada mañana.
+          <strong> MERCADOPUBLICO_TICKET</strong>. Después las licitaciones se revisan solas cada tarde a las 18:00.
         </div>
       )}
       <div className="toolbar">
@@ -83,7 +83,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
       <div className="mini" style={{ marginBottom: 10 }}>
         {lista.length} licitaciones{!todasRegiones && data.regiones ? ` · región: ${data.regiones}` : ""}
         {data.ultima_sincronizacion ? ` · revisado ${new Date(data.ultima_sincronizacion).toLocaleString("es-CL")}` : " · aún no se ha revisado"}
-        {" · las palabras clave y la región se cambian en Config."}
+        {" · se buscan solas cada tarde a las 18:00 (nuevas listas en la mañana) · palabras clave y región en Config."}
       </div>
       {avance && avance.estado === "corriendo" && <div className="aviso"><span className="spinner"></span>{avance.paso} ({avance.segundos || 0} s)</div>}
 

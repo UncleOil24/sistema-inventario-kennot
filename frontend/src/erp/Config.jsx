@@ -133,7 +133,7 @@ export default function Config({ notify }) {
       <div className="panel">
         <div className="panel-titulo">Licitaciones de Mercado Público</div>
         {mpTicket === null ? <span className="mini">—</span> : mpTicket
-          ? <div className="mini"><span className="estado estado-ok">✓ Conectado</span> Se revisan solas cada mañana; también puedes pulsar "Buscar nuevas" en Licitaciones.</div>
+          ? <div className="mini"><span className="estado estado-ok">✓ Conectado</span> Se revisan solas cada tarde a las 18:00 y las nuevas aparecen en el Inicio; si el correo está configurado, llega un resumen cada mañana. También puedes pulsar "Buscar nuevas" en Licitaciones.</div>
           : <div className="aviso" style={{ marginBottom: 0 }}>Falta el ticket. Pídelo gratis en <strong>chilecompra.cl/api</strong> (botón "Pide tu ticket", con Clave Única). Llega por correo; agrégalo en Render → backend → Environment como <strong>MERCADOPUBLICO_TICKET</strong>.</div>}
         {params && <>
           <div className="field">

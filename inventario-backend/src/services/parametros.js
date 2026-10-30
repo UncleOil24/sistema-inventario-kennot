@@ -13,6 +13,7 @@ const DEFAULTS = {
   mp_palabras: "ferreteria, materiales de construccion, materiales construccion, cemento, pintura, gasfiteria, electricidad, electrico, herramientas, maderas, madera, fierro, mantencion, mantenimiento, reparacion, aseo y ornato, articulos de ferreteria, insumos de construccion, candados, cerrajeria, tuberia, pvc, ceramica, sanitario",
   mp_regiones: "Maule",             // separadas por coma; vacío = todo Chile
   mp_ultima_sincronizacion: "",
+  ultimo_resumen_licitaciones: "",
   // Datos de la empresa para el PDF de la cotización
   empresa_nombre: "INVERSIONES KENOTT SpA",
   empresa_rut: "78.060.315-1",

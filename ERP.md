@@ -144,9 +144,12 @@ Variables nuevas en Render (todas opcionales; sin ellas esa función avisa y el 
 | `MERCADOPUBLICO_TICKET` | Ticket de la API de Mercado Público (gratis, chilecompra.cl/api, con Clave Única) |
 | `SMTP_USER` / `SMTP_PASS` | Correo que envía el respaldo (Gmail + contraseña de aplicación). Opcionales `SMTP_HOST`, `SMTP_PORT` |
 
-Tareas programadas: `.github/workflows/tareas.yml` llama a `POST /api/tareas` cada mañana (08:17 Chile). Es pública
-pero solo actúa cuando corresponde (Mercado Público cada 6 h como mínimo, respaldo cada 6 días) y acepta una llamada cada 10 minutos.
-También despierta el servidor de Render. Se puede lanzar a mano en GitHub → Actions → "Tareas diarias" → Run workflow.
+Tareas programadas: `.github/workflows/tareas.yml` llama a `POST /api/tareas` a las 21:03 y 22:03 UTC y a las 11:03 UTC.
+El servidor decide según la hora de Chile: desde las 18:00 revisa Mercado Público (una vez por tarde); entre 06:00 y 12:00
+envía por correo el resumen de licitaciones nuevas (las que aún no se avisaron) y el respaldo semanal. Es pública pero solo
+actúa cuando corresponde y acepta una llamada cada 10 minutos. También despierta el servidor de Render. Se puede lanzar
+a mano en GitHub → Actions → "Tareas diarias" → Run workflow. Las fechas de la API (hora de Chile sin zona) se interpretan
+como hora de Chile.
 
 Notas de la API de Mercado Público: el listado de activas trae solo código, nombre y cierre, por eso el filtro por palabras
 es sobre el nombre; el detalle cuesta una consulta por licitación (máx. 80 por vuelta, de a una, con pausa) y el ticket tiene
