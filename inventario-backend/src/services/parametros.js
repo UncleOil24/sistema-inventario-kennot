@@ -6,6 +6,13 @@ const DEFAULTS = {
   margen_particular: "50",        // % sobre el precio de compra
   ultimo_numero_cotizacion: "0",  // la próxima cotización usa el siguiente número
   validez_cotizacion_dias: "30",
+  meses_precio_antiguo: "6",        // un precio más viejo que esto se marca para volver a cotizar
+  dias_seguimiento: "5",            // días sin respuesta para llamar al cliente
+  respaldo_email: "",               // a dónde llega el respaldo semanal
+  ultimo_respaldo: "",
+  mp_palabras: "ferreteria, materiales de construccion, materiales construccion, cemento, pintura, gasfiteria, electricidad, electrico, herramientas, maderas, madera, fierro, mantencion, mantenimiento, reparacion, aseo y ornato, articulos de ferreteria, insumos de construccion, candados, cerrajeria, tuberia, pvc, ceramica, sanitario",
+  mp_regiones: "Maule",             // separadas por coma; vacío = todo Chile
+  mp_ultima_sincronizacion: "",
   // Datos de la empresa para el PDF de la cotización
   empresa_nombre: "INVERSIONES KENOTT SpA",
   empresa_rut: "78.060.315-1",

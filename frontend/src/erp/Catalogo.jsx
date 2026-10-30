@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
-import { api, fmt, fecha, hoyISO, invalidarProductos } from "./lib";
+import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses } from "./lib";
 
 const UNIDADES = ["UNIDAD", "METRO", "KG", "CAJA", "ROLLO", "M3", "M2", "BOLSA", "SACO", "PACK", "PLANCHA", "JUEGO", "LITRO", "GALÓN"];
 const POR_PAGINA = 150;
@@ -11,6 +11,7 @@ const FILTROS = [
   ["sin_precio", "Sin precio (falta cotizar)"],
   ["sin_confirmar", "Con precio sin confirmar"],
   ["confirmados", "Confirmados"],
+  ["antiguo", "Precio antiguo (volver a cotizar)"],
 ];
 
 export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, proveedores }) {
@@ -52,8 +53,8 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
 
   const tot = (resumen || []).reduce((a, r) => ({
     items: a.items + r.items, con_precio: a.con_precio + r.con_precio, sin_precio: a.sin_precio + r.sin_precio,
-    confirmados: a.confirmados + r.confirmados, con_aviso: a.con_aviso + r.con_aviso,
-  }), { items: 0, con_precio: 0, sin_precio: 0, confirmados: 0, con_aviso: 0 });
+    confirmados: a.confirmados + r.confirmados, con_aviso: a.con_aviso + r.con_aviso, antiguos: a.antiguos + (r.antiguos || 0),
+  }), { items: 0, con_precio: 0, sin_precio: 0, confirmados: 0, con_aviso: 0, antiguos: 0 });
 
   const cols = esAdmin ? 11 : 7;
 
@@ -61,7 +62,7 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
     <>
       <div className="stats">
         <div className="stat-card clickable" onClick={() => setRevision("")}><div className="stat-label">Productos</div><div className="stat-value">{tot.items.toLocaleString("es-CL")}</div></div>
-        <div className="stat-card clickable" onClick={() => setRevision("sin_confirmar")}><div className="stat-label">Con precio</div><div className="stat-value">{tot.con_precio.toLocaleString("es-CL")}</div><div className="mini">{tot.confirmados} confirmados</div></div>
+        <div className="stat-card clickable" onClick={() => setRevision("sin_confirmar")}><div className="stat-label">Con precio</div><div className="stat-value">{tot.con_precio.toLocaleString("es-CL")}</div><div className="mini">{tot.confirmados} confirmados · <span className="link-mini" onClick={(e) => { e.stopPropagation(); setRevision("antiguo"); }}>{tot.antiguos} antiguos</span></div></div>
         <div className="stat-card clickable" onClick={() => setRevision("sin_precio")}><div className="stat-label">Sin precio</div><div className="stat-value" style={{ color: tot.sin_precio ? "var(--warn)" : "var(--success)" }}>{tot.sin_precio.toLocaleString("es-CL")}</div><div className="mini">falta cotizar</div></div>
         <div className="stat-card clickable" onClick={() => setRevision("aviso")}><div className="stat-label">Por revisar</div><div className="stat-value" style={{ color: tot.con_aviso ? "var(--danger)" : "var(--success)" }}>{tot.con_aviso.toLocaleString("es-CL")}</div><div className="mini">avisos en REVISAR</div></div>
       </div>
@@ -82,13 +83,13 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
         <button className="btn btn-primary" onClick={() => setEditar({ nombre: "", categoria: categoria !== "Todas" ? categoria : (categorias[0]?.categoria || ""), unidad: "UNIDAD" })}>+ Nuevo producto</button>
       </div>
 
-      {(revision === "sin_precio" || revision === "aviso") && resumen && (
+      {(revision === "sin_precio" || revision === "aviso" || revision === "antiguo") && resumen && (
         <div className="panel">
-          <div className="panel-titulo">{revision === "sin_precio" ? "Productos sin precio por categoría (para pedir cotización)" : "Avisos por categoría"}</div>
+          <div className="panel-titulo">{revision === "sin_precio" ? "Productos sin precio por categoría (para pedir cotización)" : revision === "antiguo" ? "Precios antiguos por categoría (pedir cotización nueva)" : "Avisos por categoría"}</div>
           <div className="chips">
-            {resumen.filter((r) => (revision === "sin_precio" ? r.sin_precio : r.con_aviso) > 0).map((r) => (
+            {resumen.filter((r) => (revision === "sin_precio" ? r.sin_precio : revision === "antiguo" ? r.antiguos : r.con_aviso) > 0).map((r) => (
               <button key={r.categoria} className={`chip ${categoria === r.categoria ? "activo" : ""}`} onClick={() => setCategoria(categoria === r.categoria ? "Todas" : r.categoria)}>
-                {r.categoria} <strong>{revision === "sin_precio" ? r.sin_precio : r.con_aviso}</strong>
+                {r.categoria} <strong>{revision === "sin_precio" ? r.sin_precio : revision === "antiguo" ? r.antiguos : r.con_aviso}</strong>
               </button>
             ))}
           </div>
@@ -119,7 +120,7 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
                     <td className="id-cell">{p.codigo ?? "—"}</td>
                     <td>
                       {p.nombre}
-                      <div className="mini">{p.categoria}{esAdmin && p.fecha_precio ? ` · act. ${fecha(p.fecha_precio)}` : ""}</div>
+                      <div className="mini">{p.categoria}{esAdmin && p.fecha_precio ? ` · act. ${fecha(p.fecha_precio)}` : ""}{p.precio_antiguo && <span className="antiguo" title="Precio antiguo: conviene pedir cotización nueva"> · ⏱ precio {haceMeses(p.fecha_precio)}</span>}</div>
                     </td>
                     <td className="mini">{p.unidad}</td>
                     {esAdmin && <td className="price-cell compra">{sinPrecio ? "—" : fmt(p.precio_compra)}{p.confirmado && <span className="ok-confirm" title="Precio confirmado">✓</span>}</td>}

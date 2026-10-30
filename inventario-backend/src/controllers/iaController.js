@@ -3,6 +3,7 @@ const Producto = require("../models/Producto");
 const PrecioProveedor = require("../models/PrecioProveedor");
 const Proveedor = require("../models/Proveedor");
 const AuditoriaIA = require("../models/AuditoriaIA");
+const Licitacion = require("../models/Licitacion");
 const { handler, ErrorNegocio } = require("../services/erp");
 const ia = require("../services/ia");
 const { getParametros } = require("../services/parametros");
@@ -51,6 +52,32 @@ const listaCliente = handler(async (req, res) => {
     },
   });
 });
+
+// POST /api/ia/licitacion/:codigo   -> los productos de la licitación calzados con el catálogo
+const licitacion = handler(async (req, res) => {
+  const l = await Licitacion.findByPk(req.params.codigo);
+  if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
+  if (!l.items?.length) throw new ErrorNegocio("Esta licitación no trae productos detallados: cotízala a mano");
+  const lineas = l.items.map((i) => {
+    const extra = i.descripcion && sinTildes(i.descripcion) !== sinTildes(i.producto) ? ` - ${String(i.descripcion).slice(0, 160)}` : "";
+    return { descripcion: `${i.producto}${extra}`.trim(), cantidad: Number(i.cantidad) || 1, unidad: i.unidad || "" };
+  });
+  const { indice, productos } = await indiceCatalogo();
+  const calzadas = await ia.calzarLineas(lineas, indice, { usuario: req.usuario.nombre, tipo: "licitacion", archivo: l.codigo });
+  const ver = vista(req, await getParametros());
+  res.json({
+    ok: true,
+    data: {
+      archivo: `Licitación ${l.codigo}`, cliente: l.organismo || "", observaciones: l.nombre,
+      lineas: calzadas.map((x) => ({
+        descripcion: x.descripcion, cantidad: x.cantidad, unidad: x.unidad, calce: x.calce, nota: x.nota,
+        producto: x.producto_id ? ver(productos.get(x.producto_id)) : null,
+        candidatos: x.candidatos.slice(0, 6).map((p) => ver(p)),
+      })),
+    },
+  });
+});
+const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
 // POST /api/ia/documento-proveedor   (multipart: archivo)  -> propuesta para revisar
 const documentoProveedor = handler(async (req, res) => {
@@ -130,4 +157,4 @@ const auditoria = handler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-module.exports = { estado, listaCliente, documentoProveedor, aprobarDocumento, auditoria };
+module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, auditoria };

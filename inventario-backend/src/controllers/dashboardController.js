@@ -9,6 +9,8 @@ const Gasto = require("../models/Gasto");
 const { handler } = require("../services/erp");
 const { esAdmin } = require("../middlewares/auth");
 const { SQL_AVISO } = require("../services/precios");
+const { getParametros } = require("../services/parametros");
+const { wherePorSeguir } = require("./cotizacionesController");
 
 const n = (v) => Math.round(Number(v) || 0);
 const ymd = (d) => d.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
@@ -23,6 +25,10 @@ const getDashboard = handler(async (req, res) => {
   const hoyStr = ymd(hoy);
 
   await Cotizacion.update({ estado: "vencida", motivo_estado: "Venció su validez" }, { where: { estado: "cotizacion", fecha_validez: { [Op.lt]: hoyStr } } });
+  const params = await getParametros();
+  const limAntiguo = new Date(); limAntiguo.setMonth(limAntiguo.getMonth() - (Number(params.meses_precio_antiguo) || 6));
+  const porSeguir = await Cotizacion.findAll({ where: await wherePorSeguir(), order: [["fecha", "ASC"]], limit: 50,
+    attributes: ["id", "numero", "cliente", "nombre_cotizacion", "fecha", "fecha_validez", "ultimo_contacto", "proximo_contacto", "subtotal"] });
 
   const [ventasPeriodo, comprasPeriodo, gastosPeriodo, cotizaciones, pagosMes, porCobrar, porPagar, ventasActivas, ocsVenta, catalogo] = await Promise.all([
     Venta.findAll({ where: { estado: "emitida", fecha: { [Op.gte]: inicioSerie } }, order: [["fecha", "DESC"], ["id", "DESC"]] }),
@@ -44,8 +50,9 @@ const getDashboard = handler(async (req, res) => {
     sequelize.query(`SELECT COUNT(*)::int AS productos,
         COUNT(*) FILTER (WHERE precio_compra IS NULL OR precio_compra <= 0)::int AS sin_precio,
         COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
-        COUNT(*) FILTER (WHERE confirmado)::int AS confirmados
-      FROM productos WHERE activo`, { plain: true }),
+        COUNT(*) FILTER (WHERE confirmado)::int AS confirmados,
+        COUNT(*) FILTER (WHERE precio_compra > 0 AND fecha_precio < :lim)::int AS antiguos
+      FROM productos WHERE activo`, { plain: true, replacements: { lim: ymd(limAntiguo) } }),
   ]);
 
   // --- Serie mensual: ventas, costo, margen, gastos, utilidad y compras ---
@@ -150,7 +157,8 @@ const getDashboard = handler(async (req, res) => {
     },
     serie,
     top_productos: topProductos,
-    catalogo,
+    catalogo: { ...catalogo, meses_antiguo: Number(params.meses_precio_antiguo) || 6 },
+    por_seguir: { cantidad: porSeguir.length, detalle: porSeguir.slice(0, 10).map((c) => ({ id: c.id, numero: c.numero, cliente: c.cliente, nombre: c.nombre_cotizacion, fecha: c.fecha, vence: c.fecha_validez, ultimo_contacto: c.ultimo_contacto, proximo_contacto: c.proximo_contacto, neto: n(c.subtotal) })) },
     por_comprar: { cantidad: porComprar.length, detalle: porComprar.slice(0, 10).map((v) => ({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, fecha: v.fecha, neto: n(v.subtotal) })) },
     cuentas_por_cobrar: cxc,
     cuentas_por_pagar: cxp,

@@ -1,0 +1,17 @@
+# Tarea diaria: despierta el servidor y le pide revisar Mercado Público y el respaldo semanal.
+# El servidor decide si corresponde hacer algo (ver inventario-backend/src/routes/tareas.js).
+name: Tareas diarias
+on:
+  schedule:
+    - cron: "17 11 * * *"   # 08:17 en Chile (horario de verano)
+  workflow_dispatch: {}
+jobs:
+  tareas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Despertar el servidor
+        run: curl -s -m 120 https://inventario-kennot-backend.onrender.com/ || true
+      - name: Ejecutar tareas
+        run: |
+          sleep 20
+          curl -s -m 120 -X POST https://inventario-kennot-backend.onrender.com/api/tareas

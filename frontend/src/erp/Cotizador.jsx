@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Totales, Estado } from "./ui";
 import ImportarLista from "./ImportarLista";
-import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto } from "./lib";
+import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses } from "./lib";
 
 // Cotizador: arma la cotización con nuestros precios según el tipo de cliente.
 // borrador: { id?, numero?, cliente_id, tipo_precio, nombre_cotizacion, validez_dias, notas, items }
@@ -53,6 +53,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const costo = items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad || 0), 0);
   const margen = subtotal - costo;
   const sinPrecio = items.filter((i) => !(Number(i.precio) > 0)).length;
+  const antiguos = items.filter((i) => i.precio_antiguo).length;
 
   const limpiar = () => setBorrador({ cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] });
 
@@ -158,6 +159,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       ) : (
         <>
           {sinPrecio > 0 && <div className="aviso">{sinPrecio} línea(s) sin precio (en amarillo): ingresa el precio a mano o pide cotización al proveedor.</div>}
+          {antiguos > 0 && <div className="aviso">⏱ {antiguos} línea(s) con precio de compra antiguo: conviene confirmar el precio con el proveedor antes de enviar.</div>}
           <div className="table-wrap" style={{ marginBottom: "1rem" }}>
             <table className="table table-compacta">
               <thead><tr>
@@ -171,7 +173,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                   return (
                     <tr key={i.producto_id} className={!(Number(i.precio) > 0) ? "fila-alerta" : ""}>
                       <td className="id-cell">{i.codigo ?? ""}</td>
-                      <td>{i.nombre}<div className="mini">{i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}{i.descripcion_cliente ? ` · cliente: "${i.descripcion_cliente}"` : ""}</div></td>
+                      <td>{i.nombre}<div className="mini">{i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}{i.descripcion_cliente ? ` · cliente: "${i.descripcion_cliente}"` : ""}{i.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(i.fecha_precio)}</span>}</div></td>
                       <td><input className="qty-input" type="number" min="0" step="any" value={i.cantidad} onChange={(e) => setLinea(i.producto_id, "cantidad", e.target.value)} /></td>
                       <td>
                         <input className="qty-input" style={{ width: 96 }} type="number" min="0" value={i.precio} onChange={(e) => setLinea(i.producto_id, "precio", e.target.value)} />

@@ -10,6 +10,7 @@ import Clientes from "./erp/Clientes";
 import Gastos from "./erp/Gastos";
 import Reportes from "./erp/Reportes";
 import Config from "./erp/Config";
+import Licitaciones from "./erp/Licitaciones";
 import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
 import Usuarios from "./erp/Usuarios";
@@ -214,6 +215,10 @@ const styles = `
   .chip { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 5px 12px; font-family: var(--mono); font-size: 11px; color: var(--text2); cursor: pointer; }
   .chip:hover { border-color: var(--border2); color: var(--text); }
   .chip.activo { border-color: var(--accent); color: var(--accent); background: rgba(232,197,71,0.08); }
+  .chip-alerta { border-color: rgba(232,163,61,0.6); color: var(--warn); }
+  .antiguo { color: var(--warn); }
+  .lic-nueva { border-left: 3px solid var(--accent); }
+  .link-mini { text-decoration: underline; cursor: pointer; }
   .chip strong { margin-left: 4px; color: var(--text); }
   .resumen-utilidad { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .resumen-utilidad > div, .vigente > div { display: flex; flex-direction: column; gap: 2px; }
@@ -318,15 +323,18 @@ function App({ usuario, onLogout }) {
     showNotif("✓ Agregado a la cotización");
   };
 
+  const [filtroCot, setFiltroCot] = useState("");
   const irA = (vista, id) => {
     if (vista === "ventas" && id) setVentaAbrir(id);
+    if (vista === "cotizaciones-seguir") { setFiltroCot("seguir"); setView("cotizaciones"); return; }
+    if (vista === "cotizaciones") setFiltroCot("");
     setView(vista);
   };
   const verVenta = (id) => { setVentaAbrir(id); setView("ventas"); };
   const verOrden = (id) => { setOrdenAbrir(id); setView("compras"); };
 
   const nav = (id, texto, extra) => (
-    <button className={`nav-btn ${view === id ? "active" : ""}`} onClick={() => setView(id)}>{texto}{extra}</button>
+    <button className={`nav-btn ${view === id ? "active" : ""}`} onClick={() => { if (id === "cotizaciones") setFiltroCot(""); setView(id); }}>{texto}{extra}</button>
   );
 
   return (
@@ -340,6 +348,7 @@ function App({ usuario, onLogout }) {
             <span className="nav-sep" />
             {nav("cotizar", "Cotizar", borrador.items.length > 0 && <span className="badge">{borrador.items.length}</span>)}
             {nav("cotizaciones", "Cotizaciones")}
+            {nav("licitaciones", "Licitaciones")}
             {nav("ventas", "Ventas")}
             {nav("clientes", "Clientes")}
             <span className="nav-sep" />
@@ -385,9 +394,13 @@ function App({ usuario, onLogout }) {
               irAClientes={() => setView("clientes")} onGuardada={() => setView("cotizaciones")} />
           )}
           {view === "cotizaciones" && (
-            <Cotizaciones esAdmin={esAdmin} notify={showNotif} verVenta={verVenta}
+            <Cotizaciones key={filtroCot} filtroInicial={filtroCot} esAdmin={esAdmin} notify={showNotif} verVenta={verVenta}
               onEditar={(b) => { setBorrador(b); setView("cotizar"); }}
               onVenta={(v) => verVenta(v.id)} />
+          )}
+          {view === "licitaciones" && (
+            <Licitaciones esAdmin={esAdmin} notify={showNotif} clientes={clientes}
+              onCotizar={(b) => { setBorrador(b); setView("cotizar"); }} />
           )}
           {view === "ventas" && (
             <Ventas notify={showNotif} esAdmin={esAdmin} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />

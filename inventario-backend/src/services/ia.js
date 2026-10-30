@@ -372,5 +372,6 @@ async function leerDocumentoProveedor(file, indice, usuario) {
 }
 
 module.exports = {
+  calzarLineas,
   iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, crearIndice, candidatos, normalizar, contenidoArchivo,
 };

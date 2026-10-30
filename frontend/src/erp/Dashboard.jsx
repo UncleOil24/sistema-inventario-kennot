@@ -22,7 +22,7 @@ export default function Dashboard({ notify, irA, esAdmin }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   if (!data) return <Cargando />;
-  const { mes_actual: m, cuentas_por_cobrar: cxc, cuentas_por_pagar: cxp, caja, catalogo, cotizaciones, por_comprar: porComprar } = data;
+  const { mes_actual: m, cuentas_por_cobrar: cxc, cuentas_por_pagar: cxp, caja, catalogo, cotizaciones, por_comprar: porComprar, por_seguir: porSeguir } = data;
 
   return (
     <>
@@ -41,11 +41,12 @@ export default function Dashboard({ notify, irA, esAdmin }) {
         {esAdmin && <Kpi label="Margen del mes" valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
         {esAdmin && <Kpi label="Utilidad del mes" valor={fmt(m.utilidad)} sub={`margen − gastos (${fmt(m.gastos)})`} alerta={m.utilidad < 0} onClick={() => irA("gastos")} />}
         <Kpi label="Cotizaciones abiertas" valor={fmt(cotizaciones.monto_abierto)} sub={`${cotizaciones.abiertas} por responder · neto`} onClick={() => irA("cotizaciones")} />
+        <Kpi label="Clientes por llamar" valor={porSeguir.cantidad} sub="cotizaciones sin respuesta" alerta={porSeguir.cantidad > 0} onClick={() => irA("cotizaciones-seguir")} />
         {esAdmin && <Kpi label="Ventas por comprar" valor={porComprar.cantidad} sub="sin órdenes de compra" alerta={porComprar.cantidad > 0} onClick={() => irA("ventas")} />}
         <Kpi label="Por cobrar" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
         {esAdmin && <Kpi label="Por pagar" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
         {esAdmin && <Kpi label="Caja del mes" valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />}
-        <Kpi label="Catálogo" valor={catalogo.productos.toLocaleString("es-CL")} sub={`${catalogo.sin_precio} sin precio · ${catalogo.con_aviso} por revisar`} onClick={() => irA("catalogo")} />
+        <Kpi label="Catálogo" valor={catalogo.productos.toLocaleString("es-CL")} sub={`${catalogo.sin_precio} sin precio · ${catalogo.con_aviso} por revisar · ${catalogo.antiguos} precios de +${catalogo.meses_antiguo} meses`} onClick={() => irA("catalogo")} />
       </div>
 
       <div className="panel">
@@ -54,6 +55,27 @@ export default function Dashboard({ notify, irA, esAdmin }) {
       </div>
 
       <div className="dash-grid">
+        <div className="panel">
+          <div className="panel-titulo">
+            Clientes por llamar <span className="mini">({porSeguir.cantidad} cotizaciones sin respuesta)</span>
+            <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => irA("cotizaciones-seguir")}>Ver todas →</button>
+          </div>
+          {porSeguir.detalle.length === 0 ? <div className="mini">✓ No hay seguimientos pendientes</div> : (
+            <table className="table table-compacta">
+              <thead><tr><th>N°</th><th>Cliente</th><th>Enviada</th><th>Último contacto</th><th>Neto</th></tr></thead>
+              <tbody>
+                {porSeguir.detalle.map((c) => (
+                  <tr key={c.id} className="clickable" onClick={() => irA("cotizaciones-seguir")}>
+                    <td className="id-cell">{c.numero}</td><td>{c.cliente || "—"}<div className="mini">{c.nombre}</div></td>
+                    <td className="mini">{fecha(c.fecha)}</td><td className="mini">{c.ultimo_contacto ? fecha(c.ultimo_contacto) : "nunca"}</td>
+                    <td className="price-cell">{fmt(c.neto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
         {esAdmin && (
           <div className="panel">
             <div className="panel-titulo">Ventas por comprar <span className="mini">({porComprar.cantidad} sin órdenes de compra)</span></div>

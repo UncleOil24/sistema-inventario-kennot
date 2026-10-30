@@ -128,6 +128,30 @@ GET  /api/cotizaciones/:id/pdf
 
 Nuevas dependencias del backend: `@anthropic-ai/sdk`, `pdfkit`, `mammoth` (leer Word).
 
+## Seguimiento, precios antiguos, licitaciones y respaldo
+
+| Función | Dónde | Cómo funciona |
+|---|---|---|
+| **Clientes por llamar** | Inicio y Cotizaciones → "Por llamar" | Cotización abierta sin contacto en `dias_seguimiento` días (5) o cuya fecha de "volver a llamar" llegó. Botón **☎ Seguimiento**: nota de lo que dijo el cliente + cuándo volver a llamar. Queda el historial. |
+| **Precios antiguos** | Catálogo (filtro y ⏱), Cotizar, lista del cliente, Inicio | Precio de compra con fecha de más de `meses_precio_antiguo` meses (6). Se avisa para pedir cotización nueva. |
+| **Licitaciones** | Menú Licitaciones | Cada mañana (o con "Buscar nuevas") se piden las licitaciones activas a Mercado Público, se filtran por palabras clave (`mp_palabras`) y se pide el detalle de las nuevas (organismo, región, productos). Se muestran las de las regiones de `mp_regiones` (Maule). **Cotizar** calza los productos con Claude y los pasa al cotizador. |
+| **Respaldo** | Config → Respaldo | Excel con todas las tablas. Descarga manual siempre; envío semanal por correo si hay SMTP configurado. |
+
+Variables nuevas en Render (todas opcionales; sin ellas esa función avisa y el resto sigue igual):
+
+| Variable | Para qué |
+|---|---|
+| `MERCADOPUBLICO_TICKET` | Ticket de la API de Mercado Público (gratis, chilecompra.cl/api, con Clave Única) |
+| `SMTP_USER` / `SMTP_PASS` | Correo que envía el respaldo (Gmail + contraseña de aplicación). Opcionales `SMTP_HOST`, `SMTP_PORT` |
+
+Tareas programadas: `.github/workflows/tareas.yml` llama a `POST /api/tareas` cada mañana (08:17 Chile). Es pública
+pero solo actúa cuando corresponde (Mercado Público cada 6 h como mínimo, respaldo cada 6 días) y acepta una llamada cada 10 minutos.
+También despierta el servidor de Render. Se puede lanzar a mano en GitHub → Actions → "Tareas diarias" → Run workflow.
+
+Notas de la API de Mercado Público: el listado de activas trae solo código, nombre y cierre, por eso el filtro por palabras
+es sobre el nombre; el detalle cuesta una consulta por licitación (máx. 80 por vuelta, de a una, con pausa) y el ticket tiene
+un tope de 10.000 consultas diarias. Compra Ágil usa otra API (beta) y no está incluida todavía.
+
 ## Pendiente
 
 - Kenott y Tactics como empresas separadas, si se decide.

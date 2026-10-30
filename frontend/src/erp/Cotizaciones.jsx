@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, Totales } from "./ui";
-import { api, fmt, fecha, descargar, cargarProductos } from "./lib";
+import { api, fmt, fecha, descargar, cargarProductos, hoyISO } from "./lib";
 
 const FILTROS = [
-  ["", "Todas"], ["cotizacion", "Abiertas"], ["borrador", "Borradores"],
+  ["", "Todas"], ["seguir", "Por llamar"], ["cotizacion", "Abiertas"], ["borrador", "Borradores"],
   ["aceptada", "Aceptadas"], ["rechazada", "Rechazadas"], ["vencida", "Vencidas"],
 ];
 
-export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVenta }) {
+const diasEntre = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${String(a).slice(0, 10)}T12:00:00`)) / 864e5);
+
+export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVenta, filtroInicial = "" }) {
   const [lista, setLista] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [estado, setEstado] = useState("");
+  const [estado, setEstado] = useState(filtroInicial);
+  const [porSeguir, setPorSeguir] = useState(0);
+  const [seguimiento, setSeguimiento] = useState(null);
   const [busqueda, setBusqueda] = useState("");
   const [abierta, setAbierta] = useState(null);
   const [aceptar, setAceptar] = useState(null);
@@ -19,9 +23,11 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
     setLoading(true);
     try {
       const p = new URLSearchParams();
-      if (estado) p.append("estado", estado);
+      if (estado === "seguir") p.append("seguimiento", "1");
+      else if (estado) p.append("estado", estado);
       if (busqueda) p.append("busqueda", busqueda);
       setLista(await api(`/cotizaciones?${p}`));
+      api("/cotizaciones/por-seguir/cantidad").then((r) => setPorSeguir(r.cantidad)).catch(() => {});
     } catch (e) { notify(e.message, "danger"); }
     finally { setLoading(false); }
   }, [estado, busqueda, notify]);
@@ -77,7 +83,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
           <input className="search-input" placeholder="Buscar por N°, cliente o nombre..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
         <div className="chips">
-          {FILTROS.map(([v, t]) => <button key={v} className={`chip ${estado === v ? "activo" : ""}`} onClick={() => setEstado(v)}>{t}</button>)}
+          {FILTROS.map(([v, t]) => <button key={v} className={`chip ${estado === v ? "activo" : ""} ${v === "seguir" && porSeguir ? "chip-alerta" : ""}`} onClick={() => setEstado(v)}>{t}{v === "seguir" && porSeguir > 0 && <strong>{porSeguir}</strong>}</button>)}
         </div>
       </div>
 
@@ -93,6 +99,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
                     <span>{c.cliente || "Sin cliente"}</span>
                     <span>{fecha(c.fecha || c.createdAt)}</span>
                     {c.estado === "cotizacion" && c.fecha_validez && <span>válida hasta {fecha(c.fecha_validez)}</span>}
+                    {c.estado === "cotizacion" && <SeguimientoInfo c={c} />}
                     <span>{c.items?.length || 0} productos</span>
                     <Estado valor={c.tipo_precio} />
                     <Estado valor={c.estado} />
@@ -109,6 +116,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
                     {["borrador", "cotizacion"].includes(c.estado) && <button className="btn btn-ghost btn-sm" onClick={() => editar(c)}>Editar</button>}
                     {c.estado === "borrador" && <button className="btn btn-ghost btn-sm" onClick={() => emitir(c)}>Emitir</button>}
                     {c.estado === "cotizacion" && <>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setSeguimiento(c)}>☎ Seguimiento</button>
                       <button className="btn btn-success btn-sm" onClick={() => setAceptar(c)}>✓ Aceptada → Venta</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => rechazar(c)}>Rechazada</button>
                     </>}
@@ -123,6 +131,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
         )}
 
       {abierta && <DetalleCotizacion cot={abierta} esAdmin={esAdmin} onClose={() => setAbierta(null)} onVencer={() => { vencer(abierta); setAbierta(null); }} />}
+      {seguimiento && <Seguimiento cot={seguimiento} notify={notify} onClose={() => setSeguimiento(null)} onHecho={() => { setSeguimiento(null); cargar(); }} />}
       {aceptar && <AceptarCotizacion cot={aceptar} notify={notify} onClose={() => setAceptar(null)}
         onHecho={(venta) => { setAceptar(null); cargar(); onVenta(venta); }} />}
     </>
@@ -215,6 +224,64 @@ function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
           <input type="number" min="0" value={form.dias_credito} onChange={(e) => setForm({ ...form, dias_credito: e.target.value })} />
         </div>
       )}
+    </Modal>
+  );
+}
+
+// Cuándo se habló con el cliente y cuándo toca volver a llamar
+function SeguimientoInfo({ c }) {
+  const hoy = hoyISO();
+  const base = c.ultimo_contacto || c.fecha;
+  const dias = base ? diasEntre(base, hoy) : 0;
+  const toca = c.proximo_contacto && c.proximo_contacto <= hoy;
+  return (
+    <span className={toca ? "antiguo" : ""}>
+      {c.ultimo_contacto ? `último contacto hace ${dias} día(s)` : `enviada hace ${dias} día(s), sin contacto`}
+      {c.proximo_contacto ? ` · llamar ${c.proximo_contacto <= hoy ? "hoy" : `el ${fecha(c.proximo_contacto)}`}` : ""}
+    </span>
+  );
+}
+
+function Seguimiento({ cot, notify, onClose, onHecho }) {
+  const [nota, setNota] = useState("");
+  const [dias, setDias] = useState(5);
+  const [enviando, setEnviando] = useState(false);
+  const guardar = async () => {
+    setEnviando(true);
+    try {
+      await api(`/cotizaciones/${cot.id}/seguimiento`, { method: "POST", body: { nota, dias: Number(dias) } });
+      notify("✓ Seguimiento registrado");
+      onHecho();
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setEnviando(false); }
+  };
+  const historial = [...(cot.seguimientos || [])].reverse();
+  return (
+    <Modal titulo={`// Seguimiento N° ${cot.numero}`} onClose={onClose} ancho={620}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={enviando} onClick={guardar}>{enviando ? "Guardando..." : "Registrar contacto"}</button>
+      </>}>
+      <div className="mini">{cot.cliente || "Sin cliente"} · {cot.nombre_cotizacion} · {fmt(cot.total)} · válida hasta {fecha(cot.fecha_validez)}</div>
+      <div className="field">
+        <label>¿Qué dijo el cliente?</label>
+        <textarea className="textarea" rows={3} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: La está revisando la directora, responden el lunes" />
+      </div>
+      <div className="field">
+        <label>Volver a llamar en</label>
+        <select value={dias} onChange={(e) => setDias(e.target.value)}>
+          {[[1, "1 día"], [2, "2 días"], [3, "3 días"], [5, "5 días"], [7, "1 semana"], [14, "2 semanas"], [0, "No volver a llamar"]].map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+        </select>
+      </div>
+      {historial.length > 0 && (
+        <div className="panel">
+          <div className="panel-titulo">Contactos anteriores</div>
+          {historial.map((h, k) => (
+            <div key={k} className="mini"><strong style={{ color: "var(--text)" }}>{new Date(h.fecha).toLocaleDateString("es-CL")}</strong> · {h.usuario}: {h.nota || "(sin nota)"}{h.proximo ? ` · llamar el ${fecha(h.proximo)}` : ""}</div>
+          ))}
+        </div>
+      )}
+      <div className="mini">Si el cliente ya decidió, cierra la ventana y usa "Aceptada → Venta" o "Rechazada".</div>
     </Modal>
   );
 }
