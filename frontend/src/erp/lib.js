@@ -91,6 +91,7 @@ export const lineaDesdeProducto = (p, tipo) => ({
   precio: precioSegun(p, tipo), auto: true, // auto: el precio sigue al tipo de cliente
   convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
   costo: p.precio_compra !== undefined ? Number(p.precio_compra) || 0 : undefined, proveedor: p.proveedor,
+  fecha_precio: p.fecha_precio, precio_antiguo: !!p.precio_antiguo,
 });
 
 
@@ -107,3 +108,11 @@ export async function subirArchivo(path, archivo, extra = {}) {
 }
 
 export const ETIQUETA_CALCE = { exacto: "Exacto", equivalente: "Equivalente", parecido: "Parecido", sin_producto: "Sin producto" };
+
+// "hace 8 meses" a partir de una fecha AAAA-MM-DD
+export const haceMeses = (iso) => {
+  if (!iso) return "";
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`), h = new Date();
+  const m = (h.getFullYear() - d.getFullYear()) * 12 + h.getMonth() - d.getMonth();
+  return m <= 0 ? "este mes" : m === 1 ? "hace 1 mes" : `hace ${m} meses`;
+};

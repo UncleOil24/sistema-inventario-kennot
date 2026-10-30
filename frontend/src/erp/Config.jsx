@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { api, authFetch, API_URL, invalidarProductos } from "./lib";
+import { api, authFetch, API_URL, invalidarProductos, descargar } from "./lib";
 
 export default function Config({ notify }) {
   const [params, setParams] = useState(null);
@@ -10,10 +10,29 @@ export default function Config({ notify }) {
   const [resultado, setResultado] = useState(null);
 
   const [ia, setIa] = useState(null);
+  const [resp, setResp] = useState(null);
+  const [mpTicket, setMpTicket] = useState(null);
+  const [respaldando, setRespaldando] = useState(false);
+  const cargarResp = () => api("/respaldo/estado").then(setResp).catch(() => {});
   useEffect(() => {
     api("/parametros").then(setParams).catch((e) => notify(e.message, "danger"));
     api("/ia/estado").then(setIa).catch(() => {});
+    cargarResp();
+    api("/mercado-publico/licitaciones?vista=descartadas").then((d) => setMpTicket(d.ticket)).catch(() => {});
   }, [notify]);
+
+  const bajarRespaldo = async () => {
+    setRespaldando(true);
+    try { await descargar("/respaldo/excel", `Respaldo_Kenott_${new Date().toLocaleDateString("sv-SE")}.xlsx`); notify("✓ Respaldo descargado"); }
+    catch (e) { notify(e.message, "danger"); }
+    finally { setRespaldando(false); }
+  };
+  const enviarRespaldo = async () => {
+    setRespaldando(true);
+    try { await api("/parametros", { method: "PUT", body: { respaldo_email: params.respaldo_email || "" } }); const r = await api("/respaldo/enviar", { method: "POST" }); notify(`✓ Respaldo enviado a ${r.para}`); cargarResp(); }
+    catch (e) { notify(e.message, "danger"); }
+    finally { setRespaldando(false); }
+  };
 
   const guardar = async () => {
     setGuardando(true);
@@ -79,6 +98,10 @@ export default function Config({ notify }) {
             {campo("ultimo_numero_cotizacion", "Último N° de cotización usado", "La próxima cotización usa el número siguiente")}
             {campo("validez_cotizacion_dias", "Validez por defecto (días)")}
           </div>
+          <div className="fields-row">
+            {campo("dias_seguimiento", "Llamar al cliente después de (días)", "Una cotización sin respuesta pasa a \"Por llamar\"")}
+            {campo("meses_precio_antiguo", "Precio antiguo después de (meses)", "Se marca ⏱ para volver a cotizarlo")}
+          </div>
           <div className="mini">
             Margen sobre la venta: convenio {Math.round((Number(params.margen_convenio) / (100 + Number(params.margen_convenio))) * 100)}% ·
             particular {Math.round((Number(params.margen_particular) / (100 + Number(params.margen_particular))) * 100)}% (antes de gastos).
@@ -105,6 +128,38 @@ export default function Config({ notify }) {
           </div>
           <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
         </>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-titulo">Licitaciones de Mercado Público</div>
+        {mpTicket === null ? <span className="mini">—</span> : mpTicket
+          ? <div className="mini"><span className="estado estado-ok">✓ Conectado</span> Se revisan solas cada mañana; también puedes pulsar "Buscar nuevas" en Licitaciones.</div>
+          : <div className="aviso" style={{ marginBottom: 0 }}>Falta el ticket. Pídelo gratis en <strong>chilecompra.cl/api</strong> (botón "Pide tu ticket", con Clave Única). Llega por correo; agrégalo en Render → backend → Environment como <strong>MERCADOPUBLICO_TICKET</strong>.</div>}
+        {params && <>
+          <div className="field">
+            <label>Palabras clave (separadas por coma)</label>
+            <textarea className="textarea" rows={4} value={params.mp_palabras || ""} onChange={(e) => setParams({ ...params, mp_palabras: e.target.value })} />
+            <span className="mini">Se busca cualquiera de estas palabras en el nombre de la licitación (sin importar tildes).</span>
+          </div>
+          {texto("mp_regiones", "Regiones (separadas por coma; vacío = todo Chile)")}
+          <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
+        </>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-titulo">Respaldo</div>
+        <div className="mini">Un Excel con toda la información del sistema (productos, precios, clientes, cotizaciones, ventas, compras, gastos).</div>
+        <div><button className="btn btn-ghost" disabled={respaldando} onClick={bajarRespaldo}>↓ Descargar respaldo ahora</button></div>
+        {resp && (resp.correo ? <>
+          <div className="mini"><span className="estado estado-ok">✓ Correo configurado</span> Se envía solo una vez por semana.{resp.ultimo ? ` Último envío: ${new Date(resp.ultimo).toLocaleString("es-CL")}.` : " Aún no se ha enviado."}</div>
+          {params && texto("respaldo_email", "Enviar el respaldo a")}
+          <div><button className="btn btn-ghost" disabled={respaldando} onClick={enviarRespaldo}>✉ Enviar respaldo ahora</button></div>
+        </> : (
+          <div className="aviso" style={{ marginBottom: 0 }}>
+            Para recibirlo por correo cada semana: en la cuenta de Gmail de la empresa activa la verificación en 2 pasos y crea una
+            "contraseña de aplicación". Luego en Render → backend → Environment agrega <strong>SMTP_USER</strong> (el correo) y <strong>SMTP_PASS</strong> (esa contraseña).
+          </div>
+        ))}
       </div>
 
       <div className="panel">

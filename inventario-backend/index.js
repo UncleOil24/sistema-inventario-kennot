@@ -18,6 +18,7 @@ require("./src/models/Parametro");
 require("./src/models/Gasto");
 require("./src/models/RegistroCambio");
 require("./src/models/AuditoriaIA");
+require("./src/models/Licitacion");
 
 const productosRoutes = require("./src/routes/productos");
 const cotizacionesRoutes = require("./src/routes/cotizaciones");
@@ -33,6 +34,9 @@ const preciosRoutes = require("./src/routes/precios");
 const gastosRoutes = require("./src/routes/gastos");
 const parametrosRoutes = require("./src/routes/parametros");
 const iaRoutes = require("./src/routes/ia");
+const mercadoPublicoRoutes = require("./src/routes/mercadoPublico");
+const respaldoRoutes = require("./src/routes/respaldo");
+const tareasRoutes = require("./src/routes/tareas");
 const { migrar } = require("./src/services/migracion");
 const { requiereAuth } = require("./src/middlewares/auth");
 const { crearAdminInicial } = require("./src/controllers/authController");
@@ -57,6 +61,7 @@ app.get("/", (req, res) => {
 
 // Login es público; todo lo demás bajo /api exige sesión
 app.use("/api/auth", authRoutes);
+app.use("/api/tareas", tareasRoutes); // tareas programadas (públicas, sin efecto si no corresponde)
 app.use("/api", requiereAuth);
 app.use("/api/usuarios", usuariosRoutes);
 app.use("/api/productos", productosRoutes);
@@ -71,6 +76,8 @@ app.use("/api/precios", preciosRoutes);
 app.use("/api/gastos", gastosRoutes);
 app.use("/api/parametros", parametrosRoutes);
 app.use("/api/ia", iaRoutes);
+app.use("/api/mercado-publico", mercadoPublicoRoutes);
+app.use("/api/respaldo", respaldoRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ ok: false, error: `Ruta no encontrada: ${req.method} ${req.path}` });

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal, Estado, SelectorProducto } from "./ui";
-import { fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto } from "./lib";
+import { fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses } from "./lib";
 
 // Sube la lista del cliente (Excel, PDF, Word o foto), Claude calza cada línea con el catálogo
 // y aquí se revisa antes de agregarla a la cotización. Los precios los pone el sistema.
-export default function ImportarLista({ tipo, notify, onClose, onAgregar }) {
+// cargar (opcional): función que devuelve el resultado ya calzado (p.ej. una licitación), en vez de subir archivo
+export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar, titulo = "// Cotizar lista del cliente" }) {
   const productos = useProductos();
   const [archivo, setArchivo] = useState(null);
   const [leyendo, setLeyendo] = useState(false);
@@ -22,6 +23,18 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar }) {
     finally { setLeyendo(false); }
   };
 
+  useEffect(() => {
+    if (!cargar) return;
+    let vivo = true;
+    setLeyendo(true);
+    cargar()
+      .then((r) => { if (vivo) { setRes(r); setLineas(r.lineas.map((l, i) => ({ ...l, i, incluir: !!l.producto }))); } })
+      .catch((e) => { notify(e.message, "danger"); onClose(); })
+      .finally(() => vivo && setLeyendo(false));
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const set = (i, cambios) => setLineas((ls) => ls.map((l) => (l.i === i ? { ...l, ...cambios } : l)));
   const elegidas = lineas.filter((l) => l.incluir && l.producto);
   const revisar = lineas.filter((l) => l.calce === "parecido" || l.calce === "sin_producto" || (l.producto && !(precioSegun(l.producto, tipo) > 0))).length;
@@ -38,16 +51,18 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar }) {
   };
 
   return (
-    <Modal titulo="// Cotizar lista del cliente" onClose={onClose} ancho={1150}
+    <Modal titulo={titulo} onClose={onClose} ancho={1150}
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{elegidas.length} de {lineas.length} líneas se agregarán{revisar ? ` · ${revisar} para revisar (en amarillo)` : ""}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={!elegidas.length} onClick={agregar}>Agregar a la cotización</button>
       </> : <>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!archivo || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo con Claude...</> : "Leer lista"}</button>
+        {!cargar && <button className="btn btn-primary" disabled={!archivo || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo con Claude...</> : "Leer lista"}</button>}
       </>}>
-      {!res ? (
+      {!res && cargar ? (
+        <div className="cot-empty"><span className="spinner"></span>Buscando cada producto en el catálogo con Claude...</div>
+      ) : !res ? (
         <>
           <div className="mini">Sube la lista tal como la mandó el cliente: Excel, PDF, Word o una foto. Claude lee cada línea y propone el producto de nuestro catálogo; tú revisas antes de agregar. Puede tardar unos segundos por cada 30 líneas.</div>
           <input type="file" accept=".xlsx,.xlsm,.pdf,.docx,.csv,.txt,.jpg,.jpeg,.png,.webp" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
@@ -78,7 +93,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar }) {
                       <td>
                         <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => precioSegun(p, tipo)}
                           onChange={(p) => set(l.i, { producto: p, incluir: !!p, calce: p ? (p.id === l.producto?.id ? l.calce : "exacto") : "sin_producto", nota: p && p.id !== l.producto?.id ? "Elegido a mano" : l.nota })} />
-                        {l.producto && <div className="mini">{l.producto.unidad}</div>}
+                        {l.producto && <div className="mini">{l.producto.unidad}{l.producto.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(l.producto.fecha_precio)}</span>}</div>}
                       </td>
                       <td className="price-cell">{l.producto ? (precio > 0 ? fmt(precio) : "sin precio") : "—"}</td>
                       <td className="price-cell">{precio > 0 ? fmt(precio * Number(l.cantidad || 0)) : ""}</td>

@@ -17,8 +17,15 @@ const CAMPOS_COSTO = [
 const CAMPOS_OCULTOS = ["precio_venta", "stock", "stock_minimo"];
 
 // Agrega los precios de venta calculados y oculta costos si corresponde
+// Un precio es "antiguo" si su fecha tiene más meses que el parámetro meses_precio_antiguo
+const limiteAntiguo = (params) => {
+  const d = new Date();
+  d.setMonth(d.getMonth() - (Number(params.meses_precio_antiguo) || 6));
+  return d.toISOString().slice(0, 10);
+};
 const vista = (req, params) => (p) => {
   const j = typeof p.toJSON === "function" ? p.toJSON() : { ...p };
+  j.precio_antiguo = !!(Number(j.precio_compra) > 0 && j.fecha_precio && String(j.fecha_precio) < limiteAntiguo(params));
   j.precio_convenio = precioVenta(j.precio_compra, "convenio", params);
   j.precio_particular = precioVenta(j.precio_compra, "particular", params);
   CAMPOS_OCULTOS.forEach((c) => delete j[c]);
@@ -53,20 +60,22 @@ const getProductos = handler(async (req, res) => {
   if (revision === "aviso") y.push(literal(SQL_AVISO));
   if (revision === "confirmados") where.confirmado = true;
   if (revision === "sin_confirmar") y.push({ confirmado: false, precio_compra: { [Op.gt]: 0 } });
+  const params0 = await getParametros();
+  if (revision === "antiguo") y.push({ precio_compra: { [Op.gt]: 0 }, fecha_precio: { [Op.lt]: limiteAntiguo(params0) } });
   if (y.length) where[Op.and] = y;
 
   const camposValidos = ["id", "codigo", "nombre", "categoria", "precio_compra", "proveedor", "fecha_precio"];
   const ordenBy = camposValidos.includes(sort) ? sort : "codigo";
   const ordenDir = String(dir).toUpperCase() === "DESC" ? "DESC" : "ASC";
 
-  const [productos, params] = await Promise.all([
+  const [productos] = await Promise.all([
     Producto.findAll({
       where,
       order: [[literal(`"${ordenBy}" IS NULL`), "ASC"], [ordenBy, ordenDir], ["id", "ASC"]],
       limit: Math.min(Number(limite) || 5000, 5000),
     }),
-    getParametros(),
   ]);
+  const params = params0;
   res.json({ ok: true, data: productos.map(vista(req, params)) });
 });
 
@@ -82,6 +91,7 @@ const getCategorias = handler(async (req, res) => {
 
 // GET /api/productos/resumen   (para la pantalla Por revisar)
 const getResumen = handler(async (req, res) => {
+  const lim = limiteAntiguo(await getParametros());
   const [filas] = await sequelize.query(`
     SELECT categoria,
       COUNT(*)::int AS items,
@@ -89,8 +99,9 @@ const getResumen = handler(async (req, res) => {
       COUNT(*) FILTER (WHERE precio_compra IS NULL OR precio_compra <= 0)::int AS sin_precio,
       COUNT(*) FILTER (WHERE confirmado)::int AS confirmados,
       COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
-      COUNT(*) FILTER (WHERE NOT confirmado AND precio_compra > 0)::int AS sin_confirmar
-    FROM productos WHERE activo GROUP BY categoria ORDER BY categoria`);
+      COUNT(*) FILTER (WHERE NOT confirmado AND precio_compra > 0)::int AS sin_confirmar,
+      COUNT(*) FILTER (WHERE precio_compra > 0 AND fecha_precio < :lim)::int AS antiguos
+    FROM productos WHERE activo GROUP BY categoria ORDER BY categoria`, { replacements: { lim } });
   res.json({ ok: true, data: filas });
 });
 
@@ -258,6 +269,7 @@ const desconfirmarPrecio = handler(async (req, res) => {
 });
 
 module.exports = {
+  limiteAntiguo,
   getProductos, getCategorias, getResumen, getProducto, crearProducto, actualizarProducto, eliminarProducto,
   getPrecios, agregarPrecio, descartarPrecio, confirmarPrecio, desconfirmarPrecio, vista,
 };

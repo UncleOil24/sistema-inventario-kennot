@@ -75,6 +75,7 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
       precio,
       costo,
       proveedor: previo?.proveedor ?? p.proveedor ?? null,
+      fecha_precio: previo?.fecha_precio ?? p.fecha_precio ?? null,
     };
   });
 };
@@ -88,11 +89,27 @@ const datosCliente = async (body, t) => {
   return { cliente_id: null, cliente: body.cliente || null, tipo_precio: body.tipo_precio || "convenio" };
 };
 
-// GET /api/cotizaciones?estado=&busqueda=
+// Cotizaciones abiertas a las que hay que llamar: la próxima fecha de contacto llegó, o no se ha
+// hablado con el cliente en `dias_seguimiento` días desde que se envió (o desde el último contacto).
+const wherePorSeguir = async () => {
+  const params = await getParametros();
+  const dias = Number(params.dias_seguimiento) || 5;
+  const hoy = hoyISO();
+  const limite = sumarDias(hoy, -dias);
+  return {
+    estado: "cotizacion",
+    [Op.or]: [
+      { proximo_contacto: { [Op.lte]: hoy } },
+      { proximo_contacto: null, [Op.and]: [sequelize.where(sequelize.fn("COALESCE", sequelize.col("ultimo_contacto"), sequelize.col("fecha")), { [Op.lte]: limite })] },
+    ],
+  };
+};
+
+// GET /api/cotizaciones?estado=&busqueda=&seguimiento=1
 const getCotizaciones = handler(async (req, res) => {
   await marcarVencidas();
   const { estado, busqueda } = req.query;
-  const where = {};
+  const where = req.query.seguimiento === "1" ? await wherePorSeguir() : {};
   if (estado) where.estado = estado;
   if (busqueda) where[Op.or] = ["numero", "cliente", "nombre_cotizacion"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   const data = await Cotizacion.findAll({ where, order: [["createdAt", "DESC"]] });
@@ -174,6 +191,27 @@ const cambiarEstado = handler(async (req, res) => {
   if (estado === "cotizacion" && cot.estado === "vencida") cambios.fecha_validez = sumarDias(hoyISO(), cot.validez_dias || 30);
   await cot.update(cambios);
   res.json({ ok: true, data: vista(req)(cot) });
+});
+
+// POST /api/cotizaciones/:id/seguimiento   { nota, proximo_contacto (AAAA-MM-DD) | dias }
+// Registra que se habló con el cliente y cuándo volver a llamar.
+const registrarSeguimiento = handler(async (req, res) => {
+  const cot = await Cotizacion.findByPk(req.params.id);
+  if (!cot) throw new ErrorNegocio("Cotización no encontrada", 404);
+  if (cot.estado !== "cotizacion") throw new ErrorNegocio("Solo se hace seguimiento a cotizaciones abiertas");
+  const params = await getParametros();
+  const hoy = hoyISO();
+  const proximo = req.body?.proximo_contacto
+    || (req.body?.dias === 0 || req.body?.dias === "0" ? null : sumarDias(hoy, Number(req.body?.dias) || Number(params.dias_seguimiento) || 5));
+  const historial = [...(cot.seguimientos || []), { fecha: new Date().toISOString(), nota: req.body?.nota || "", usuario: req.usuario.nombre, proximo }];
+  await cot.update({ seguimientos: historial, ultimo_contacto: hoy, proximo_contacto: proximo });
+  res.json({ ok: true, data: vista(req)(cot) });
+});
+
+// GET /api/cotizaciones/por-seguir/cantidad
+const cantidadPorSeguir = handler(async (req, res) => {
+  await marcarVencidas();
+  res.json({ ok: true, data: { cantidad: await Cotizacion.count({ where: await wherePorSeguir() }) } });
 });
 
 // DELETE /api/cotizaciones/:id
@@ -265,6 +303,7 @@ const descargarPdf = async (req, res) => {
 };
 
 module.exports = {
+  registrarSeguimiento, cantidadPorSeguir, wherePorSeguir,
   descargarPdf,
   getCotizaciones, getCotizacion, crearCotizacion, actualizarCotizacion, cambiarEstado, eliminarCotizacion, descargarExcel,
 };
