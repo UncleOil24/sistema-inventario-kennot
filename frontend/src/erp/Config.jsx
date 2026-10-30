@@ -9,7 +9,11 @@ export default function Config({ notify }) {
   const [importando, setImportando] = useState(false);
   const [resultado, setResultado] = useState(null);
 
-  useEffect(() => { api("/parametros").then(setParams).catch((e) => notify(e.message, "danger")); }, [notify]);
+  const [ia, setIa] = useState(null);
+  useEffect(() => {
+    api("/parametros").then(setParams).catch((e) => notify(e.message, "danger"));
+    api("/ia/estado").then(setIa).catch(() => {});
+  }, [notify]);
 
   const guardar = async () => {
     setGuardando(true);
@@ -37,13 +41,14 @@ export default function Config({ notify }) {
     finally { setImportando(false); }
   };
 
-  const campo = (k, label, ayuda) => (
+  const campo = (k, label, ayuda, tipo = "number") => (
     <div className="field">
       <label>{label}</label>
-      <input type="number" value={params[k] ?? ""} onChange={(e) => setParams({ ...params, [k]: e.target.value })} />
+      <input type={tipo} value={params[k] ?? ""} onChange={(e) => setParams({ ...params, [k]: e.target.value })} />
       {ayuda && <span className="mini">{ayuda}</span>}
     </div>
   );
+  const texto = (k, label) => campo(k, label, null, "text");
 
   return (
     <div className="dash-grid">
@@ -65,6 +70,32 @@ export default function Config({ notify }) {
           </div>
           <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
         </>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-titulo">Datos de la empresa (PDF de la cotización)</div>
+        {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
+          <div className="fields-row">{texto("empresa_nombre", "Razón social")}{texto("empresa_rut", "RUT")}</div>
+          {texto("empresa_giro", "Giro")}
+          <div className="fields-row">{texto("empresa_contacto", "Contacto")}{texto("empresa_fono", "Teléfono")}</div>
+          {texto("empresa_email", "Email")}
+          <div className="fields-row">{texto("responsable_nombre", "Responsable comercial")}{texto("responsable_cargo", "Cargo")}</div>
+          {texto("representante_nombre", "Representante legal (firma)")}
+          <div className="fields-row">{texto("banco", "Banco")}{texto("tipo_cuenta", "Tipo de cuenta")}</div>
+          {texto("numero_cuenta", "N° de cuenta")}
+          <div className="field">
+            <label>Texto de agradecimiento</label>
+            <textarea className="textarea" rows={3} value={params.texto_agradecimiento || ""} onChange={(e) => setParams({ ...params, texto_agradecimiento: e.target.value })} />
+          </div>
+          <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
+        </>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-titulo">Lectura con Claude</div>
+        {!ia ? <span className="mini">—</span> : ia.configurada
+          ? <div className="mini"><span className="estado estado-ok">✓ Conectado</span> Modelo: {ia.modelo}. Se usa para leer listas de clientes y documentos de proveedores. Cada respuesta queda guardada para auditar.</div>
+          : <div className="aviso" style={{ marginBottom: 0 }}>Falta la clave de la API de Anthropic. En Render → servicio del backend → Environment, agrega <strong>ANTHROPIC_API_KEY</strong> con la clave de la empresa (console.anthropic.com) y reinicia el servicio.</div>}
       </div>
 
       <div className="panel">

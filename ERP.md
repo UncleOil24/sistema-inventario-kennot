@@ -87,12 +87,51 @@ GET/POST/PUT/DELETE /api/gastos
 GET/PUT /api/parametros          GET /api/dashboard/reportes?desde=&hasta=
 ```
 
-## Pendiente (próximas etapas)
+## Lectura con Claude (API de Anthropic)
 
-- Calce con Claude (API de Anthropic): subir la lista del cliente o la cotización del proveedor y que proponga el producto por línea.
-- PDF de la cotización con formato Kenott (hoy se descarga en Excel con la plantilla).
-- Roles separados (ventas, compras, administración, gerencia); hoy hay Admin y Usuario.
+Claude **lee y propone**; el sistema pone los precios y una persona revisa antes de emitir o cambiar un precio.
+
+| Dónde | Qué hace |
+|---|---|
+| Cotizar → **Subir lista del cliente** | Excel, PDF, Word, CSV o foto. Claude extrae cada línea (descripción, cantidad, unidad) y elige el producto del catálogo entre candidatos: exacto, equivalente, parecido o sin producto, con una nota corta. Pantalla de revisión: amarillo = parecido, sin producto o sin precio; se puede cambiar el producto o buscar otro. La descripción del cliente queda guardada en cada línea. |
+| Catálogo o Compras → **Documento proveedor** (admin) | PDF o foto de cotización/factura. Claude extrae proveedor, N°, fecha y líneas con precio unitario neto (si venían con IVA se dividen por 1,19; si solo hay total, ÷ cantidad) y se comprueba que la suma de líneas dé el total del documento. Cada línea se asigna a un producto o se crea uno nuevo. Al aprobar, los precios entran al historial y se recalcula precio vigente, opciones y REVISAR. |
+
+Cómo calza: el servidor busca primero en el catálogo los 15 candidatos más parecidos (descripción estándar +
+descripciones con que cada proveedor cotizó ese producto) y Claude elige entre ellos, así nunca inventa productos.
+Probado con las 2.229 descripciones de proveedores de la planilla: el producto correcto queda entre los candidatos en el 97% de los casos.
+
+Configuración en Render (servicio del backend → Environment):
+
+| Variable | Para qué |
+|---|---|
+| `ANTHROPIC_API_KEY` | Clave de la API (console.anthropic.com). La administra la empresa. Sin ella, los botones avisan que falta. |
+| `ANTHROPIC_MODEL` | Opcional. Por defecto `claude-sonnet-5-5`. |
+
+Cada respuesta de Claude queda en la tabla `auditoria_ia` (archivo, usuario, tokens usados y respuesta), para auditar calces y costos.
+
+## Cotización en PDF
+
+Botón **Guardar y descargar PDF** en Cotizar y **↓ PDF** en Cotizaciones. Mismo diseño que la plantilla Excel
+(cabecera verde con logo, cliente, descripción, detalle, totales, responsable comercial, datos de transferencia y firma).
+Los datos de la empresa se editan en Configuración. Con muchas líneas pasa a varias páginas. El Excel sigue disponible.
+
+## Endpoints de esta etapa
+
+```
+GET  /api/ia/estado
+POST /api/ia/lista-cliente                (multipart: archivo)
+POST /api/ia/documento-proveedor          (multipart: archivo, admin)
+POST /api/ia/documento-proveedor/aprobar  { proveedor, documento, fecha, origen, lineas: [{ producto_id | nuevo, precio, ... }] }
+GET  /api/ia/auditoria                    (admin)
+GET  /api/cotizaciones/:id/pdf
+```
+
+Nuevas dependencias del backend: `@anthropic-ai/sdk`, `pdfkit`, `mammoth` (leer Word).
+
+## Pendiente
+
 - Kenott y Tactics como empresas separadas, si se decide.
+- Facturación electrónica SII y portales de compras públicas (fase futura).
 
 ---
 

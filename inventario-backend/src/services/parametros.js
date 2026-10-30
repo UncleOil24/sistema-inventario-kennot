@@ -6,6 +6,20 @@ const DEFAULTS = {
   margen_particular: "50",        // % sobre el precio de compra
   ultimo_numero_cotizacion: "0",  // la próxima cotización usa el siguiente número
   validez_cotizacion_dias: "30",
+  // Datos de la empresa para el PDF de la cotización
+  empresa_nombre: "INVERSIONES KENOTT SpA",
+  empresa_rut: "78.060.315-1",
+  empresa_giro: "Comercialización y Distribución de Productos",
+  empresa_contacto: "Marcela Espinosa",
+  empresa_fono: "+56 9 4709 6606",
+  empresa_email: "kenottinversiones@gmail.com",
+  responsable_nombre: "Nicol Orellana",
+  responsable_cargo: "Jefa Departamento de Ventas",
+  representante_nombre: "Marcela Tapia Espinosa",
+  banco: "BCI",
+  tipo_cuenta: "Cuenta Corriente en Pesos",
+  numero_cuenta: "97527637",
+  texto_agradecimiento: "Agradecemos sinceramente la oportunidad de presentar esta cotización y quedamos a su disposición para atender cualquier consulta técnica o comercial relacionada con los productos y servicios ofertados.",
 };
 
 const getParametros = async (t) => {

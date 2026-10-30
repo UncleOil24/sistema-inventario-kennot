@@ -93,3 +93,17 @@ export const lineaDesdeProducto = (p, tipo) => ({
   costo: p.precio_compra !== undefined ? Number(p.precio_compra) || 0 : undefined, proveedor: p.proveedor,
 });
 
+
+// Sube un archivo (multipart) y devuelve data o lanza Error con el mensaje del backend
+export async function subirArchivo(path, archivo, extra = {}) {
+  const fd = new FormData();
+  fd.append("archivo", archivo);
+  Object.entries(extra).forEach(([k, v]) => fd.append(k, v));
+  const res = await authFetch(`${API_URL}/api${path}`, { method: "POST", body: fd });
+  let data;
+  try { data = await res.json(); } catch { throw new Error(`Error ${res.status} del servidor`); }
+  if (!res.ok || !data.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data.data;
+}
+
+export const ETIQUETA_CALCE = { exacto: "Exacto", equivalente: "Equivalente", parecido: "Parecido", sin_producto: "Sin producto" };

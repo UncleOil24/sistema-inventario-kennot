@@ -29,6 +29,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
 
   const accion = async (fn, ok) => { try { await fn(); notify(ok); cargar(); } catch (e) { notify(e.message, "danger"); } };
   const excel = (c) => descargar(`/cotizaciones/${c.id}/excel`, `COT-${c.numero}-${c.cliente || "cliente"}.xlsx`).catch((e) => notify(e.message, "danger"));
+  const pdf = (c) => descargar(`/cotizaciones/${c.id}/pdf`, `COT-${c.numero}-${c.cliente || "cliente"}.pdf`).catch((e) => notify(e.message, "danger"));
   const rechazar = (c) => {
     const motivo = prompt(`¿Por qué se rechazó la N° ${c.numero}? (precio, plazo, se compró a otro...)`, "");
     if (motivo !== null) accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } }), "Cotización marcada como rechazada");
@@ -50,12 +51,12 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
           producto_id: i.producto_id, codigo: i.codigo ?? p.codigo, nombre: i.nombre, unidad: i.unidad,
           cantidad: i.cantidad, precio: i.precio, auto: false,
           convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
-          costo: i.costo, proveedor: i.proveedor,
+          costo: i.costo, proveedor: i.proveedor, descripcion_cliente: i.descripcion_cliente,
         };
       });
       onEditar({
         id: c.id, numero: c.numero, cliente_id: c.cliente_id || "", tipo_precio: c.tipo_precio,
-        nombre_cotizacion: c.nombre_cotizacion || "", validez_dias: c.validez_dias || 30, notas: c.notas || "", items,
+        nombre_cotizacion: c.nombre_cotizacion || "", validez_dias: c.validez_dias || 30, notas: c.notas || "", archivo_cliente: c.archivo_cliente || "", items,
       });
     } catch (e) { notify(e.message, "danger"); }
   };
@@ -103,6 +104,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
                   <div className="hist-total">{fmt(c.total)}</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => setAbierta(c)}>Ver</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => pdf(c)}>↓ PDF</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => excel(c)}>↓ Excel</button>
                     {["borrador", "cotizacion"].includes(c.estado) && <button className="btn btn-ghost btn-sm" onClick={() => editar(c)}>Editar</button>}
                     {c.estado === "borrador" && <button className="btn btn-ghost btn-sm" onClick={() => emitir(c)}>Emitir</button>}
@@ -138,6 +140,7 @@ function DetalleCotizacion({ cot, esAdmin, onClose, onVencer }) {
         <span>{cot.cliente || "Sin cliente"}</span><span>{fecha(cot.fecha || cot.createdAt)}</span>
         <span>Validez {cot.validez_dias} días{cot.fecha_validez ? ` (hasta ${fecha(cot.fecha_validez)})` : ""}</span>
         {cot.creado_por && <span>Por {cot.creado_por}</span>}
+        {cot.archivo_cliente && <span>Lista del cliente: {cot.archivo_cliente}</span>}
         <Estado valor={cot.tipo_precio} /><Estado valor={cot.estado} />
       </div>
       <div className="table-wrap">

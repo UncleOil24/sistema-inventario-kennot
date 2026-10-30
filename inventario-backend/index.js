@@ -17,6 +17,7 @@ require("./src/models/PrecioProveedor");
 require("./src/models/Parametro");
 require("./src/models/Gasto");
 require("./src/models/RegistroCambio");
+require("./src/models/AuditoriaIA");
 
 const productosRoutes = require("./src/routes/productos");
 const cotizacionesRoutes = require("./src/routes/cotizaciones");
@@ -31,6 +32,7 @@ const usuariosRoutes = require("./src/routes/usuarios");
 const preciosRoutes = require("./src/routes/precios");
 const gastosRoutes = require("./src/routes/gastos");
 const parametrosRoutes = require("./src/routes/parametros");
+const iaRoutes = require("./src/routes/ia");
 const { migrar } = require("./src/services/migracion");
 const { requiereAuth } = require("./src/middlewares/auth");
 const { crearAdminInicial } = require("./src/controllers/authController");
@@ -68,6 +70,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/precios", preciosRoutes);
 app.use("/api/gastos", gastosRoutes);
 app.use("/api/parametros", parametrosRoutes);
+app.use("/api/ia", iaRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ ok: false, error: `Ruta no encontrada: ${req.method} ${req.path}` });
@@ -75,7 +78,8 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err.message);
-  res.status(500).json({ ok: false, error: err.message });
+  if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ ok: false, error: "El archivo es demasiado grande" });
+  res.status(err.status || 500).json({ ok: false, error: err.message });
 });
 
 const start = async () => {

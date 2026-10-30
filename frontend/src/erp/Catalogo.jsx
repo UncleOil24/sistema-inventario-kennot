@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal } from "./ui";
+import DocumentoProveedor from "./DocumentoProveedor";
 import { api, fmt, fecha, hoyISO, invalidarProductos } from "./lib";
 
 const UNIDADES = ["UNIDAD", "METRO", "KG", "CAJA", "ROLLO", "M3", "M2", "BOLSA", "SACO", "PACK", "PLANCHA", "JUEGO", "LITRO", "GALÓN"];
@@ -23,6 +24,7 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
   const [mostrar, setMostrar] = useState(POR_PAGINA);
   const [editar, setEditar] = useState(null);
   const [precios, setPrecios] = useState(null);
+  const [documento, setDocumento] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -76,6 +78,7 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
         <select className="filter-select" value={revision} onChange={(e) => setRevision(e.target.value)}>
           {FILTROS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
         </select>
+        {esAdmin && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura de proveedor (PDF o foto)">⇪ Documento proveedor</button>}
         <button className="btn btn-primary" onClick={() => setEditar({ nombre: "", categoria: categoria !== "Todas" ? categoria : (categorias[0]?.categoria || ""), unidad: "UNIDAD" })}>+ Nuevo producto</button>
       </div>
 
@@ -148,6 +151,7 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
 
       {editar && <EditarProducto producto={editar} esAdmin={esAdmin} categorias={categorias} proveedores={proveedores} notify={notify}
         onClose={() => setEditar(null)} onGuardado={() => { setEditar(null); refrescar(); }} />}
+      {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} onClose={() => { setDocumento(false); refrescar(); }} />}
       {precios && <PreciosProducto producto={precios} proveedores={proveedores} notify={notify}
         onClose={() => setPrecios(null)} onCambio={refrescar} />}
     </>

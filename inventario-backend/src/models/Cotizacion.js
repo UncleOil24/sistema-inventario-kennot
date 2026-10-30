@@ -21,6 +21,7 @@ const Cotizacion = sequelize.define("Cotizacion", {
   motivo_estado: { type: DataTypes.STRING(255), allowNull: true }, // p.ej. por qué se rechazó
   venta_id: { type: DataTypes.INTEGER, allowNull: true },
   notas: { type: DataTypes.TEXT, allowNull: true },
+  archivo_cliente: { type: DataTypes.STRING(255), allowNull: true }, // nombre del archivo que envió el cliente
   creado_por: { type: DataTypes.STRING(100), allowNull: true },
   // items: [{ producto_id, nombre, descripcion_cliente, unidad, cantidad, precio, costo, proveedor }]
   // "precio" (venta) y "costo" (compra) se COPIAN al cotizar: si el catálogo cambia

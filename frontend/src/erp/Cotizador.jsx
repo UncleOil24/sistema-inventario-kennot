@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Totales, Estado } from "./ui";
+import ImportarLista from "./ImportarLista";
 import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto } from "./lib";
 
 // Cotizador: arma la cotización con nuestros precios según el tipo de cliente.
@@ -8,6 +9,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const productos = useProductos();
   const [q, setQ] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [importar, setImportar] = useState(false);
   const { items } = borrador;
   const cliente = clientes.find((c) => String(c.id) === String(borrador.cliente_id));
   const tipo = borrador.tipo_precio || cliente?.tipo || "convenio";
@@ -54,7 +56,22 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   const limpiar = () => setBorrador({ cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] });
 
-  const guardar = async (estado, excel = false) => {
+  // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
+  const agregarLista = (nuevas, res) => {
+    setBorrador((b) => {
+      const lista = [...b.items];
+      for (const n of nuevas) {
+        const previa = lista.find((i) => i.producto_id === n.producto_id);
+        if (previa) Object.assign(previa, { cantidad: Number(previa.cantidad) + Number(n.cantidad) });
+        else lista.push(n);
+      }
+      return { ...b, items: lista, archivo_cliente: res.archivo, nombre_cotizacion: b.nombre_cotizacion || (res.cliente ? `Lista ${res.cliente}` : "") };
+    });
+    setImportar(false);
+    notify(`✓ ${nuevas.length} líneas agregadas desde la lista del cliente`);
+  };
+
+  const guardar = async (estado, salida = null) => {
     if (!items.length) return;
     if (sinPrecio && estado !== "borrador" && !confirm(`${sinPrecio} línea(s) sin precio. ¿Guardar igual?`)) return;
     setGuardando(true);
@@ -65,14 +82,15 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         nombre_cotizacion: borrador.nombre_cotizacion || undefined,
         validez_dias: Number(borrador.validez_dias) || 30,
         notas: borrador.notas || null,
+        archivo_cliente: borrador.archivo_cliente || null,
         estado,
-        items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio) })),
+        items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio), descripcion_cliente: i.descripcion_cliente || null })),
       };
       const cot = borrador.id
         ? await api(`/cotizaciones/${borrador.id}`, { method: "PUT", body })
         : await api("/cotizaciones", { method: "POST", body });
-      if (excel) await descargar(`/cotizaciones/${cot.id}/excel`, `COT-${cot.numero}-${cot.cliente || "cliente"}.xlsx`);
-      notify(`✓ Cotización N° ${cot.numero} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${excel ? " · Excel descargado" : ""}`);
+      if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `COT-${cot.numero}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
+      notify(`✓ Cotización N° ${cot.numero} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
       limpiar();
       onGuardada?.(cot);
     } catch (e) { notify(e.message, "danger"); }
@@ -113,6 +131,10 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         {!cliente && <div className="mini">Sin cliente se usa precio convenio. Si es institución, usa convenio; en duda, convenio.</div>}
       </div>
 
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        <button className="btn btn-ghost" onClick={() => setImportar(true)}>⇪ Subir lista del cliente (Excel, PDF, Word o foto)</button>
+        {borrador.archivo_cliente && <span className="mini">Lista: {borrador.archivo_cliente}</span>}
+      </div>
       <div className="field" style={{ position: "relative", marginBottom: "1rem" }}>
         <label>Agregar producto</label>
         <input className="search-input" style={{ paddingLeft: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder='Palabras en cualquier orden o N°. Ej: "cemento 25", "1416"' />
@@ -149,7 +171,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                   return (
                     <tr key={i.producto_id} className={!(Number(i.precio) > 0) ? "fila-alerta" : ""}>
                       <td className="id-cell">{i.codigo ?? ""}</td>
-                      <td>{i.nombre}<div className="mini">{i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}</div></td>
+                      <td>{i.nombre}<div className="mini">{i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}{i.descripcion_cliente ? ` · cliente: "${i.descripcion_cliente}"` : ""}</div></td>
                       <td><input className="qty-input" type="number" min="0" step="any" value={i.cantidad} onChange={(e) => setLinea(i.producto_id, "cantidad", e.target.value)} /></td>
                       <td>
                         <input className="qty-input" style={{ width: 96 }} type="number" min="0" value={i.precio} onChange={(e) => setLinea(i.producto_id, "precio", e.target.value)} />
@@ -184,10 +206,12 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         <button className="btn btn-ghost" onClick={limpiar} disabled={guardando}>Limpiar</button>
         <button className="btn btn-ghost" onClick={() => guardar("borrador")} disabled={!items.length || guardando}>Guardar borrador</button>
         <button className="btn btn-ghost" onClick={() => guardar("cotizacion")} disabled={!items.length || guardando}>Guardar cotización</button>
-        <button className="btn btn-primary" onClick={() => guardar("cotizacion", true)} disabled={!items.length || guardando}>
-          {guardando ? <><span className="spinner"></span>Guardando...</> : "Guardar y descargar Excel"}
+        <button className="btn btn-ghost" onClick={() => guardar("cotizacion", "excel")} disabled={!items.length || guardando}>Guardar + Excel</button>
+        <button className="btn btn-primary" onClick={() => guardar("cotizacion", "pdf")} disabled={!items.length || guardando}>
+          {guardando ? <><span className="spinner"></span>Guardando...</> : "Guardar y descargar PDF"}
         </button>
       </div>
+      {importar && <ImportarLista tipo={tipo} notify={notify} onClose={() => setImportar(false)} onAgregar={agregarLista} />}
     </>
   );
 }

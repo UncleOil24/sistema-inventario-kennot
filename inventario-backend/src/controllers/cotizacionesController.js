@@ -8,6 +8,7 @@ const Producto = require("../models/Producto");
 const { handler, ErrorNegocio, calcularTotales, normalizarItems } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { esAdmin } = require("../middlewares/auth");
+const { generarPdfCotizacion } = require("../services/pdfCotizacion");
 
 const PLANTILLA = path.join(__dirname, "../../plantillas/plantilla_cotizacion.xlsx");
 const ESTADOS = ["borrador", "cotizacion", "aceptada", "rechazada", "vencida"];
@@ -123,6 +124,7 @@ const crearCotizacion = handler(async (req, res) => {
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
       estado: b.estado === "borrador" ? "borrador" : "cotizacion",
       notas: b.notas || null,
+      archivo_cliente: b.archivo_cliente || null,
       items, ...calcularTotales(items),
       costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0),
       creado_por: req.usuario.nombre,
@@ -199,6 +201,7 @@ const descargarExcel = async (req, res) => {
     ws.getCell("D8").value = cot.cliente || "Sin nombre";
     ws.getCell("H8").value = fecha.toLocaleDateString("es-CL");
     ws.getCell("H9").value = validez.toLocaleDateString("es-CL");
+    ws.getCell("D9").value = cot.nombre_cotizacion || "";
 
     const FILA_INICIO = 12;
     const FILA_TOTALES_ORIG = 42;
@@ -245,6 +248,23 @@ const descargarExcel = async (req, res) => {
   }
 };
 
+// GET /api/cotizaciones/:id/pdf   (formato Kenott, sin costos)
+const limpioArchivo = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s.-]/g, "").trim().slice(0, 60) || "cliente";
+const descargarPdf = async (req, res) => {
+  try {
+    const cot = await Cotizacion.findByPk(req.params.id);
+    if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+    const empresa = await getParametros();
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="COT-${cot.numero}-${limpioArchivo(cot.cliente)}.pdf"`);
+    generarPdfCotizacion(cot.toJSON(), empresa, res);
+  } catch (error) {
+    console.error(error);
+    if (!res.headersSent) res.status(500).json({ ok: false, error: error.message });
+  }
+};
+
 module.exports = {
+  descargarPdf,
   getCotizaciones, getCotizacion, crearCotizacion, actualizarCotizacion, cambiarEstado, eliminarCotizacion, descargarExcel,
 };

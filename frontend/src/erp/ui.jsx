@@ -34,6 +34,10 @@ const ESTADOS = {
   particular: ["Particular", "neutral"],
   web: ["Tienda web", "neutral"],
   proveedor: ["Proveedor", "info"],
+  exacto: ["Exacto", "ok"],
+  equivalente: ["Equivalente", "info"],
+  parecido: ["Parecido", "warn"],
+  sin_producto: ["Sin producto", "warn"],
   activo: ["Activo", "ok"],
   inactivo: ["Inactivo", "muted"],
 };
@@ -168,4 +172,48 @@ export function PagosPanel({ doc, tipo, onRegistrar, onEliminar }) {
 
 export function Cargando() {
   return <div className="cot-empty"><span className="spinner"></span>Cargando...</div>;
+}
+
+// Selector de producto para revisar un calce: candidatos propuestos + búsqueda en todo el catálogo
+export function SelectorProducto({ valor, candidatos = [], productos, onChange, precioDe, permitirNinguno = true }) {
+  const [buscando, setBuscando] = useState(false);
+  const [q, setQ] = useState("");
+  const sugerencias = useMemo(() => {
+    const palabras = sinTildes(q).trim().split(/\s+/).filter(Boolean);
+    if (!palabras.length) return [];
+    return productos.filter((p) => { const t = sinTildes(`${p.codigo ?? ""} ${p.nombre}`); return palabras.every((w) => t.includes(w)); }).slice(0, 10);
+  }, [q, productos]);
+  const opciones = [...candidatos];
+  if (valor && !opciones.some((c) => c.id === valor.id)) opciones.unshift(valor);
+
+  if (buscando) {
+    return (
+      <div style={{ position: "relative", minWidth: 260 }}>
+        <input autoFocus className="qty-input" style={{ width: "100%", textAlign: "left" }} value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar en el catálogo..." onBlur={() => setTimeout(() => setBuscando(false), 200)} />
+        {sugerencias.length > 0 && (
+          <div className="sugerencias">
+            {sugerencias.map((p) => (
+              <button key={p.id} className="sugerencia" onMouseDown={() => { onChange(p); setBuscando(false); setQ(""); }}>
+                <span><span className="mini">{p.codigo}</span> {p.nombre}</span>
+                {precioDe && <span className="sug-meta">{fmt(precioDe(p))}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 260 }}>
+      <select className="select-linea" value={valor?.id || ""} onChange={(e) => {
+        if (e.target.value === "__buscar") { setBuscando(true); return; }
+        onChange(opciones.find((c) => String(c.id) === e.target.value) || null);
+      }}>
+        {permitirNinguno && <option value="">— Ninguno —</option>}
+        {opciones.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} · ` : ""}{c.nombre}</option>)}
+        <option value="__buscar">🔍 Buscar otro...</option>
+      </select>
+    </div>
+  );
 }

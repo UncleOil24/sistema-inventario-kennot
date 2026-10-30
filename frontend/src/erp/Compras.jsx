@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
 import { api, fmt, fecha, useProductos } from "./lib";
+import DocumentoProveedor from "./DocumentoProveedor";
 
 export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
   const [ordenes, setOrdenes] = useState([]);
@@ -9,6 +10,7 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
   const [busqueda, setBusqueda] = useState("");
   const [editando, setEditando] = useState(null); // null | "nueva" | orden
   const [detalle, setDetalle] = useState(null);
+  const [documento, setDocumento] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,7 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
           <option value="porpagar">Recibidas sin pagar</option>
           <option value="anulada">Anuladas</option>
         </select>
+        {esAdmin && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura del proveedor: actualiza el historial de precios">⇪ Documento proveedor</button>}
         <button className="btn btn-primary" onClick={() => setEditando("nueva")} disabled={proveedores.length === 0}
           title={proveedores.length === 0 ? "Primero crea un proveedor" : ""}>+ Nueva orden</button>
       </div>
@@ -89,6 +92,7 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
         </table>
       </div>
 
+      {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} onClose={() => { setDocumento(false); onPreciosCambio?.(); }} />}
       {editando && (
         <FormOrden orden={editando === "nueva" ? null : editando} proveedores={proveedores} notify={notify}
           onClose={() => setEditando(null)}
