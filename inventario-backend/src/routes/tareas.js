@@ -17,6 +17,7 @@ const horaChile = () => Number(new Date().toLocaleString("en-US", { timeZone: "A
 
 // Licitaciones nuevas (de la región, abiertas, sin revisar) que aún no salieron en un resumen
 async function nuevasSinAvisar(params) {
+  await mp.aplicarRelevanciaMinima(params);
   const filas = await Licitacion.findAll({
     where: { avisada: false, estado_interno: "nueva", [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] },
     order: [["prioridad", "DESC"], ["fecha_cierre", "ASC"]],

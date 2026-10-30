@@ -6,7 +6,7 @@ import { api, fmt, fecha, sinTildes } from "./lib";
 const VISTAS = [["nuevas", "Nuevas"], ["abiertas", "Abiertas"], ["cotizadas", "Cotizadas"], ["descartadas", "Descartadas"], ["todas", "Todas"]];
 const FUENTES = [["", "Todo"], ["compra_agil", "Compra Ágil"], ["licitacion", "Licitaciones"]];
 const tipoDe = (l) => (l.fuente === "compra_agil" ? "Compra Ágil" : "Licitación");
-const colorCalce = (r) => (r >= 70 ? "estado-ok" : r >= 40 ? "estado-neutral" : "estado-muted");
+const colorCalce = (r) => (r >= 80 ? "estado-ok" : r >= 50 ? "estado-neutral" : "estado-muted");
 const diasPara = (d) => (d ? Math.ceil((new Date(d) - new Date()) / 864e5) : null);
 
 // Licitaciones de Mercado Público que calzan con nuestras palabras clave y región.
@@ -91,7 +91,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
         {esAdmin && <button className="btn btn-primary" disabled={!data.ticket || avance?.estado === "corriendo"} onClick={sincronizar}>{avance?.estado === "corriendo" ? <><span className="spinner"></span>Buscando...</> : "↻ Buscar nuevas"}</button>}
       </div>
       <div className="mini" style={{ marginBottom: 10 }}>
-        {lista.length} procesos{!todasRegiones && data.regiones ? ` · región: ${data.regiones}` : ""}{data.monto_minimo ? ` · desde ${fmt(data.monto_minimo)}` : ""}
+        {lista.length} procesos{!todasRegiones && data.regiones ? ` · región: ${data.regiones}` : ""}{data.monto_minimo ? ` · desde ${fmt(data.monto_minimo)}` : ""}{data.relevancia_minima ? ` · calce desde ${data.relevancia_minima}%` : ""}
         {data.ultima_sincronizacion ? ` · revisado ${new Date(data.ultima_sincronizacion).toLocaleString("es-CL")}` : " · aún no se ha revisado"}
         {" · se buscan solas cada tarde a las 18:00 (nuevas listas en la mañana) · ★ = organismo prioritario · criterios en Config."}
       </div>
