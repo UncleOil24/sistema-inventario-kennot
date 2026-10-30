@@ -70,25 +70,48 @@ async function contenidoArchivo(file) {
   throw new ErrorNegocio("Formato no soportado. Sube Excel, PDF, Word, CSV o una foto");
 }
 
-// Llama a Claude obligándolo a responder con la herramienta (JSON con formato fijo)
+// Llama a Claude pidiéndole responder con la herramienta (JSON con formato fijo).
+// No se fuerza con tool_choice: algunos modelos no lo aceptan. Si responde en texto, se busca el JSON
+// en la respuesta, y si no aparece se reintenta una vez recordándole usar la herramienta.
+const extraerJson = (texto) => {
+  const t = String(texto || "");
+  const bloque = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidato = bloque ? bloque[1] : t.slice(t.indexOf("{"), t.lastIndexOf("}") + 1);
+  try { return candidato ? JSON.parse(candidato) : null; } catch { return null; }
+};
+
 async function llamar({ system, contenido, herramienta, maxTokens = 8000 }) {
   const cliente = getCliente();
-  let r;
-  try {
-    r = await cliente.messages.create({
-      model: MODELO(),
-      max_tokens: maxTokens,
-      system,
-      tools: [herramienta],
-      tool_choice: { type: "tool", name: herramienta.name },
-      messages: [{ role: "user", content: contenido }],
-    });
-  } catch (e) {
-    throw traducirError(e);
+  const instruccion = `\n\nResponde SIEMPRE llamando a la herramienta "${herramienta.name}" con todos los datos. No escribas texto aparte.`;
+  let uso = { input_tokens: 0, output_tokens: 0 };
+  let mensajes = [{ role: "user", content: contenido }];
+  for (let intento = 0; intento < 2; intento++) {
+    let r;
+    try {
+      r = await cliente.messages.create({
+        model: MODELO(),
+        max_tokens: maxTokens,
+        system: system + instruccion,
+        tools: [herramienta],
+        messages: mensajes,
+      });
+    } catch (e) {
+      throw traducirError(e);
+    }
+    uso = { input_tokens: uso.input_tokens + (r.usage?.input_tokens || 0), output_tokens: uso.output_tokens + (r.usage?.output_tokens || 0) };
+    const bloque = (r.content || []).find((b) => b.type === "tool_use" && b.name === herramienta.name);
+    if (bloque) return { datos: bloque.input, uso, truncado: r.stop_reason === "max_tokens" };
+    const texto = (r.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    const json = extraerJson(texto);
+    if (json && typeof json === "object") return { datos: json, uso, truncado: r.stop_reason === "max_tokens" };
+    // Reintento: se le muestra lo que respondió y se le pide usar la herramienta
+    mensajes = [
+      { role: "user", content: contenido },
+      { role: "assistant", content: r.content && r.content.length ? r.content : [{ type: "text", text: "(sin respuesta)" }] },
+      { role: "user", content: [{ type: "text", text: `Usa la herramienta "${herramienta.name}" para entregar el resultado.` }] },
+    ];
   }
-  const bloque = (r.content || []).find((b) => b.type === "tool_use");
-  if (!bloque) throw new ErrorNegocio("Claude no devolvió una respuesta válida. Intenta de nuevo.", 502);
-  return { datos: bloque.input, uso: r.usage || {}, truncado: r.stop_reason === "max_tokens" };
+  throw new ErrorNegocio("Claude no devolvió una respuesta válida. Intenta de nuevo.", 502);
 }
 
 // Errores de la API de Anthropic -> mensaje claro en español (el detalle original va al log de Render)
