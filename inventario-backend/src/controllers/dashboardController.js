@@ -16,14 +16,21 @@ const { visible, fichaUrl } = require("../services/mercadoPublico");
 
 const n = (v) => Math.round(Number(v) || 0);
 const ymd = (d) => d.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
-const claveMes = (fecha) => String(fecha).slice(0, 7); // "2026-10"
+const claveMes = (fecha) => (fecha instanceof Date ? ymd(fecha) : String(fecha)).slice(0, 7); // "2026-10"
+// Primer día del mes, "delta" meses antes/después del mes actual EN CHILE ("2026-10-01").
+// Ojo: el servidor (Render) corre en UTC; con new Date(año, mes, 1) el 1 de octubre se convertía al 30 de septiembre.
+const primerDiaMes = (delta = 0) => {
+  const [y, m] = ymd(new Date()).split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return d.toISOString().slice(0, 10);
+};
 
 // GET /api/dashboard?meses=6
 const getDashboard = handler(async (req, res) => {
   const meses = Math.min(Math.max(Number(req.query.meses) || 6, 1), 24);
   const hoy = new Date();
-  const inicioMes = ymd(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
-  const inicioSerie = ymd(new Date(hoy.getFullYear(), hoy.getMonth() - (meses - 1), 1));
+  const inicioMes = primerDiaMes(0);
+  const inicioSerie = primerDiaMes(-(meses - 1));
   const hoyStr = ymd(hoy);
 
   await Cotizacion.update({ estado: "vencida", motivo_estado: "Venció su validez" }, { where: { estado: "cotizacion", fecha_validez: { [Op.lt]: hoyStr } } });
@@ -65,8 +72,7 @@ const getDashboard = handler(async (req, res) => {
   // --- Serie mensual: ventas, costo, margen, gastos, utilidad y compras ---
   const serie = [];
   for (let i = meses - 1; i >= 0; i--) {
-    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-    serie.push({ mes: ymd(d).slice(0, 7), ventas: 0, costo: 0, margen: 0, gastos: 0, utilidad: 0, compras: 0, cantidad: 0 });
+    serie.push({ mes: primerDiaMes(-i).slice(0, 7), ventas: 0, costo: 0, margen: 0, gastos: 0, utilidad: 0, compras: 0, cantidad: 0 });
   }
   const idx = new Map(serie.map((s, i) => [s.mes, i]));
   for (const v of ventasPeriodo) {
@@ -77,7 +83,7 @@ const getDashboard = handler(async (req, res) => {
     s.cantidad += 1;
   }
   for (const oc of comprasPeriodo) {
-    const s = serie[idx.get(ymd(new Date(oc.fecha_recepcion)).slice(0, 7))];
+    const s = serie[idx.get(claveMes(oc.fecha_recepcion))];
     if (s) s.compras += Number(oc.subtotal);
   }
   for (const g of gastosPeriodo) {
@@ -198,7 +204,7 @@ const getDashboard = handler(async (req, res) => {
 // Utilidad por cliente y por proveedor, ahorro frente a la opción 2 y diferencia cotizado vs. pagado.
 const getReportes = handler(async (req, res) => {
   const hoy = new Date();
-  const desde = req.query.desde || ymd(new Date(hoy.getFullYear(), 0, 1));
+  const desde = req.query.desde || `${ymd(hoy).slice(0, 4)}-01-01`;
   const hasta = req.query.hasta || ymd(hoy);
   const ventas = await Venta.findAll({ where: { estado: "emitida", fecha: { [Op.between]: [desde, hasta] } } });
   const ventaIds = ventas.map((v) => v.id);

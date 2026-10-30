@@ -1,3 +1,5 @@
+// El servidor trabaja en hora de Chile (Render corre en UTC): fechas por defecto, "hoy" y meses del Inicio.
+process.env.TZ = process.env.TZ || "America/Santiago";
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");

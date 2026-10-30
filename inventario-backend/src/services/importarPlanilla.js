@@ -285,7 +285,7 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
     const vistosSueltos = new Set(previos.map(claveSuelta));
     const completados = new Map(); // precios existentes a los que EXTRAS agrega marca / calce / descripción
     const nuevos = [];
-    const hoy = new Date().toISOString().slice(0, 10);
+    const hoy = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
     const agregar = (x) => {
       const reg = { ...x, fecha: x.fecha || hoy, creado_por: usuario };
       const k = clave(reg);
