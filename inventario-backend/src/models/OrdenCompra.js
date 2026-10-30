@@ -8,6 +8,7 @@ const OrdenCompra = sequelize.define("OrdenCompra", {
   numero: { type: DataTypes.STRING(20), allowNull: true },
   proveedor_id: { type: DataTypes.INTEGER, allowNull: true },
   venta_id: { type: DataTypes.INTEGER, allowNull: true }, // si nació del cuadro de compra de una venta
+  proyecto_id: { type: DataTypes.INTEGER, allowNull: true }, // si es la compra consolidada de un proyecto
   proveedor_nombre: { type: DataTypes.STRING(255), allowNull: true },
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   fecha_recepcion: { type: DataTypes.DATE, allowNull: true },

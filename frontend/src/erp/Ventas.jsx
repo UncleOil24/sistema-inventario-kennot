@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
 import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
+import { ListaProyectos, DetalleProyecto, UnirEnProyecto } from "./Proyectos";
 
 export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbierta, irACompra }) {
   const [ventas, setVentas] = useState([]);
@@ -10,6 +11,11 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
   const [busqueda, setBusqueda] = useState("");
   const [nueva, setNueva] = useState(false);
   const [detalle, setDetalle] = useState(null);
+  const [modo, setModo] = useState("ventas"); // ventas | proyectos
+  const [sel, setSel] = useState(new Set());
+  const [unir, setUnir] = useState(false);
+  const [proyecto, setProyecto] = useState(null); // id del proyecto abierto
+  const [recargarProy, setRecargarProy] = useState(0);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -36,10 +42,35 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
   }, [abrirVentaId, verDetalle, onAbierta]);
 
   const activas = ventas.filter((v) => v.estado !== "anulada");
+  const seleccionadas = ventas.filter((v) => sel.has(v.id));
+  const marcar = (id) => setSel((s) => { const x = new Set(s); x.has(id) ? x.delete(id) : x.add(id); return x; });
+  const refrescar = () => { cargar(); setRecargarProy((n) => n + 1); };
   const porCobrar = activas.reduce((s, v) => s + Number(v.total) - Number(v.monto_pagado), 0);
+
+  const chipsModo = (
+    <div className="chips" style={{ marginBottom: 12 }}>
+      <button className={`chip ${modo === "ventas" ? "activo" : ""}`} onClick={() => setModo("ventas")}>Ventas</button>
+      <button className={`chip ${modo === "proyectos" ? "activo" : ""}`} onClick={() => setModo("proyectos")}>Proyectos / licitaciones</button>
+    </div>
+  );
+  const modales = (
+    <>
+      {unir && <UnirEnProyecto ventas={seleccionadas} notify={notify} onClose={() => setUnir(false)} onListo={(id) => { setUnir(false); setSel(new Set()); refrescar(); setProyecto(id); }} />}
+      {proyecto && <DetalleProyecto id={proyecto} notify={notify} esAdmin={esAdmin} onClose={() => setProyecto(null)} verVenta={verDetalle} irACompra={irACompra} onCambio={refrescar} />}
+    </>
+  );
+  if (modo === "proyectos") return (
+    <>
+      {chipsModo}
+      <ListaProyectos notify={notify} esAdmin={esAdmin} onAbrir={setProyecto} recargar={recargarProy} />
+      {modales}
+      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} notify={notify} irACompra={irACompra} verProyecto={setProyecto} onClose={() => setDetalle(null)} onCambio={() => { refrescar(); verDetalle(detalle.id); }} />}
+    </>
+  );
 
   return (
     <>
+      {chipsModo}
       <div className="stats">
         <div className="stat-card"><div className="stat-label">Ventas listadas</div><div className="stat-value">{activas.length}</div></div>
         <div className="stat-card"><div className="stat-label">Total (con IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.total), 0))}</div></div>
@@ -61,24 +92,28 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
           <option value="parcial">Pago parcial</option>
           <option value="pagada">Pagadas</option>
         </select>
+        {sel.size > 0 && <button className="btn btn-success" onClick={() => setUnir(true)}>Unir en proyecto ({sel.size})</button>}
         <button className="btn btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>
       </div>
+      {sel.size === 0 && <div className="mini" style={{ marginTop: -8, marginBottom: 10 }}>¿Varias órdenes de compra de una misma licitación? Márcalas con la casilla y pulsa "Unir en proyecto".</div>}
 
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>OC cliente</th><th>Factura</th><th>Total</th><th>Saldo</th><th>Vence</th><th>Estado</th>{esAdmin && <th>Compra</th>}<th></th></tr></thead>
+          <thead><tr><th></th><th>N°</th><th>Fecha</th><th>Cliente</th><th>OC cliente</th><th>Proyecto</th><th>Factura</th><th>Total</th><th>Saldo</th><th>Vence</th><th>Estado</th>{esAdmin && <th>Compra</th>}<th></th></tr></thead>
           <tbody>
-            {loading ? <tr className="empty-row"><td colSpan={11}><span className="spinner"></span>Cargando...</td></tr>
-              : ventas.length === 0 ? <tr className="empty-row"><td colSpan={11}>// sin ventas — conviértelas desde Cotizaciones o crea una nueva</td></tr>
+            {loading ? <tr className="empty-row"><td colSpan={13}><span className="spinner"></span>Cargando...</td></tr>
+              : ventas.length === 0 ? <tr className="empty-row"><td colSpan={13}>// sin ventas — conviértelas desde Cotizaciones o crea una nueva</td></tr>
               : ventas.map((v) => {
                 const saldo = Number(v.total) - Number(v.monto_pagado);
                 const vencida = v.estado !== "anulada" && saldo > 0 && v.fecha_vencimiento && v.fecha_vencimiento < new Date().toLocaleDateString("sv-SE");
                 return (
-                  <tr key={v.id} className={v.estado === "anulada" ? "fila-anulada" : ""}>
+                  <tr key={v.id} className={v.estado === "anulada" ? "fila-anulada" : sel.has(v.id) ? "fila-alerta" : ""}>
+                    <td>{v.estado !== "anulada" && !v.proyecto && <input type="checkbox" checked={sel.has(v.id)} onChange={() => marcar(v.id)} title="Marcar para unir en un proyecto" />}</td>
                     <td className="id-cell">{v.numero}</td>
                     <td className="mini">{fecha(v.fecha)}</td>
                     <td>{v.cliente_nombre || <span className="mini">Sin cliente</span>}</td>
                     <td className="mini">{v.orden_compra_cliente || "—"}</td>
+                    <td>{v.proyecto ? <button className="link" title={v.proyecto.nombre} onClick={() => setProyecto(v.proyecto.id)}>{v.proyecto.numero}</button> : <span className="mini">—</span>}</td>
                     <td className="mini">{v.documento || "—"}</td>
                     <td className="price-cell">{fmt(v.total)}</td>
                     <td className="price-cell" style={{ color: saldo > 0.5 ? "var(--text)" : "var(--text3)" }}>{fmt(saldo)}</td>
@@ -94,7 +129,8 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
       </div>
 
       {nueva && <NuevaVenta clientes={clientes} notify={notify} onClose={() => setNueva(false)} onCreada={(v) => { setNueva(false); cargar(); verDetalle(v.id); }} />}
-      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} notify={notify} irACompra={irACompra} onClose={() => setDetalle(null)} onCambio={() => { cargar(); verDetalle(detalle.id); }} />}
+      {modales}
+      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} notify={notify} irACompra={irACompra} verProyecto={setProyecto} onClose={() => setDetalle(null)} onCambio={() => { refrescar(); verDetalle(detalle.id); }} />}
     </>
   );
 }
@@ -172,7 +208,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   );
 }
 
-function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra }) {
+function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, verProyecto }) {
   const [cuadro, setCuadro] = useState(false);
   const [datos, setDatos] = useState({ documento: venta.documento || "", orden_compra_cliente: venta.orden_compra_cliente || "" });
   const r = venta.resumen;
@@ -200,6 +236,7 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra }) 
         {venta.fecha_vencimiento && <span>Vence {fecha(venta.fecha_vencimiento)}</span>}
         {venta.creado_por && <span>Por {venta.creado_por}</span>}
         <Estado valor={venta.estado} /> <Estado valor={venta.estado_pago} />
+        {venta.proyecto && <button className="link" onClick={() => { onClose(); verProyecto?.(venta.proyecto.id); }}>Proyecto {venta.proyecto.numero} · {venta.proyecto.nombre} →</button>}
       </div>
       {venta.notas && <div className="mini">{venta.notas}</div>}
       {venta.estado !== "anulada" && (

@@ -9,6 +9,7 @@ const Venta = sequelize.define("Venta", {
   cliente_id: { type: DataTypes.INTEGER, allowNull: true },
   cliente_nombre: { type: DataTypes.STRING(255), allowNull: true },
   cotizacion_id: { type: DataTypes.INTEGER, allowNull: true },
+  proyecto_id: { type: DataTypes.INTEGER, allowNull: true }, // licitación/proyecto al que pertenece
   orden_compra_cliente: { type: DataTypes.STRING(60), allowNull: true }, // N° OC que envía el cliente
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   fecha_vencimiento: { type: DataTypes.DATEONLY, allowNull: true },

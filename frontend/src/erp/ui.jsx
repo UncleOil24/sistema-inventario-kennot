@@ -40,6 +40,8 @@ const ESTADOS = {
   sin_producto: ["Sin producto", "warn"],
   activo: ["Activo", "ok"],
   inactivo: ["Inactivo", "muted"],
+  abierto: ["En curso", "info"],
+  cerrado: ["Terminado", "neutral"],
 };
 export function Estado({ valor }) {
   const [txt, tono] = ESTADOS[valor] || [valor, "neutral"];

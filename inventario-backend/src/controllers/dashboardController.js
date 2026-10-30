@@ -60,8 +60,8 @@ const getDashboard = handler(async (req, res) => {
       where: { estado: "recibida", estado_pago: { [Op.ne]: "pagada" } },
       attributes: ["id", "numero", "proveedor_nombre", "fecha_vencimiento", "total", "monto_pagado"],
     }),
-    Venta.findAll({ where: { estado: "emitida" }, attributes: ["id", "numero", "cliente_nombre", "fecha", "subtotal"], order: [["id", "DESC"]], limit: 300 }),
-    OrdenCompra.findAll({ where: { venta_id: { [Op.ne]: null }, estado: { [Op.ne]: "anulada" } }, attributes: ["venta_id"], raw: true }),
+    Venta.findAll({ where: { estado: "emitida" }, attributes: ["id", "numero", "cliente_nombre", "fecha", "subtotal", "proyecto_id"], order: [["id", "DESC"]], limit: 300 }),
+    OrdenCompra.findAll({ where: { [Op.or]: [{ venta_id: { [Op.ne]: null } }, { proyecto_id: { [Op.ne]: null } }], estado: { [Op.ne]: "anulada" } }, attributes: ["venta_id", "proyecto_id"], raw: true }),
     sequelize.query(`SELECT COUNT(*)::int AS productos,
         COUNT(*) FILTER (WHERE precio_compra IS NULL OR precio_compra <= 0)::int AS sin_precio,
         COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
@@ -131,8 +131,10 @@ const getDashboard = handler(async (req, res) => {
   };
 
   // --- Ventas confirmadas que aún no tienen órdenes de compra ---
-  const conOC = new Set(ocsVenta.map((o) => o.venta_id));
-  const porComprar = ventasActivas.filter((v) => !conOC.has(v.id));
+  // (una compra consolidada del proyecto cuenta para todas sus ventas)
+  const conOC = new Set(ocsVenta.map((o) => o.venta_id).filter(Boolean));
+  const proyConOC = new Set(ocsVenta.map((o) => o.proyecto_id).filter(Boolean));
+  const porComprar = ventasActivas.filter((v) => !conOC.has(v.id) && !(v.proyecto_id && proyConOC.has(v.proyecto_id)));
 
   // --- Caja del mes ---
   const sumaTipo = (tipo) => n(pagosMes.find((p) => p.tipo === tipo)?.total);
