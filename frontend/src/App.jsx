@@ -169,6 +169,12 @@ const styles = `
   .sug-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); white-space: nowrap; }
   .modal { max-height: calc(100vh - 2rem); display: flex; flex-direction: column; }
   .modal-body { overflow-y: auto; }
+  /* Las secciones de una ventana mantienen su alto: se desplaza la ventana completa, no cada sección */
+  .modal-body > * { flex-shrink: 0; }
+  /* Botones de cada fila siempre a la vista, aunque la tabla sea más ancha que la pantalla */
+  .table td:last-child:has(> .actions), .table th:last-child:empty { position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -8px 0 12px -6px rgba(0,0,0,0.6); }
+  .table th:last-child:empty { background: var(--surface2); }
+  .table tr:hover td:last-child:has(> .actions) { background: linear-gradient(rgba(255,255,255,0.02), rgba(255,255,255,0.02)), var(--surface); }
   .dash-titulo { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: 0.06em; text-transform: uppercase; }
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 1rem; }
   .clickable { cursor: pointer; transition: border-color 0.15s; }
@@ -232,6 +238,8 @@ const styles = `
   tfoot td { border-top: 1px solid var(--border2); background: var(--surface2); }
   tr.clickable { cursor: pointer; }
   @media (max-width: 768px) { .vigente { grid-template-columns: 1fr 1fr; } .fields-row.tres { grid-template-columns: 1fr; } }
+  .progreso { height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .progreso > div { height: 100%; background: var(--accent); transition: width 0.4s; }
   @media print {
     body * { visibility: hidden; }
     .cuadro-imprimible, .cuadro-imprimible * { visibility: visible; color: #000 !important; background: #fff !important; }

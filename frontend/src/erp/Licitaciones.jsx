@@ -95,7 +95,13 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
         {data.ultima_sincronizacion ? ` · revisado ${new Date(data.ultima_sincronizacion).toLocaleString("es-CL")}` : " · aún no se ha revisado"}
         {" · se buscan solas cada tarde a las 18:00 (nuevas listas en la mañana) · ★ = organismo prioritario · criterios en Config."}
       </div>
-      {avance && avance.estado === "corriendo" && <div className="aviso"><span className="spinner"></span>{avance.paso} ({avance.segundos || 0} s)</div>}
+      {avance && avance.estado === "corriendo" && (
+        <div className="aviso">
+          <span className="spinner"></span>{avance.paso} · {Math.floor((avance.segundos || 0) / 60)} min {(avance.segundos || 0) % 60} s
+          {avance.total > 0 && <div className="progreso"><div style={{ width: `${Math.min(100, Math.round(((avance.actual || 0) / avance.total) * 100))}%` }} /></div>}
+          <div className="mini" style={{ marginTop: 6 }}>Sigue trabajando aunque cierres esta pantalla. Las siguientes revisiones son más rápidas: solo traen lo nuevo.</div>
+        </div>
+      )}
 
       {lista.length === 0 ? <div className="cot-empty">// sin procesos {vista === "abiertas" ? "abiertos" : ""} que calcen con los criterios</div> : (
         <div className="hist-list">
