@@ -73,17 +73,42 @@ async function contenidoArchivo(file) {
 // Llama a Claude obligándolo a responder con la herramienta (JSON con formato fijo)
 async function llamar({ system, contenido, herramienta, maxTokens = 8000 }) {
   const cliente = getCliente();
-  const r = await cliente.messages.create({
-    model: MODELO(),
-    max_tokens: maxTokens,
-    system,
-    tools: [herramienta],
-    tool_choice: { type: "tool", name: herramienta.name },
-    messages: [{ role: "user", content: contenido }],
-  });
+  let r;
+  try {
+    r = await cliente.messages.create({
+      model: MODELO(),
+      max_tokens: maxTokens,
+      system,
+      tools: [herramienta],
+      tool_choice: { type: "tool", name: herramienta.name },
+      messages: [{ role: "user", content: contenido }],
+    });
+  } catch (e) {
+    throw traducirError(e);
+  }
   const bloque = (r.content || []).find((b) => b.type === "tool_use");
   if (!bloque) throw new ErrorNegocio("Claude no devolvió una respuesta válida. Intenta de nuevo.", 502);
   return { datos: bloque.input, uso: r.usage || {}, truncado: r.stop_reason === "max_tokens" };
+}
+
+// Errores de la API de Anthropic -> mensaje claro en español (el detalle original va al log de Render)
+function traducirError(e) {
+  const status = e?.status;
+  const msg = String(e?.error?.error?.message || e?.message || "");
+  console.error("Claude API:", status, msg);
+  const t = msg.toLowerCase();
+  let texto;
+  if (t.includes("credit balance") || t.includes("billing")) texto = "La cuenta de la API no tiene saldo: carga créditos en console.anthropic.com (Billing)";
+  else if (status === 401 || t.includes("api key") || t.includes("authentication")) texto = "La clave de la API no es válida o fue borrada: revisa ANTHROPIC_API_KEY en Render";
+  else if (status === 403) texto = "La clave de la API no tiene permiso para este modelo o esta acción";
+  else if (t.includes("model")) texto = `El modelo configurado (${MODELO()}) no está disponible para esta cuenta. Cambia ANTHROPIC_MODEL en Render o avísale al encargado`;
+  else if (status === 413 || t.includes("too large") || t.includes("too long") || t.includes("prompt is too long")) texto = "El archivo es demasiado grande para leerlo de una vez: divídelo en partes";
+  else if (t.includes("image") && (t.includes("dimension") || t.includes("size"))) texto = "La foto es demasiado grande: reduce su tamaño o recórtala";
+  else if (t.includes("pdf") || t.includes("document")) texto = "No se pudo leer el PDF (puede estar protegido o dañado). Prueba con una foto o exportándolo de nuevo";
+  else if (status === 429) texto = "Se alcanzó el límite de uso de la API por ahora: espera un minuto y vuelve a intentar";
+  else if (status === 529 || status >= 500) texto = "El servicio de Claude está ocupado en este momento: intenta de nuevo en unos minutos";
+  else texto = `Claude rechazó la solicitud: ${msg.slice(0, 200) || "error desconocido"}`;
+  return new ErrorNegocio(texto, status === 401 || status === 403 ? 502 : status === 429 || status >= 500 ? 503 : 400);
 }
 
 const auditar = (datos) => AuditoriaIA.create(datos).catch((e) => { console.error("auditoría IA:", e.message); return null; });
@@ -141,7 +166,7 @@ const HERR_CALCE = {
           type: "object",
           properties: {
             linea: { type: "integer", description: "Número de la línea (L1, L2... sin la L)" },
-            producto_id: { type: ["integer", "null"], description: "id del candidato elegido, o null si ninguno sirve" },
+            producto_id: { type: "integer", description: "id del candidato elegido, o 0 si ninguno sirve" },
             calce: { type: "string", enum: ["exacto", "equivalente", "parecido", "sin_producto"] },
             nota: { type: "string", description: "Nota corta en español (máx. 15 palabras): qué difiere o por qué no hay producto" },
           },
@@ -158,7 +183,7 @@ Para cada línea recibes candidatos del catálogo (id | descripción estándar |
 - "exacto": mismo producto, misma medida y unidad (aunque esté escrito distinto o con abreviaturas).
 - "equivalente": mismo producto y medida, pero cambia la marca o el modelo comercial.
 - "parecido": se parece pero difiere en algo importante (medida, calidad, presentación, unidad de venta). Indica qué difiere en la nota.
-- "sin_producto": ningún candidato sirve. producto_id = null.
+- "sin_producto": ningún candidato sirve. producto_id = 0.
 Las medidas importan: 20 mm no es 25 mm, 1/2" no es 3/4", 25 kg no es 50 kg. Nunca inventes un id que no esté en los candidatos.
 Notas cortas, en español.`;
 
@@ -255,8 +280,8 @@ const HERR_PROVEEDOR = {
       numero_documento: { type: "string", description: "N° de cotización o factura tal como aparece" },
       fecha: { type: "string", description: "Fecha del documento en formato AAAA-MM-DD" },
       precios_incluyen_iva: { type: "boolean", description: "true si los precios unitarios de las líneas incluyen IVA (típico en boletas y tiendas web)" },
-      total_neto: { type: ["number", "null"], description: "Total neto del documento (sin IVA), o null si no aparece" },
-      total_documento: { type: ["number", "null"], description: "Total final con IVA, o null" },
+      total_neto: { type: "number", description: "Total neto del documento (sin IVA). Omitir si no aparece" },
+      total_documento: { type: "number", description: "Total final con IVA. Omitir si no aparece" },
       lineas: {
         type: "array",
         items: {
@@ -267,8 +292,8 @@ const HERR_PROVEEDOR = {
             marca: { type: "string" },
             unidad: { type: "string" },
             cantidad: { type: "number" },
-            precio_unitario: { type: ["number", "null"], description: "Precio unitario tal como aparece (después de descuentos de línea si los hay)" },
-            total_linea: { type: ["number", "null"] },
+            precio_unitario: { type: "number", description: "Precio unitario tal como aparece (después de descuentos de línea si los hay). Omitir si no aparece" },
+            total_linea: { type: "number", description: "Total de la línea. Omitir si no aparece" },
           },
           required: ["descripcion", "cantidad"],
         },
