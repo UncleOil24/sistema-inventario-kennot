@@ -37,7 +37,22 @@ async function pedir(params, intento = 0) {
   return data;
 }
 
-const fecha = (v) => { const d = v ? new Date(v) : null; return d && !isNaN(d) ? d : null; };
+// La API entrega fechas en hora de Chile sin zona ("2026-11-10T15:00:00"). Se interpretan como hora de Chile
+// (con su horario de verano/invierno), sin importar en qué huso corra el servidor.
+const offsetChile = (utcMs) => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(new Date(utcMs)).map((x) => [x.type, x.value]));
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - utcMs;
+};
+const fecha = (v) => {
+  if (!v) return null;
+  const t = String(v);
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(t)) { const d = new Date(t); return isNaN(d) ? null : d; }
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return null;
+  const comoUtc = Date.UTC(m[1], m[2] - 1, m[3], m[4] || 0, m[5] || 0, m[6] || 0);
+  return new Date(comoUtc - offsetChile(comoUtc));
+};
 const palabrasClave = (params) => String(params.mp_palabras || "").split(",").map((p) => sinTildes(p).trim()).filter(Boolean);
 const calzan = (texto, palabras) => { const t = sinTildes(texto); return palabras.filter((p) => t.includes(p)); };
 
@@ -115,4 +130,4 @@ const enRegiones = (region, params) => {
   return regiones.some((x) => r.includes(x));
 };
 
-module.exports = { sincronizar, ticketConfigurado, enRegiones, pedir, desdeDetalle };
+module.exports = { fecha, sincronizar, ticketConfigurado, enRegiones, pedir, desdeDetalle };

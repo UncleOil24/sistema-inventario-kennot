@@ -23,6 +23,7 @@ const Licitacion = sequelize.define("Licitacion", {
   estado_interno: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "nueva" },
   nota: { type: DataTypes.TEXT, allowNull: true },
   cotizacion_id: { type: DataTypes.INTEGER, allowNull: true },
+  avisada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // ya salió en el resumen de la mañana
 }, {
   tableName: "licitaciones",
   timestamps: true,

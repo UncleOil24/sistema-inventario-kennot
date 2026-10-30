@@ -11,6 +11,8 @@ const { esAdmin } = require("../middlewares/auth");
 const { SQL_AVISO } = require("../services/precios");
 const { getParametros } = require("../services/parametros");
 const { wherePorSeguir } = require("./cotizacionesController");
+const Licitacion = require("../models/Licitacion");
+const { enRegiones } = require("../services/mercadoPublico");
 
 const n = (v) => Math.round(Number(v) || 0);
 const ymd = (d) => d.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
@@ -27,6 +29,10 @@ const getDashboard = handler(async (req, res) => {
   await Cotizacion.update({ estado: "vencida", motivo_estado: "Venció su validez" }, { where: { estado: "cotizacion", fecha_validez: { [Op.lt]: hoyStr } } });
   const params = await getParametros();
   const limAntiguo = new Date(); limAntiguo.setMonth(limAntiguo.getMonth() - (Number(params.meses_precio_antiguo) || 6));
+  const licNuevas = (await Licitacion.findAll({
+    where: { estado_interno: "nueva", [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] },
+    order: [["fecha_cierre", "ASC"]], attributes: ["codigo", "nombre", "organismo", "comuna", "region", "fecha_cierre", "monto_estimado", "items", "createdAt"],
+  })).filter((l) => enRegiones(l.region, params));
   const porSeguir = await Cotizacion.findAll({ where: await wherePorSeguir(), order: [["fecha", "ASC"]], limit: 50,
     attributes: ["id", "numero", "cliente", "nombre_cotizacion", "fecha", "fecha_validez", "ultimo_contacto", "proximo_contacto", "subtotal"] });
 
@@ -158,6 +164,11 @@ const getDashboard = handler(async (req, res) => {
     serie,
     top_productos: topProductos,
     catalogo: { ...catalogo, meses_antiguo: Number(params.meses_precio_antiguo) || 6 },
+    licitaciones: {
+      nuevas: licNuevas.length,
+      ultima_revision: params.mp_ultima_sincronizacion || null,
+      detalle: licNuevas.slice(0, 8).map((l) => ({ codigo: l.codigo, nombre: l.nombre, organismo: l.organismo, comuna: l.comuna, cierre: l.fecha_cierre, monto: l.monto_estimado ? n(l.monto_estimado) : null, productos: (l.items || []).length })),
+    },
     por_seguir: { cantidad: porSeguir.length, detalle: porSeguir.slice(0, 10).map((c) => ({ id: c.id, numero: c.numero, cliente: c.cliente, nombre: c.nombre_cotizacion, fecha: c.fecha, vence: c.fecha_validez, ultimo_contacto: c.ultimo_contacto, proximo_contacto: c.proximo_contacto, neto: n(c.subtotal) })) },
     por_comprar: { cantidad: porComprar.length, detalle: porComprar.slice(0, 10).map((v) => ({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, fecha: v.fecha, neto: n(v.subtotal) })) },
     cuentas_por_cobrar: cxc,

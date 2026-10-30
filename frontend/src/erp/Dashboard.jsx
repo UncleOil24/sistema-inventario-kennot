@@ -22,7 +22,7 @@ export default function Dashboard({ notify, irA, esAdmin }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   if (!data) return <Cargando />;
-  const { mes_actual: m, cuentas_por_cobrar: cxc, cuentas_por_pagar: cxp, caja, catalogo, cotizaciones, por_comprar: porComprar, por_seguir: porSeguir } = data;
+  const { mes_actual: m, cuentas_por_cobrar: cxc, cuentas_por_pagar: cxp, caja, catalogo, cotizaciones, por_comprar: porComprar, por_seguir: porSeguir, licitaciones: lic } = data;
 
   return (
     <>
@@ -41,6 +41,7 @@ export default function Dashboard({ notify, irA, esAdmin }) {
         {esAdmin && <Kpi label="Margen del mes" valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
         {esAdmin && <Kpi label="Utilidad del mes" valor={fmt(m.utilidad)} sub={`margen − gastos (${fmt(m.gastos)})`} alerta={m.utilidad < 0} onClick={() => irA("gastos")} />}
         <Kpi label="Cotizaciones abiertas" valor={fmt(cotizaciones.monto_abierto)} sub={`${cotizaciones.abiertas} por responder · neto`} onClick={() => irA("cotizaciones")} />
+ <Kpi label="Licitaciones nuevas" valor={lic.nuevas} sub={lic.ultima_revision ? `revisado ${new Date(lic.ultima_revision).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "aún sin revisar"} alerta={lic.nuevas > 0} onClick={() => irA("licitaciones")} />
         <Kpi label="Clientes por llamar" valor={porSeguir.cantidad} sub="cotizaciones sin respuesta" alerta={porSeguir.cantidad > 0} onClick={() => irA("cotizaciones-seguir")} />
         {esAdmin && <Kpi label="Ventas por comprar" valor={porComprar.cantidad} sub="sin órdenes de compra" alerta={porComprar.cantidad > 0} onClick={() => irA("ventas")} />}
         <Kpi label="Por cobrar" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
@@ -55,6 +56,28 @@ export default function Dashboard({ notify, irA, esAdmin }) {
       </div>
 
       <div className="dash-grid">
+        {lic.nuevas > 0 && (
+          <div className="panel">
+            <div className="panel-titulo">
+              Licitaciones nuevas <span className="mini">({lic.nuevas} sin revisar · se buscan cada tarde a las 18:00)</span>
+              <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => irA("licitaciones")}>Ver todas →</button>
+            </div>
+            <table className="table table-compacta">
+              <thead><tr><th className="col-desc">Licitación</th><th>Organismo</th><th>Cierra</th><th>Monto</th></tr></thead>
+              <tbody>
+                {lic.detalle.map((l) => (
+                  <tr key={l.codigo} className="clickable" onClick={() => irA("licitaciones")}>
+                    <td>{l.nombre}<div className="mini">{l.codigo}{l.productos ? ` · ${l.productos} productos` : ""}</div></td>
+                    <td className="mini">{l.organismo || "—"}{l.comuna ? `, ${l.comuna}` : ""}</td>
+                    <td className="mini">{l.cierre ? new Date(l.cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                    <td className="price-cell">{l.monto ? fmt(l.monto) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <div className="panel">
           <div className="panel-titulo">
             Clientes por llamar <span className="mini">({porSeguir.cantidad} cotizaciones sin respuesta)</span>

@@ -10,8 +10,8 @@ const listar = handler(async (req, res) => {
   const params = await getParametros();
   const { vista = "abiertas", busqueda } = req.query;
   const where = {};
-  if (vista === "abiertas") {
-    where.estado_interno = { [Op.ne]: "descartada" };
+  if (vista === "abiertas" || vista === "nuevas") {
+    where.estado_interno = vista === "nuevas" ? "nueva" : { [Op.ne]: "descartada" };
     where[Op.or] = [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }];
   }
   if (vista === "descartadas") where.estado_interno = "descartada";
