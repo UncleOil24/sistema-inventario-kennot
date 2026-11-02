@@ -267,3 +267,13 @@ venta (con su factura y su cobro) y el **proyecto** las une (menú Ventas → "P
 - **Unir órdenes:** órdenes en borrador del mismo proveedor se juntan en una (suma cantidades); las otras quedan anuladas
   con la nota "Unida a OC-xxxx".
 - **Deshacer proyecto:** las ventas y órdenes no se borran, solo quedan sueltas.
+
+## Dos empresas: Inversiones Kenott y Tactics Inversiones
+
+Al cotizar (y en una venta directa) se elige la empresa. Ambas comparten catálogo, precios, márgenes y clientes.
+- Cada una tiene su **numeración de cotizaciones** (`ultimo_numero_cotizacion` para Kenott, `tactics_ultimo_numero_cotizacion`
+  para Tactics; el N° es único por empresa: índice `cotizaciones_empresa_numero_uq`).
+- **PDF y Excel**: Kenott usa `plantilla_cotizacion.xlsx` / su diseño verde; Tactics replica `Cotizacion_TACTICS_N592.xlsx`
+  (`services/excelTactics.js` y `pdfTactics` en `pdfCotizacion.js`) con `plantillas/logo_tactics.png` y `firma_tactics.png`.
+- Datos de Tactics editables en Config. (`tactics_*`: razón social, RUT, giro, dirección, contacto, banco, entrega, garantía...).
+- La venta hereda la empresa de la cotización (`ventas.empresa`). Cotizaciones y ventas se pueden filtrar por empresa.

@@ -10,6 +10,8 @@ const { getParametros, precioVenta } = require("../services/parametros");
 const { esAdmin } = require("../middlewares/auth");
 const { generarPdfCotizacion } = require("../services/pdfCotizacion");
 
+const { validarEmpresa, datosEmpresa } = require("../services/empresas");
+const { excelTactics } = require("../services/excelTactics");
 const PLANTILLA = path.join(__dirname, "../../plantillas/plantilla_cotizacion.xlsx");
 const ESTADOS = ["borrador", "cotizacion", "aceptada", "rechazada", "vencida"];
 const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
@@ -31,14 +33,14 @@ const vista = (req) => (c) => {
   return j;
 };
 
-// Correlativo: el mayor entre el último usado y el parámetro "ultimo_numero_cotizacion", + 1
-const siguienteNumero = async (t) => {
+// Correlativo de cada empresa: el mayor entre el último usado y su parámetro de "último N°", + 1
+const siguienteNumero = async (t, empresa = "kenott") => {
   const params = await getParametros(t);
   const [[fila]] = await sequelize.query(
-    `SELECT COALESCE(MAX(CASE WHEN numero ~ '^[0-9]+$' THEN numero::int END), 0) AS max FROM cotizaciones`,
-    { transaction: t }
+    `SELECT COALESCE(MAX(CASE WHEN numero ~ '^[0-9]+$' THEN numero::int END), 0) AS max FROM cotizaciones WHERE empresa = :empresa`,
+    { transaction: t, replacements: { empresa } }
   );
-  const n = Math.max(Number(fila.max) || 0, Number(params.ultimo_numero_cotizacion) || 0) + 1;
+  const n = Math.max(Number(fila.max) || 0, Number(datosEmpresa(empresa, params).ultimo_numero) || 0) + 1;
   return String(n).padStart(3, "0");
 };
 
@@ -110,6 +112,7 @@ const getCotizaciones = handler(async (req, res) => {
   const { estado, busqueda } = req.query;
   const where = req.query.seguimiento === "1" ? await wherePorSeguir() : {};
   if (estado) where.estado = estado;
+  if (req.query.empresa) where.empresa = req.query.empresa;
   if (busqueda) where[Op.or] = ["numero", "cliente", "nombre_cotizacion"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   const data = await Cotizacion.findAll({ where, order: [["createdAt", "DESC"]] });
   res.json({ ok: true, data: data.map(vista(req)) });
@@ -133,9 +136,10 @@ const crearCotizacion = handler(async (req, res) => {
     const params = await getParametros(t);
     const fecha = hoyISO();
     const validez = Number(b.validez_dias) || Number(params.validez_cotizacion_dias) || 30;
-    const numero = await siguienteNumero(t);
+    const empresa = validarEmpresa(b.empresa);
+    const numero = await siguienteNumero(t, empresa);
     return Cotizacion.create({
-      numero, ...cliente,
+      numero, empresa, ...cliente,
       nombre_cotizacion: b.nombre_cotizacion || `Cotización ${numero}`,
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
       estado: b.estado === "borrador" ? "borrador" : "cotizacion",
@@ -171,6 +175,12 @@ const actualizarCotizacion = handler(async (req, res) => {
       cambios.fecha_validez = sumarDias(c.fecha || hoyISO(), b.validez_dias);
     }
     if (b.estado && ["borrador", "cotizacion"].includes(b.estado)) cambios.estado = b.estado;
+    // Cambiar de empresa le da el número siguiente de la otra empresa
+    if (b.empresa && validarEmpresa(b.empresa) !== c.empresa) {
+      cambios.empresa = validarEmpresa(b.empresa);
+      cambios.numero = await siguienteNumero(t, cambios.empresa);
+      if ((c.nombre_cotizacion || "") === `Cotización ${c.numero}`) cambios.nombre_cotizacion = `Cotización ${cambios.numero}`;
+    }
     await c.update(cambios, { transaction: t });
     return c;
   });
@@ -227,6 +237,14 @@ const descargarExcel = async (req, res) => {
   try {
     const cot = await Cotizacion.findByPk(req.params.id);
     if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+    // Tactics tiene su propio formato
+    if (cot.empresa === "tactics") {
+      const wbT = await excelTactics(cot.toJSON(), datosEmpresa("tactics", await getParametros()));
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="Cotizacion_TACTICS_N${cot.numero}-${limpioArchivo(cot.cliente)}.xlsx"`);
+      await wbT.xlsx.write(res);
+      return res.end();
+    }
     const items = cot.items || [];
     const fecha = cot.fecha ? new Date(`${cot.fecha}T12:00:00`) : new Date(cot.createdAt);
     const validez = cot.fecha_validez ? new Date(`${cot.fecha_validez}T12:00:00`) : new Date(fecha.getTime() + 30 * 864e5);
@@ -293,7 +311,7 @@ const descargarPdf = async (req, res) => {
     if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
     const empresa = await getParametros();
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="COT-${cot.numero}-${limpioArchivo(cot.cliente)}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${cot.empresa === "tactics" ? "Cotizacion_TACTICS_N" : "COT-"}${cot.numero}-${limpioArchivo(cot.cliente)}.pdf"`);
     generarPdfCotizacion(cot.toJSON(), empresa, res);
   } catch (error) {
     console.error(error);

@@ -95,7 +95,7 @@ export default function Config({ notify }) {
             {campo("margen_particular", "Margen particular (%)", `Precio particular = compra × ${(1 + Number(params.margen_particular || 0) / 100).toFixed(2).replace(".", ",")}`)}
           </div>
           <div className="fields-row">
-            {campo("ultimo_numero_cotizacion", "Último N° de cotización usado", "La próxima cotización usa el número siguiente")}
+            {campo("ultimo_numero_cotizacion", "Último N° de cotización Kenott", "La próxima cotización usa el número siguiente")}
             {campo("validez_cotizacion_dias", "Validez por defecto (días)")}
           </div>
           <div className="fields-row">
@@ -112,7 +112,7 @@ export default function Config({ notify }) {
       </div>
 
       <div className="panel">
-        <div className="panel-titulo">Datos de la empresa (PDF de la cotización)</div>
+        <div className="panel-titulo">Datos de Inversiones Kenott (PDF y Excel de la cotización)</div>
         {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
           <div className="fields-row">{texto("empresa_nombre", "Razón social")}{texto("empresa_rut", "RUT")}</div>
           {texto("empresa_giro", "Giro")}
@@ -126,6 +126,22 @@ export default function Config({ notify }) {
             <label>Texto de agradecimiento</label>
             <textarea className="textarea" rows={3} value={params.texto_agradecimiento || ""} onChange={(e) => setParams({ ...params, texto_agradecimiento: e.target.value })} />
           </div>
+          <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
+        </>}
+      </div>
+
+      <div className="panel">
+        <div className="panel-titulo">Datos de Tactics Inversiones (formato propio)</div>
+        {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
+          <div className="mini">Al cotizar eliges "Tactics Inversiones": sale con su logo, firma, formato y numeración. Comparte catálogo, precios y márgenes con Kenott.</div>
+          <div className="fields-row">{texto("tactics_nombre", "Razón social")}{texto("tactics_rut", "RUT")}</div>
+          {texto("tactics_giro", "Giro")}
+          {texto("tactics_direccion", "Dirección")}
+          <div className="fields-row">{texto("tactics_contacto", "Contacto")}{texto("tactics_fono", "Teléfono")}</div>
+          <div className="fields-row">{texto("tactics_email", "Email")}{texto("tactics_representante", "Representante legal (firma)")}</div>
+          <div className="fields-row tres">{texto("tactics_banco", "Banco")}{texto("tactics_tipo_cuenta", "Tipo de cuenta")}{texto("tactics_numero_cuenta", "N° de cuenta")}</div>
+          <div className="fields-row tres">{texto("tactics_entrega", "Plazo de entrega")}{texto("tactics_garantia", "Garantía")}{texto("tactics_modalidad", "Modalidad de servicio")}</div>
+          {campo("tactics_ultimo_numero_cotizacion", "Último N° de cotización Tactics", "La próxima cotización Tactics usa el número siguiente")}
           <div><button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar"}</button></div>
         </>}
       </div>

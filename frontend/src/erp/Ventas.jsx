@@ -109,7 +109,7 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
                 return (
                   <tr key={v.id} className={v.estado === "anulada" ? "fila-anulada" : sel.has(v.id) ? "fila-alerta" : ""}>
                     <td>{v.estado !== "anulada" && !v.proyecto && <input type="checkbox" checked={sel.has(v.id)} onChange={() => marcar(v.id)} title="Marcar para unir en un proyecto" />}</td>
-                    <td className="id-cell">{v.numero}</td>
+                    <td className="id-cell">{v.numero}{v.empresa === "tactics" && <div><Estado valor="tactics" /></div>}</td>
                     <td className="mini">{fecha(v.fecha)}</td>
                     <td>{v.cliente_nombre || <span className="mini">Sin cliente</span>}</td>
                     <td className="mini">{v.orden_compra_cliente || "—"}</td>
@@ -138,7 +138,7 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
 function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   const productos = useProductos();
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ cliente_id: "", documento: "", orden_compra_cliente: "", dias_credito: 30, pagada_al_contado: false, medio_pago: "efectivo", notas: "" });
+  const [form, setForm] = useState({ empresa: "kenott", cliente_id: "", documento: "", orden_compra_cliente: "", dias_credito: 30, pagada_al_contado: false, medio_pago: "efectivo", notas: "" });
   const tipo = clientes.find((c) => String(c.id) === String(form.cliente_id))?.tipo || "convenio";
   const [guardando, setGuardando] = useState(false);
 
@@ -166,6 +166,11 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={guardando || items.length === 0} onClick={guardar}>{guardando ? "Guardando..." : "Registrar venta"}</button>
       </>}>
+      <div className="chips">
+        {[["kenott", "Inversiones Kenott"], ["tactics", "Tactics Inversiones"]].map(([v, t]) => (
+          <button key={v} className={`chip ${form.empresa === v ? "activo" : ""}`} onClick={() => setForm({ ...form, empresa: v })}>{form.empresa === v ? "● " : ""}{t}</button>
+        ))}
+      </div>
       <div className="fields-row">
         <div className="field">
           <label>Cliente</label>
@@ -235,7 +240,7 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, ve
         <span>{venta.cliente_nombre || "Sin cliente"}</span>
         {venta.fecha_vencimiento && <span>Vence {fecha(venta.fecha_vencimiento)}</span>}
         {venta.creado_por && <span>Por {venta.creado_por}</span>}
-        <Estado valor={venta.estado} /> <Estado valor={venta.estado_pago} />
+        <Estado valor={venta.empresa || "kenott"} /> <Estado valor={venta.estado} /> <Estado valor={venta.estado_pago} />
         {venta.proyecto && <button className="link" onClick={() => { onClose(); verProyecto?.(venta.proyecto.id); }}>Proyecto {venta.proyecto.numero} · {venta.proyecto.nombre} →</button>}
       </div>
       {venta.notas && <div className="mini">{venta.notas}</div>}
