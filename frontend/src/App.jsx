@@ -407,7 +407,7 @@ function App({ usuario, onLogout }) {
               onVenta={(v) => verVenta(v.id)} />
           )}
           {view === "licitaciones" && (
-            <Licitaciones esAdmin={esAdmin} notify={showNotif} clientes={clientes}
+            <Licitaciones esAdmin={esAdmin} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
               onCotizar={(b) => { setBorrador(b); setView("cotizar"); }} />
           )}
           {view === "ventas" && (

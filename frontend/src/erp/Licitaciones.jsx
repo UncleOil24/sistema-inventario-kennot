@@ -10,7 +10,15 @@ const colorCalce = (r) => (r >= 80 ? "estado-ok" : r >= 50 ? "estado-neutral" : 
 const diasPara = (d) => (d ? Math.ceil((new Date(d) - new Date()) / 864e5) : null);
 
 // Licitaciones de Mercado Público que calzan con nuestras palabras clave y región.
-export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
+const rutLimpio = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
+// ¿El organismo de la licitación ya está en Clientes? (por RUT o por nombre)
+const clienteDe = (l, clientes) => {
+  const org = sinTildes(l.organismo || "");
+  return clientes.find((c) => (l.rut_unidad && c.rut && rutLimpio(c.rut) === rutLimpio(l.rut_unidad)) || (org && sinTildes(c.nombre) === org));
+};
+
+export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, recargarClientes }) {
+  const [nuevoCliente, setNuevoCliente] = useState(null);
   const [data, setData] = useState(null);
   const [vista, setVista] = useState("abiertas");
   const [fuente, setFuente] = useState("");
@@ -58,15 +66,14 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
 
   // Pasa las líneas revisadas al cotizador, con el organismo como cliente si ya existe
   const alCotizador = (l, nuevas) => {
-    const organismo = sinTildes(l.organismo || "");
-    const cliente = clientes.find((c) => organismo && (sinTildes(c.nombre) === organismo || (c.rut && l.rut_unidad && c.rut.replace(/\W/g, "") === l.rut_unidad.replace(/\W/g, ""))));
+    const cliente = clienteDe(l, clientes);
     onCotizar({
       cliente_id: cliente?.id || "", tipo_precio: cliente?.tipo || "convenio",
       nombre_cotizacion: `${tipoDe(l)} ${l.codigo} – ${l.nombre}`.slice(0, 250),
       validez_dias: l.fuente === "compra_agil" ? 10 : 30, notas: `Mercado Público ${l.codigo}`, archivo_cliente: `${tipoDe(l)} ${l.codigo}`, items: nuevas,
     });
     marcar(l, "cotizada");
-    if (!cliente && l.organismo) notify(`Recuerda crear el cliente "${l.organismo}" (convenio) y elegirlo en la cotización`);
+    if (!cliente && l.organismo) notify(`"${l.organismo}" no está en Clientes: usa "+ Agregar cliente" en la licitación y elígelo en la cotización`);
   };
 
   if (!data) return <div className="cot-empty"><span className="spinner"></span>Cargando...</div>;
@@ -117,6 +124,9 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
                     <span>{l.organismo || "Organismo sin detalle"}</span>
                     {l.region && <span>{l.region}</span>}
                     {l.items?.length > 0 && <span>{l.items.length} productos</span>}
+                    {l.organismo && (clienteDe(l, clientes)
+                      ? <span className="estado estado-ok" title="Ya está en Clientes">✓ cliente</span>
+                      : <button className="link" onClick={() => setNuevoCliente(l)}>+ Agregar cliente</button>)}
                     {l.estado_interno !== "nueva" && <span className={`estado estado-${l.estado_interno === "cotizada" ? "ok" : l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
                   </div>
                   {l.relevancia != null
@@ -143,6 +153,8 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
         </div>
       )}
 
+      {nuevoCliente && <ClienteDesdeLicitacion l={nuevoCliente} notify={notify} onClose={() => setNuevoCliente(null)}
+        onCreado={async () => { setNuevoCliente(null); await recargarClientes?.(); }} />}
       {abierta && <DetalleLicitacion codigo={abierta.codigo} ficha={abierta.ficha} tipo={tipoDe(abierta)} notify={notify} onClose={() => { setAbierta(null); cargar(); }} onCotizar={(l) => { setAbierta(null); setCotizar(l); }} />}
       {cotizar && (
         <ImportarLista tipo="convenio" esAdmin={esAdmin} notify={notify} titulo={`// Cotizar ${tipoDe(cotizar)} ${cotizar.codigo}`}
@@ -189,6 +201,52 @@ function DetalleLicitacion({ codigo, ficha, tipo, notify, onClose, onCotizar }) 
         ) : <div className="mini">Este proceso no trae el detalle de productos: revisa las bases en Mercado Público.</div>}
         <div className="mini">Actualizado: {fecha(l.updatedAt)}. Revisa siempre las bases y anexos en Mercado Público antes de ofertar.</div>
       </>}
+    </Modal>
+  );
+}
+
+// Crea el organismo de la licitación en Clientes (convenio), con los datos de Mercado Público
+function ClienteDesdeLicitacion({ l, notify, onClose, onCreado }) {
+  const [form, setForm] = useState({
+    nombre: (l.organismo || "").trim(), rut: l.rut_unidad || "", tipo: "convenio",
+    contacto: l.unidad || "", direccion: l.fuente === "compra_agil" ? (l.comuna || "") : "", comuna: l.fuente === "compra_agil" ? "" : (l.comuna || ""),
+    telefono: "", email: "",
+  });
+  const [guardando, setGuardando] = useState(false);
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await api("/clientes", { method: "POST", body: form });
+      notify(`✓ ${form.nombre} agregado a Clientes`);
+      await onCreado();
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setGuardando(false); }
+  };
+  return (
+    <Modal titulo="// Agregar cliente" onClose={onClose} ancho={620}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={guardando || !form.nombre.trim()} onClick={guardar}>{guardando ? "Guardando..." : "Agregar a Clientes"}</button>
+      </>}>
+      <div className="mini">Datos tomados de Mercado Público ({l.codigo}). Revísalos y completa lo que falte.</div>
+      <div className="field"><label>Nombre</label><input value={form.nombre} onChange={(e) => set("nombre", e.target.value)} /></div>
+      <div className="fields-row">
+        <div className="field"><label>RUT</label><input value={form.rut} onChange={(e) => set("rut", e.target.value)} /></div>
+        <div className="field">
+          <label>Tipo</label>
+          <select value={form.tipo} onChange={(e) => set("tipo", e.target.value)}><option value="convenio">Convenio (institución)</option><option value="particular">Particular</option></select>
+        </div>
+      </div>
+      <div className="field"><label>Unidad de compra / contacto</label><input value={form.contacto} onChange={(e) => set("contacto", e.target.value)} placeholder="Ej: Departamento de Adquisiciones" /></div>
+      <div className="fields-row">
+        <div className="field"><label>Dirección</label><input value={form.direccion} onChange={(e) => set("direccion", e.target.value)} /></div>
+        <div className="field"><label>Comuna</label><input value={form.comuna} onChange={(e) => set("comuna", e.target.value)} /></div>
+      </div>
+      <div className="fields-row">
+        <div className="field"><label>Teléfono</label><input value={form.telefono} onChange={(e) => set("telefono", e.target.value)} /></div>
+        <div className="field"><label>Email</label><input value={form.email} onChange={(e) => set("email", e.target.value)} /></div>
+      </div>
     </Modal>
   );
 }
