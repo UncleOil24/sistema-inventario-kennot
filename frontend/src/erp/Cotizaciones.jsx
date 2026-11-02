@@ -16,6 +16,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
   const [porSeguir, setPorSeguir] = useState(0);
   const [seguimiento, setSeguimiento] = useState(null);
   const [busqueda, setBusqueda] = useState("");
+  const [empresa, setEmpresa] = useState("");
   const [abierta, setAbierta] = useState(null);
   const [aceptar, setAceptar] = useState(null);
 
@@ -26,16 +27,18 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
       if (estado === "seguir") p.append("seguimiento", "1");
       else if (estado) p.append("estado", estado);
       if (busqueda) p.append("busqueda", busqueda);
+      if (empresa) p.append("empresa", empresa);
       setLista(await api(`/cotizaciones?${p}`));
       api("/cotizaciones/por-seguir/cantidad").then((r) => setPorSeguir(r.cantidad)).catch(() => {});
     } catch (e) { notify(e.message, "danger"); }
     finally { setLoading(false); }
-  }, [estado, busqueda, notify]);
+  }, [estado, busqueda, empresa, notify]);
   useEffect(() => { const t = setTimeout(cargar, 250); return () => clearTimeout(t); }, [cargar]);
 
   const accion = async (fn, ok) => { try { await fn(); notify(ok); cargar(); } catch (e) { notify(e.message, "danger"); } };
-  const excel = (c) => descargar(`/cotizaciones/${c.id}/excel`, `COT-${c.numero}-${c.cliente || "cliente"}.xlsx`).catch((e) => notify(e.message, "danger"));
-  const pdf = (c) => descargar(`/cotizaciones/${c.id}/pdf`, `COT-${c.numero}-${c.cliente || "cliente"}.pdf`).catch((e) => notify(e.message, "danger"));
+  const nombreArchivo = (c, ext) => `${c.empresa === "tactics" ? "Cotizacion_TACTICS_N" : "COT-"}${c.numero}-${c.cliente || "cliente"}.${ext}`;
+  const excel = (c) => descargar(`/cotizaciones/${c.id}/excel`, nombreArchivo(c, "xlsx")).catch((e) => notify(e.message, "danger"));
+  const pdf = (c) => descargar(`/cotizaciones/${c.id}/pdf`, nombreArchivo(c, "pdf")).catch((e) => notify(e.message, "danger"));
   const rechazar = (c) => {
     const motivo = prompt(`¿Por qué se rechazó la N° ${c.numero}? (precio, plazo, se compró a otro...)`, "");
     if (motivo !== null) accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } }), "Cotización marcada como rechazada");
@@ -61,7 +64,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
         };
       });
       onEditar({
-        id: c.id, numero: c.numero, cliente_id: c.cliente_id || "", tipo_precio: c.tipo_precio,
+        id: c.id, numero: c.numero, empresa: c.empresa || "kenott", empresa_original: c.empresa || "kenott", cliente_id: c.cliente_id || "", tipo_precio: c.tipo_precio,
         nombre_cotizacion: c.nombre_cotizacion || "", validez_dias: c.validez_dias || 30, notas: c.notas || "", archivo_cliente: c.archivo_cliente || "", items,
       });
     } catch (e) { notify(e.message, "danger"); }
@@ -83,6 +86,9 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
           <input className="search-input" placeholder="Buscar por N°, cliente o nombre..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
         <div className="chips">
+          {[["", "Ambas"], ["kenott", "Kenott"], ["tactics", "Tactics"]].map(([v, t]) => <button key={`e${v}`} className={`chip ${empresa === v ? "activo" : ""}`} onClick={() => setEmpresa(v)}>{t}</button>)}
+        </div>
+        <div className="chips">
           {FILTROS.map(([v, t]) => <button key={v} className={`chip ${estado === v ? "activo" : ""} ${v === "seguir" && porSeguir ? "chip-alerta" : ""}`} onClick={() => setEstado(v)}>{t}{v === "seguir" && porSeguir > 0 && <strong>{porSeguir}</strong>}</button>)}
         </div>
       </div>
@@ -96,6 +102,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
                 <div className="hist-info">
                   <div className="hist-nombre">N° {c.numero} · {c.nombre_cotizacion || "Sin nombre"}</div>
                   <div className="hist-meta">
+                    <Estado valor={c.empresa || "kenott"} />
                     <span>{c.cliente || "Sin cliente"}</span>
                     <span>{fecha(c.fecha || c.createdAt)}</span>
                     {c.estado === "cotizacion" && c.fecha_validez && <span>válida hasta {fecha(c.fecha_validez)}</span>}
@@ -140,7 +147,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
 
 function DetalleCotizacion({ cot, esAdmin, onClose, onVencer }) {
   return (
-    <Modal titulo={`// Cotización N° ${cot.numero}`} onClose={onClose} ancho={820}
+    <Modal titulo={`// Cotización ${cot.empresa === "tactics" ? "Tactics" : "Kenott"} N° ${cot.numero}`} onClose={onClose} ancho={820}
       footer={<>
         {cot.estado === "cotizacion" && <button className="btn btn-ghost" onClick={onVencer}>Marcar vencida</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>

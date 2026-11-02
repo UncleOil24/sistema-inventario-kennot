@@ -36,6 +36,22 @@ const DEFAULTS = {
   banco: "BCI",
   tipo_cuenta: "Cuenta Corriente en Pesos",
   numero_cuenta: "97527637",
+  // --- Tactics Inversiones SpA (segunda empresa: se elige en cada cotización) ---
+  tactics_nombre: "Tactics Inversiones SpA",
+  tactics_rut: "76.999.682-6",
+  tactics_giro: "Actividades especializadas de construcción, contratista, comercialización y traslado de personal.",
+  tactics_direccion: "30 Sur #1008, La Campiña, Maule",
+  tactics_contacto: "Jorge Orellana",
+  tactics_email: "tacticsinversionesspa@gmail.com",
+  tactics_fono: "+56 9 5667 9308",
+  tactics_representante: "Jorge Orellana",
+  tactics_banco: "BCI",
+  tactics_tipo_cuenta: "Cuenta corriente en pesos",
+  tactics_numero_cuenta: "13731173",
+  tactics_entrega: "02 días hábiles",
+  tactics_garantia: "6 meses",
+  tactics_modalidad: "contratación de suministro de materiales",
+  tactics_ultimo_numero_cotizacion: "592",
   texto_agradecimiento: "Agradecemos sinceramente la oportunidad de presentar esta cotización y quedamos a su disposición para atender cualquier consulta técnica o comercial relacionada con los productos y servicios ofertados.",
 };
 

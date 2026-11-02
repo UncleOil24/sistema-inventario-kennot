@@ -5,7 +5,8 @@ const sequelize = require("../../config/database");
 // Las rechazadas y vencidas no se borran: sirven para medir cuánto se cotiza y se gana.
 const Cotizacion = sequelize.define("Cotizacion", {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  numero: { type: DataTypes.STRING(20), allowNull: false, unique: true }, // correlativo
+  numero: { type: DataTypes.STRING(20), allowNull: false }, // correlativo (propio de cada empresa)
+  empresa: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "kenott" }, // kenott | tactics
   cliente_id: { type: DataTypes.INTEGER, allowNull: true },
   cliente: { type: DataTypes.STRING(255), allowNull: true }, // nombre (se conserva aunque se borre la ficha)
   tipo_precio: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "convenio" }, // convenio | particular
@@ -34,6 +35,7 @@ const Cotizacion = sequelize.define("Cotizacion", {
 }, {
   tableName: "cotizaciones",
   timestamps: true,
+  indexes: [{ name: "cotizaciones_empresa_numero_uq", unique: true, fields: ["empresa", "numero"] }],
 });
 
 module.exports = Cotizacion;

@@ -55,7 +55,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const sinPrecio = items.filter((i) => !(Number(i.precio) > 0)).length;
   const antiguos = items.filter((i) => i.precio_antiguo).length;
 
-  const limpiar = () => setBorrador({ cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] });
+  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] }));
+  const empresa = borrador.empresa || "kenott";
 
   // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
   const agregarLista = (nuevas, res) => {
@@ -80,6 +81,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       const body = {
         cliente_id: borrador.cliente_id ? Number(borrador.cliente_id) : null,
         tipo_precio: tipo,
+        empresa,
         nombre_cotizacion: borrador.nombre_cotizacion || undefined,
         validez_dias: Number(borrador.validez_dias) || 30,
         notas: borrador.notas || null,
@@ -90,8 +92,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       const cot = borrador.id
         ? await api(`/cotizaciones/${borrador.id}`, { method: "PUT", body })
         : await api("/cotizaciones", { method: "POST", body });
-      if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `COT-${cot.numero}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
-      notify(`✓ Cotización N° ${cot.numero} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
+      if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${cot.empresa === "tactics" ? "Cotizacion_TACTICS_N" : "COT-"}${cot.numero}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
+      notify(`✓ Cotización ${cot.empresa === "tactics" ? "Tactics" : "Kenott"} N° ${cot.numero} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
       limpiar();
       onGuardada?.(cot);
     } catch (e) { notify(e.message, "danger"); }
@@ -100,8 +102,17 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   return (
     <>
-      {borrador.id && <div className="aviso">Editando la cotización N° {borrador.numero}. <button className="link" onClick={limpiar}>Cancelar edición</button></div>}
+      {borrador.id && <div className="aviso">Editando la cotización {empresa === "tactics" ? "Tactics" : "Kenott"} N° {borrador.numero}. <button className="link" onClick={limpiar}>Cancelar edición</button></div>}
       <div className="panel">
+        <div className="field">
+          <label>Cotiza la empresa</label>
+          <div className="chips">
+            {[["kenott", "Inversiones Kenott"], ["tactics", "Tactics Inversiones"]].map(([v, t]) => (
+              <button key={v} className={`chip ${empresa === v ? "activo" : ""}`} onClick={() => set({ empresa: v })}>{empresa === v ? "● " : ""}{t}</button>
+            ))}
+            <span className="mini" style={{ alignSelf: "center" }}>El PDF y el Excel salen con los datos, el formato y la numeración de esa empresa.{borrador.id && borrador.empresa_original && borrador.empresa_original !== empresa ? " Al guardar recibe un número nuevo de esa empresa." : ""}</span>
+          </div>
+        </div>
         <div className="fields-row tres">
           <div className="field">
             <label>Cliente</label>

@@ -15,6 +15,7 @@ const {
 const { getParametros, precioVenta } = require("../services/parametros");
 const { normProv } = require("../services/precios");
 const { esAdmin } = require("../middlewares/auth");
+const { validarEmpresa } = require("../services/empresas");
 
 const SIN_PROVEEDOR = "SIN PROVEEDOR";
 
@@ -75,6 +76,7 @@ const crearVentaEnTransaccion = async (datos, t) => {
     cliente_id: datos.cliente_id || null,
     cliente_nombre,
     cotizacion_id: datos.cotizacion_id || null,
+    empresa: validarEmpresa(datos.empresa),
     orden_compra_cliente: datos.orden_compra_cliente || null,
     fecha_vencimiento: venc,
     documento: datos.documento || null,
@@ -107,6 +109,7 @@ const getVentas = handler(async (req, res) => {
   if (busqueda) {
     where[Op.or] = ["numero", "cliente_nombre", "documento", "orden_compra_cliente"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
+  if (req.query.empresa) where.empresa = req.query.empresa;
   if (req.query.proyecto_id === "ninguno") where.proyecto_id = null;
   else if (req.query.proyecto_id) where.proyecto_id = req.query.proyecto_id;
   const data = await Venta.findAll({ where, order: [["id", "DESC"]] });
@@ -184,6 +187,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
       cliente_nombre: cot.cliente,
       tipo_precio: cot.tipo_precio,
       cotizacion_id: cot.id,
+      empresa: cot.empresa,
       creado_por: req.usuario.nombre,
       notas: req.body?.notas || cot.nombre_cotizacion,
       items: cot.items.map((i) => ({

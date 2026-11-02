@@ -42,6 +42,8 @@ const ESTADOS = {
   activo: ["Activo", "ok"],
   inactivo: ["Inactivo", "muted"],
   abierto: ["En curso", "info"],
+  kenott: ["Kenott", "ok"],
+  tactics: ["Tactics", "info"],
   cerrado: ["Terminado", "neutral"],
 };
 export function Estado({ valor }) {
