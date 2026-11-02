@@ -213,6 +213,19 @@ const styles = `
   .textarea { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; font-family: var(--sans); font-size: 12px; color: var(--text); outline: none; width: 100%; resize: vertical; }
   .select-linea { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-family: var(--mono); font-size: 11px; color: var(--text); max-width: 340px; width: 100%; }
   .nav-btn { padding: 6px 10px; }
+  .menu-mas { position: relative; flex-shrink: 0; }
+  .que-hacer { border-color: var(--border2); }
+  .tareas { display: flex; flex-direction: column; gap: 6px; }
+  .tarea { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .tarea.urgente { border-color: rgba(232,163,61,0.55); background: rgba(232,163,61,0.06); }
+  .tarea-icono { font-size: 18px; width: 26px; text-align: center; flex-shrink: 0; }
+  .tarea-texto { flex: 1; font-size: 14px; color: var(--text); display: flex; flex-direction: column; gap: 2px; }
+  .tarea-vacia { padding: 14px; color: var(--success); font-size: 14px; }
+  .menu-pop-izq { left: 0; right: auto; min-width: 190px; }
+  .menu-pop button.activo { color: var(--accent); }
+  .subpestanas { margin-bottom: 16px; }
+  .subpestanas .chip { font-size: 12.5px; padding: 8px 16px; }
+  .header-nav { overflow: visible; }
   .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
   .fila-alerta td { background: rgba(232,197,71,0.13); }
   .link { background: none; border: none; color: var(--info); cursor: pointer; font-family: var(--mono); font-size: 11px; padding: 2px 4px; text-align: left; }
@@ -292,6 +305,7 @@ const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizac
 function App({ usuario, onLogout }) {
   const esAdmin = usuario.rol === "admin";
   const [menuUsuario, setMenuUsuario] = useState(false);
+  const [menuMas, setMenuMas] = useState(false);
   const [cambiarPass, setCambiarPass] = useState(false);
   const [view, setView] = useState("dashboard");
   const [notif, setNotif] = useState(null);
@@ -335,6 +349,7 @@ function App({ usuario, onLogout }) {
   const [filtroCot, setFiltroCot] = useState("");
   const irA = (vista, id) => {
     if (vista === "ventas" && id) setVentaAbrir(id);
+    if (vista === "compras" && id) setOrdenAbrir(id);
     if (vista === "cotizaciones-seguir") { setFiltroCot("seguir"); setView("cotizaciones"); return; }
     if (vista === "cotizaciones") setFiltroCot("");
     setView(vista);
@@ -342,9 +357,12 @@ function App({ usuario, onLogout }) {
   const verVenta = (id) => { setVentaAbrir(id); setView("ventas"); };
   const verOrden = (id) => { setOrdenAbrir(id); setView("compras"); };
 
-  const nav = (id, texto, extra) => (
-    <button className={`nav-btn ${view === id ? "active" : ""}`} onClick={() => { if (id === "cotizaciones") setFiltroCot(""); setView(id); }}>{texto}{extra}</button>
+  const nav = (id, texto, extra, activos = [id]) => (
+    <button className={`nav-btn ${activos.includes(view) ? "active" : ""}`} onClick={() => { setMenuMas(false); if (id === "cotizaciones") setFiltroCot(""); setView(id); }}>{texto}{extra}</button>
   );
+  // Menú "Más": lo que se usa de vez en cuando
+  const MAS = [["clientes", "Clientes"], ["proveedores", "Proveedores"], ...(esAdmin ? [["gastos", "Gastos"], ["reportes", "Reportes"], ["config", "Configuración"], ["usuarios", "Usuarios"]] : [])];
+  const enMas = MAS.some(([v]) => v === view);
 
   return (
     <>
@@ -352,23 +370,24 @@ function App({ usuario, onLogout }) {
         <header className="header">
           <nav className="header-nav">
             {nav("dashboard", "Inicio")}
-            {nav("catalogo", "Catálogo")}
-            <span className="nav-sep" />
-            {nav("cotizar", "Cotizar", borrador.items.length > 0 && <span className="badge">{borrador.items.length}</span>)}
-            {nav("cotizaciones", "Cotizaciones")}
-            {nav("licitaciones", "Licitaciones")}
+            {nav("licitaciones", "Oportunidades")}
+            {nav("cotizaciones", "Cotizaciones", borrador.items.length > 0 && <span className="badge" title="Productos en la cotización que estás armando">{borrador.items.length}</span>, ["cotizaciones", "cotizar"])}
             {nav("ventas", "Ventas")}
-            {nav("clientes", "Clientes")}
-            <span className="nav-sep" />
             {nav("compras", "Compras")}
-            {nav("proveedores", "Proveedores")}
-            {esAdmin && nav("gastos", "Gastos")}
-            {esAdmin && <>
-              <span className="nav-sep" />
-              {nav("reportes", "Reportes")}
-              {nav("config", "Config.")}
-              {nav("usuarios", "Usuarios")}
-            </>}
+            {nav("catalogo", "Catálogo")}
+            <div className="menu-mas">
+              <button className={`nav-btn ${enMas ? "active" : ""}`} onClick={() => setMenuMas((m) => !m)}>
+                {enMas ? MAS.find(([v]) => v === view)[1] : "Más"} ▾
+              </button>
+              {menuMas && (
+                <>
+                  <div className="menu-fondo" onClick={() => setMenuMas(false)} />
+                  <div className="menu-pop menu-pop-izq">
+                    {MAS.map(([v, t]) => <button key={v} className={view === v ? "activo" : ""} onClick={() => { setMenuMas(false); setView(v); }}>{t}</button>)}
+                  </div>
+                </>
+              )}
+            </div>
           </nav>
           <div className="user-menu">
             <button className="user-btn" onClick={() => setMenuUsuario((m) => !m)}>
@@ -396,6 +415,12 @@ function App({ usuario, onLogout }) {
           {view === "dashboard" && <Dashboard notify={showNotif} irA={irA} esAdmin={esAdmin} />}
           {view === "catalogo" && (
             <Catalogo esAdmin={esAdmin} notify={showNotif} enCotizacion={enCotizacion} onCotizar={cotizarProducto} proveedores={proveedores} />
+          )}
+          {(view === "cotizar" || view === "cotizaciones") && (
+            <div className="chips subpestanas">
+              <button className={`chip ${view === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>＋ Nueva cotización{borrador.items.length > 0 ? ` (${borrador.items.length} productos)` : ""}</button>
+              <button className={`chip ${view === "cotizaciones" ? "activo" : ""}`} onClick={() => { setFiltroCot(""); setView("cotizaciones"); }}>Cotizaciones guardadas</button>
+            </div>
           )}
           {view === "cotizar" && (
             <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={esAdmin} notify={showNotif}
