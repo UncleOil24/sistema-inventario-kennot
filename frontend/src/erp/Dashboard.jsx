@@ -3,6 +3,8 @@ import { Estado, Cargando } from "./ui";
 import { api, fmt, fecha } from "./lib";
 
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+const MESES_LARGO = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const mesLargo = (m) => MESES_LARGO[Number(String(m).split("-")[1]) - 1] || "mes";
 const nombreMes = (m) => { const [y, mm] = m.split("-"); return `${MESES[Number(mm) - 1]} ${y.slice(2)}`; };
 const compacto = (n) => {
   const v = Math.abs(n);
@@ -37,16 +39,16 @@ export default function Dashboard({ notify, irA, esAdmin }) {
       </div>
 
       <div className="kpis">
-        <Kpi label="Ventas del mes (neto)" valor={fmt(m.ventas)} sub={`${m.cantidad} ventas · ticket ${fmt(m.ticket_promedio)}`} acento />
-        {esAdmin && <Kpi label="Margen del mes" valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
-        {esAdmin && <Kpi label="Utilidad del mes" valor={fmt(m.utilidad)} sub={`margen − gastos (${fmt(m.gastos)})`} alerta={m.utilidad < 0} onClick={() => irA("gastos")} />}
+        <Kpi label={`Ventas de ${mesLargo(m.mes)} (neto)`} valor={fmt(m.ventas)} sub={`${m.cantidad} ventas · ticket ${fmt(m.ticket_promedio)}`} acento />
+        {esAdmin && <Kpi label={`Margen de ${mesLargo(m.mes)}`} valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
+        {esAdmin && <Kpi label={`Utilidad de ${mesLargo(m.mes)}`} valor={fmt(m.utilidad)} sub={`margen − gastos (${fmt(m.gastos)})`} alerta={m.utilidad < 0} onClick={() => irA("gastos")} />}
         <Kpi label="Cotizaciones abiertas" valor={fmt(cotizaciones.monto_abierto)} sub={`${cotizaciones.abiertas} por responder · neto`} onClick={() => irA("cotizaciones")} />
  <Kpi label="Licitaciones nuevas" valor={lic.nuevas} sub={lic.ultima_revision ? `revisado ${new Date(lic.ultima_revision).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "aún sin revisar"} alerta={lic.nuevas > 0} onClick={() => irA("licitaciones")} />
         <Kpi label="Clientes por llamar" valor={porSeguir.cantidad} sub="cotizaciones sin respuesta" alerta={porSeguir.cantidad > 0} onClick={() => irA("cotizaciones-seguir")} />
         {esAdmin && <Kpi label="Ventas por comprar" valor={porComprar.cantidad} sub="sin órdenes de compra" alerta={porComprar.cantidad > 0} onClick={() => irA("ventas")} />}
-        <Kpi label="Por cobrar" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
-        {esAdmin && <Kpi label="Por pagar" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
-        {esAdmin && <Kpi label="Caja del mes" valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />}
+        <Kpi label="Por cobrar (todas)" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes, de cualquier mes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
+        {esAdmin && <Kpi label="Por pagar (todas)" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
+        {esAdmin && <Kpi label={`Caja de ${mesLargo(m.mes)}`} valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />}
         <Kpi label="Catálogo" valor={catalogo.productos.toLocaleString("es-CL")} sub={`${catalogo.sin_precio} sin precio · ${catalogo.con_aviso} por revisar · ${catalogo.antiguos} precios de +${catalogo.meses_antiguo} meses`} onClick={() => irA("catalogo")} />
       </div>
 

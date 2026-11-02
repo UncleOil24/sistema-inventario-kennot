@@ -4,11 +4,23 @@ import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
 import { ListaProyectos, DetalleProyecto, UnirEnProyecto } from "./Proyectos";
 
+// Períodos para filtrar (fechas en hora local de Chile)
+const PERIODOS = [["todo", "Todas las fechas"], ["mes", "Este mes"], ["mes_pasado", "Mes pasado"], ["anio", "Este año"]];
+const iso = (d) => d.toLocaleDateString("sv-SE");
+function rangoPeriodo(p) {
+  const hoy = new Date();
+  if (p === "mes") return [iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1)), iso(hoy)];
+  if (p === "mes_pasado") return [iso(new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)), iso(new Date(hoy.getFullYear(), hoy.getMonth(), 0))];
+  if (p === "anio") return [iso(new Date(hoy.getFullYear(), 0, 1)), iso(hoy)];
+  return [null, null];
+}
+
 export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbierta, irACompra }) {
   const [ventas, setVentas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtroPago, setFiltroPago] = useState("");
   const [busqueda, setBusqueda] = useState("");
+  const [periodo, setPeriodo] = useState("todo"); // todo | mes | mes_pasado | anio
   const [nueva, setNueva] = useState(false);
   const [detalle, setDetalle] = useState(null);
   const [modo, setModo] = useState("ventas"); // ventas | proyectos
@@ -23,12 +35,15 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
       const p = new URLSearchParams();
       if (filtroPago && filtroPago !== "porcomprar") p.append("estado_pago", filtroPago);
       if (busqueda) p.append("busqueda", busqueda);
+      const [desde, hasta] = rangoPeriodo(periodo);
+      if (desde) p.append("desde", desde);
+      if (hasta) p.append("hasta", hasta);
       let data = await api(`/ventas?${p}`);
       if (filtroPago === "porcomprar") data = data.filter((v) => v.estado !== "anulada" && !v.tiene_compras);
       setVentas(data);
     } catch (e) { notify(e.message, "danger"); }
     finally { setLoading(false); }
-  }, [filtroPago, busqueda, notify]);
+  }, [filtroPago, busqueda, periodo, notify]);
 
   useEffect(() => { const t = setTimeout(cargar, 250); return () => clearTimeout(t); }, [cargar]);
 
@@ -72,7 +87,7 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
     <>
       {chipsModo}
       <div className="stats">
-        <div className="stat-card"><div className="stat-label">Ventas listadas</div><div className="stat-value">{activas.length}</div></div>
+        <div className="stat-card"><div className="stat-label">Ventas · {PERIODOS.find(([v]) => v === periodo)[1].toLowerCase()}</div><div className="stat-value">{activas.length}</div></div>
         <div className="stat-card"><div className="stat-label">Total (con IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.total), 0))}</div></div>
         {esAdmin
           ? <div className="stat-card"><div className="stat-label">Margen neto</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.subtotal) - Number(v.costo_total), 0))}</div></div>
@@ -85,6 +100,9 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
           <span className="search-icon">⌕</span>
           <input className="search-input" placeholder="Buscar por N°, cliente o documento..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
+        <select className="filter-select" value={periodo} onChange={(e) => setPeriodo(e.target.value)} title="Período de las ventas listadas">
+          {PERIODOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+        </select>
         <select className="filter-select" value={filtroPago} onChange={(e) => setFiltroPago(e.target.value)}>
           <option value="">Todas</option>
           {esAdmin && <option value="porcomprar">Por comprar (sin órdenes)</option>}
