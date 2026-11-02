@@ -238,7 +238,7 @@ async function calzarLineas(lineas, indice, { usuario, tipo, archivo } = {}) {
       const elegido = l.candidatos.find((p) => p.id === Number(c.producto_id)) || null;
       l.producto_id = elegido ? elegido.id : null;
       l.calce = elegido ? (c.calce === "sin_producto" ? "parecido" : c.calce) : "sin_producto";
-      l.nota = c.nota || "";
+      l.nota = /^placeholder$/i.test(String(c.nota || "").trim()) ? "" : c.nota || "";
     }
   }
   for (const l of resultado) if (!l.calce) Object.assign(l, { producto_id: null, calce: "sin_producto", nota: "Sin respuesta para esta línea" });

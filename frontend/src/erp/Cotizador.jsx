@@ -213,7 +213,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
           {guardando ? <><span className="spinner"></span>Guardando...</> : "Guardar y descargar PDF"}
         </button>
       </div>
-      {importar && <ImportarLista tipo={tipo} notify={notify} onClose={() => setImportar(false)} onAgregar={agregarLista} />}
+      {importar && <ImportarLista tipo={tipo} esAdmin={esAdmin} notify={notify} onClose={() => setImportar(false)} onAgregar={agregarLista} />}
     </>
   );
 }

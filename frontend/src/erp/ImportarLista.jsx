@@ -1,12 +1,29 @@
 import { useState, useEffect } from "react";
 import { Modal, Estado, SelectorProducto } from "./ui";
-import { fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses } from "./lib";
+import { api, fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses, invalidarProductos, sinTildes } from "./lib";
+
+// Unidades de Mercado Público y listas de clientes -> las del catálogo
+const UNIDADES = { EA: "UNIDAD", UN: "UNIDAD", UND: "UNIDAD", UNIDAD: "UNIDAD", U: "UNIDAD", GL: "GALÓN", GAL: "GALÓN", GALON: "GALÓN", KG: "KG", KGM: "KG",
+  MT: "METRO", MTR: "METRO", M: "METRO", METRO: "METRO", M2: "M2", MTK: "M2", M3: "M3", MTQ: "M3", LT: "LITRO", LTR: "LITRO", L: "LITRO", LITRO: "LITRO",
+  CJ: "CAJA", CAJA: "CAJA", BX: "CAJA", RO: "ROLLO", ROLLO: "ROLLO", SAC: "SACO", SACO: "SACO", BG: "BOLSA", BOLSA: "BOLSA", PK: "PACK", PAQ: "PACK", JGO: "JUEGO", SET: "JUEGO" };
+const unidadCatalogo = (u) => UNIDADES[sinTildes(u || "").replace(/[^A-Z0-9]/g, "")] || "UNIDAD";
+// "Pinturas al esmalte - Pintura piscina ... similar o equivalente a Sipa" -> "PINTURA PISCINA ..."
+const nombreSugerido = (desc) => {
+  let t = String(desc || "").trim();
+  const partes = t.split(/\s+-\s+/);
+  if (partes.length > 1 && partes[0].length < 60) t = partes.slice(1).join(" - ");
+  t = t.replace(/[,;.]?\s*(similar|o similar|similar\s+o|o\s+equivalente|equivalente)\b.*$/i, "").replace(/\s+/g, " ").trim().replace(/[.,;:]$/, "");
+  return t.toUpperCase().slice(0, 250);
+};
+const categoriaSugerida = (l) => l.candidatos?.find((c) => c.categoria)?.categoria || "General";
 
 // Sube la lista del cliente (Excel, PDF, Word o foto), Claude calza cada línea con el catálogo
 // y aquí se revisa antes de agregarla a la cotización. Los precios los pone el sistema.
 // cargar (opcional): función que devuelve el resultado ya calzado (p.ej. una licitación), en vez de subir archivo
-export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar, titulo = "// Cotizar lista del cliente" }) {
+export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar, esAdmin, titulo = "// Cotizar lista del cliente" }) {
   const productos = useProductos();
+  const [alCatalogo, setAlCatalogo] = useState(null); // línea que se está creando en el catálogo
+  const [creandoTodas, setCreandoTodas] = useState(false);
   const [archivo, setArchivo] = useState(null);
   const [leyendo, setLeyendo] = useState(false);
   const [res, setRes] = useState(null);
@@ -36,6 +53,26 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
   }, []);
 
   const set = (i, cambios) => setLineas((ls) => ls.map((l) => (l.i === i ? { ...l, ...cambios } : l)));
+  const sinProducto = lineas.filter((l) => !l.producto);
+  const usarNuevo = (l, p) => set(l.i, { producto: p, incluir: true, calce: "nuevo", nota: "Agregado al catálogo" });
+
+  // Crea en el catálogo todas las líneas sin producto (sin precio: se cotizan después en Catálogo → Precios)
+  const crearTodas = async () => {
+    if (!confirm(`¿Agregar al catálogo los ${sinProducto.length} productos que no existen? Quedan sin precio de compra hasta que los cotices (Catálogo → Precios).`)) return;
+    setCreandoTodas(true);
+    let n = 0;
+    try {
+      for (const l of sinProducto) {
+        const nombre = nombreSugerido(l.descripcion);
+        const existente = (productos || []).find((p) => sinTildes(p.nombre) === sinTildes(nombre));
+        const p = existente || await api("/productos", { method: "POST", body: { nombre, unidad: unidadCatalogo(l.unidad), categoria: categoriaSugerida(l) } });
+        usarNuevo(l, p);
+        n++;
+      }
+      notify(`✓ ${n} producto(s) agregados al catálogo`);
+    } catch (e) { notify(`${n} agregados; error en el siguiente: ${e.message}`, "danger"); }
+    finally { invalidarProductos(); setCreandoTodas(false); }
+  };
   const elegidas = lineas.filter((l) => l.incluir && l.producto);
   const revisar = lineas.filter((l) => l.calce === "parecido" || l.calce === "sin_producto" || (l.producto && !(precioSegun(l.producto, tipo) > 0))).length;
 
@@ -89,11 +126,12 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
                       <td><input type="checkbox" checked={l.incluir} disabled={!l.producto} onChange={(e) => set(l.i, { incluir: e.target.checked })} /></td>
                       <td>{l.descripcion}{l.unidad && <div className="mini">{l.unidad}</div>}</td>
                       <td><input className="qty-input" type="number" min="0" step="any" value={l.cantidad} onChange={(e) => set(l.i, { cantidad: e.target.value })} /></td>
-                      <td><Estado valor={l.calce} />{l.nota && <div className="mini" style={{ maxWidth: 200 }}>{l.nota}</div>}</td>
+                      <td><Estado valor={l.calce} />{l.nota && !/^placeholder$/i.test(l.nota) && <div className="mini" style={{ maxWidth: 200 }}>{l.nota}</div>}</td>
                       <td>
                         <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => precioSegun(p, tipo)}
                           onChange={(p) => set(l.i, { producto: p, incluir: !!p, calce: p ? (p.id === l.producto?.id ? l.calce : "exacto") : "sin_producto", nota: p && p.id !== l.producto?.id ? "Elegido a mano" : l.nota })} />
                         {l.producto && <div className="mini">{l.producto.unidad}{l.producto.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(l.producto.fecha_precio)}</span>}</div>}
+                        {(!l.producto || l.calce === "parecido") && <button className="link" onClick={() => setAlCatalogo(l)}>+ Agregar al catálogo como producto nuevo</button>}
                       </td>
                       <td className="price-cell">{l.producto ? (precio > 0 ? fmt(precio) : "sin precio") : "—"}</td>
                       <td className="price-cell">{precio > 0 ? fmt(precio * Number(l.cantidad || 0)) : ""}</td>
@@ -103,9 +141,72 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
               </tbody>
             </table>
           </div>
-          <div className="mini">Las líneas sin producto no se agregan: créalas en el Catálogo (como producto aparte) o cotízalas a mano.</div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            {sinProducto.length > 0 && <button className="btn btn-ghost btn-sm" disabled={creandoTodas} onClick={crearTodas}>{creandoTodas ? <><span className="spinner"></span>Agregando...</> : `+ Agregar al catálogo las ${sinProducto.length} sin producto`}</button>}
+            <span className="mini">Los productos nuevos quedan en el catálogo sin precio: cárgalo aquí al crearlos o después en Catálogo → Precios.</span>
+          </div>
         </>
       )}
+      {alCatalogo && <NuevoDesdeLinea linea={alCatalogo} esAdmin={esAdmin} notify={notify} productos={productos}
+        onClose={() => setAlCatalogo(null)} onCreado={(p) => { usarNuevo(alCatalogo, p); setAlCatalogo(null); }} />}
+    </Modal>
+  );
+}
+
+// Crear en el catálogo el producto que pidió el cliente (con precio de compra opcional)
+function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado }) {
+  const [categorias, setCategorias] = useState([]);
+  const [form, setForm] = useState({ nombre: nombreSugerido(linea.descripcion), unidad: unidadCatalogo(linea.unidad), categoria: categoriaSugerida(linea), precio_compra: "", proveedor: "", documento: "" });
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { api("/productos/categorias").then(setCategorias).catch(() => {}); }, []);
+  const parecidos = (productos || []).filter((p) => {
+    const a = new Set(sinTildes(form.nombre).split(/\s+/).filter((w) => w.length > 3));
+    const b = sinTildes(p.nombre).split(/\s+/).filter((w) => a.has(w));
+    return a.size && b.length >= Math.min(3, a.size);
+  }).slice(0, 5);
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      const body = { nombre: form.nombre, unidad: form.unidad, categoria: form.categoria || "General" };
+      if (esAdmin && Number(form.precio_compra) > 0 && form.proveedor.trim()) Object.assign(body, { precio_compra: Number(form.precio_compra), proveedor: form.proveedor, documento: form.documento || null });
+      const p = await api("/productos", { method: "POST", body });
+      invalidarProductos();
+      notify(`✓ ${p.nombre} agregado al catálogo (N° ${p.codigo})`);
+      onCreado(p);
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setGuardando(false); }
+  };
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  return (
+    <Modal titulo="// Agregar al catálogo" onClose={onClose} ancho={640}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={guardando || !form.nombre.trim()} onClick={guardar}>{guardando ? "Guardando..." : "Agregar y usar en esta línea"}</button>
+      </>}>
+      <div className="mini">El cliente pidió: <strong>{linea.descripcion}</strong>{linea.unidad ? ` (${linea.unidad})` : ""}</div>
+      <div className="field"><label>Descripción en nuestro catálogo</label><input value={form.nombre} onChange={(e) => set("nombre", e.target.value.toUpperCase())} /></div>
+      {parecidos.length > 0 && (
+        <div className="aviso" style={{ marginBottom: 0 }}>
+          ¿Ya existe? Parecidos en el catálogo:{" "}
+          {parecidos.map((p) => <button key={p.id} className="link" onClick={() => onCreado(p)}>N° {p.codigo} {p.nombre}</button>)}
+        </div>
+      )}
+      <div className="fields-row">
+        <div className="field"><label>Unidad</label><input value={form.unidad} onChange={(e) => set("unidad", e.target.value.toUpperCase())} /></div>
+        <div className="field">
+          <label>Categoría</label>
+          <input list="cats-nuevo" value={form.categoria} onChange={(e) => set("categoria", e.target.value)} />
+          <datalist id="cats-nuevo">{categorias.map((c) => <option key={c.categoria} value={c.categoria} />)}</datalist>
+        </div>
+      </div>
+      {esAdmin && <>
+        <div className="mini">Precio de compra (opcional, neto sin IVA): si ya lo cotizaste, el sistema calcula el precio de venta altiro.</div>
+        <div className="fields-row tres">
+          <div className="field"><label>Precio compra neto</label><input type="number" min="0" value={form.precio_compra} onChange={(e) => set("precio_compra", e.target.value)} /></div>
+          <div className="field"><label>Proveedor</label><input value={form.proveedor} onChange={(e) => set("proveedor", e.target.value.toUpperCase())} placeholder="MADESUR, SODIMAC..." /></div>
+          <div className="field"><label>N° cotización / factura</label><input value={form.documento} onChange={(e) => set("documento", e.target.value)} /></div>
+        </div>
+      </>}
     </Modal>
   );
 }
