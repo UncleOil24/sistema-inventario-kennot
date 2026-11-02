@@ -11,6 +11,8 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
   const [editando, setEditando] = useState(null); // null | "nueva" | orden
   const [detalle, setDetalle] = useState(null);
   const [documento, setDocumento] = useState(false);
+  const [agrupar, setAgrupar] = useState(() => { try { return localStorage.getItem("compras_agrupar") !== "0"; } catch { return true; } });
+  const cambiarAgrupar = (v) => { setAgrupar(v); try { localStorage.setItem("compras_agrupar", v ? "1" : "0"); } catch { /* */ } };
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -54,7 +56,7 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
       <div className="toolbar">
         <div className="search-wrap">
           <span className="search-icon">⌕</span>
-          <input className="search-input" placeholder="Buscar por N°, proveedor o factura..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          <input className="search-input" placeholder="Buscar por N° de orden, proveedor, factura o N° de venta..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
         <select className="filter-select" value={filtro} onChange={(e) => setFiltro(e.target.value)}>
           <option value="">Todas</option>
@@ -69,25 +71,20 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
       </div>
       {proveedores.length === 0 && <div className="aviso">Para crear órdenes de compra primero registra al menos un proveedor en la pestaña Proveedores.</div>}
 
+      <div className="chips" style={{ marginBottom: 10 }}>
+        <button className={`chip ${agrupar ? "activo" : ""}`} onClick={() => cambiarAgrupar(true)}>Agrupadas por venta</button>
+        <button className={`chip ${!agrupar ? "activo" : ""}`} onClick={() => cambiarAgrupar(false)}>Lista simple</button>
+      </div>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th>Factura</th><th>Total</th><th>Saldo</th><th>Estado</th><th>Pago</th><th></th></tr></thead>
+          <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th>{!agrupar && <th>Para</th>}<th>Factura</th><th>Total</th><th>Saldo</th><th>Estado</th><th>Pago</th><th></th></tr></thead>
           <tbody>
-            {loading ? <tr className="empty-row"><td colSpan={9}><span className="spinner"></span>Cargando...</td></tr>
-              : ordenes.length === 0 ? <tr className="empty-row"><td colSpan={9}>// sin órdenes de compra</td></tr>
-              : ordenes.map((o) => (
-                <tr key={o.id} className={o.estado === "anulada" ? "fila-anulada" : ""}>
-                  <td className="id-cell">{o.numero}</td>
-                  <td className="mini">{fecha(o.fecha)}</td>
-                  <td>{o.proveedor_nombre}</td>
-                  <td className="mini">{o.documento || "—"}</td>
-                  <td className="price-cell">{fmt(o.total)}</td>
-                  <td className="price-cell">{o.estado === "recibida" ? fmt(Number(o.total) - Number(o.monto_pagado)) : "—"}</td>
-                  <td><Estado valor={o.estado} /></td>
-                  <td>{o.estado === "recibida" ? <Estado valor={o.estado_pago} /> : <span className="mini">—</span>}</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={() => verDetalle(o.id)}>Ver</button></td>
-                </tr>
-              ))}
+            {loading ? <tr className="empty-row"><td colSpan={10}><span className="spinner"></span>Cargando...</td></tr>
+              : ordenes.length === 0 ? <tr className="empty-row"><td colSpan={10}>// sin órdenes de compra</td></tr>
+              : agrupar ? grupos(ordenes).map((g) => (
+                <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} />
+              ))
+              : ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} conPara />)}
           </tbody>
         </table>
       </div>
@@ -108,6 +105,71 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
   );
 }
 
+// Agrupa las órdenes por la venta (o el proyecto) para la que se compró; las demás van en "Compras sueltas"
+function grupos(ordenes) {
+  const mapa = new Map();
+  for (const o of ordenes) {
+    const clave = o.venta ? `v${o.venta.id}` : o.proyecto ? `p${o.proyecto.id}` : "sueltas";
+    if (!mapa.has(clave)) mapa.set(clave, { clave, venta: o.venta, proyecto: o.proyecto, ordenes: [] });
+    mapa.get(clave).ordenes.push(o);
+  }
+  const lista = [...mapa.values()];
+  // La venta/proyecto con la orden más nueva primero; las sueltas al final
+  lista.sort((a, b) => (a.clave === "sueltas") - (b.clave === "sueltas") || Math.max(...b.ordenes.map((o) => o.id)) - Math.max(...a.ordenes.map((o) => o.id)));
+  return lista;
+}
+
+function GrupoCompras({ g, verDetalle }) {
+  const vivas = g.ordenes.filter((o) => o.estado !== "anulada");
+  const total = vivas.reduce((s, o) => s + Number(o.total), 0);
+  const recibidas = vivas.filter((o) => o.estado === "recibida").length;
+  const saldo = vivas.filter((o) => o.estado === "recibida").reduce((s, o) => s + Number(o.total) - Number(o.monto_pagado), 0);
+  const titulo = g.venta
+    ? <>Venta <strong>{g.venta.numero}</strong> · {g.venta.cliente_nombre || "Sin cliente"}{g.venta.orden_compra_cliente ? ` · OC cliente ${g.venta.orden_compra_cliente}` : ""}{g.venta.empresa === "tactics" ? " · Tactics" : ""}</>
+    : g.proyecto ? <>Proyecto <strong>{g.proyecto.numero}</strong> · {g.proyecto.nombre} (compra consolidada)</>
+    : <>Compras sueltas (sin venta)</>;
+  return (
+    <>
+      <tr className="fila-grupo">
+        <td colSpan={4}>{titulo}</td>
+        <td className="price-cell">{fmt(total)}</td>
+        <td className="price-cell">{recibidas ? fmt(saldo) : "—"}</td>
+        <td colSpan={3} className="mini">{vivas.length} orden(es) · {recibidas} recibida(s)</td>
+      </tr>
+      {g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
+    </>
+  );
+}
+
+function FilaOrden({ o, verDetalle, conPara, sangria }) {
+  return (
+    <tr className={o.estado === "anulada" ? "fila-anulada" : ""}>
+      <td className="id-cell" style={sangria ? { paddingLeft: 28 } : undefined}>{sangria ? "└ " : ""}{o.numero}</td>
+      <td className="mini">{fecha(o.fecha)}</td>
+      <td>{o.proveedor_nombre}</td>
+      {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}` : o.proyecto ? `${o.proyecto.numero} (proyecto)` : "—"}</td>}
+      <td className="mini">{o.documento || "—"}</td>
+      <td className="price-cell">{fmt(o.total)}</td>
+      <td className="price-cell">{o.estado === "recibida" ? fmt(Number(o.total) - Number(o.monto_pagado)) : "—"}</td>
+      <td><Estado valor={o.estado} /></td>
+      <td>{o.estado === "recibida" ? <Estado valor={o.estado_pago} /> : <span className="mini">—</span>}</td>
+      <td><div className="actions"><button className="btn btn-ghost btn-sm" onClick={() => verDetalle(o.id)}>Ver</button></div></td>
+    </tr>
+  );
+}
+
+// Elegir la venta para la que se compra (ventas no anuladas, las más nuevas primero)
+function SelectorVenta({ valor, onChange, disabled }) {
+  const [ventas, setVentas] = useState([]);
+  useEffect(() => { api("/ventas").then((vs) => setVentas(vs.filter((v) => v.estado !== "anulada"))).catch(() => {}); }, []);
+  return (
+    <select value={valor || ""} disabled={disabled} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
+      <option value="">— Sin venta (compra suelta) —</option>
+      {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre || "Sin cliente"}{v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : ""}</option>)}
+    </select>
+  );
+}
+
 function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
   const productos = useProductos();
   const [items, setItems] = useState(() => orden?.items || []);
@@ -116,6 +178,7 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
     documento: orden?.documento || "",
     fecha_vencimiento: orden?.fecha_vencimiento || "",
     notas: orden?.notas || "",
+    venta_id: orden?.venta_id || null,
   });
   const [guardando, setGuardando] = useState(false);
 
@@ -156,6 +219,12 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
           <input value={form.documento} onChange={(e) => setForm({ ...form, documento: e.target.value })} placeholder="Ej: 88123" />
         </div>
       </div>
+      {!orden && (
+        <div className="field">
+          <label>Para la venta (opcional)</label>
+          <SelectorVenta valor={form.venta_id} onChange={(venta_id) => setForm({ ...form, venta_id })} />
+        </div>
+      )}
       <ItemsEditor items={items} setItems={setItems} productos={productos} precioDe={(p) => p.precio_compra} etiquetaPrecio="Costo neto" />
       <div className="fields-row">
         <div className="field">
@@ -213,6 +282,12 @@ function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onE
         {orden.fecha_vencimiento && <span>Vence {fecha(orden.fecha_vencimiento)}</span>}
         {orden.creado_por && <span>Por {orden.creado_por}</span>}
         <Estado valor={orden.estado} />
+      </div>
+      <div className="field">
+        <label>Para la venta</label>
+        <SelectorVenta valor={orden.venta_id} disabled={!!orden.proyecto_id}
+          onChange={(venta_id) => accion(() => api(`/ordenes-compra/${orden.id}/venta`, { method: "PUT", body: { venta_id } }), venta_id ? "✓ Orden asignada a la venta" : "Orden quitada de la venta")} />
+        {orden.proyecto_id && <span className="mini">Es la compra consolidada de un proyecto.</span>}
       </div>
       {orden.notas && !orden.venta_id && <div className="mini">{orden.notas}</div>}
       <div className="table-wrap">

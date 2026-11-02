@@ -4,6 +4,8 @@ const OrdenCompra = require("../models/OrdenCompra");
 const Proveedor = require("../models/Proveedor");
 const Producto = require("../models/Producto");
 const Pago = require("../models/Pago");
+const Venta = require("../models/Venta");
+const Proyecto = require("../models/Proyecto");
 const PrecioProveedor = require("../models/PrecioProveedor");
 const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago,
@@ -41,10 +43,19 @@ const getOrdenes = handler(async (req, res) => {
   if (estado_pago) where.estado_pago = estado_pago;
   if (proveedor_id) where.proveedor_id = proveedor_id;
   if (busqueda) {
-    where[Op.or] = ["numero", "proveedor_nombre", "documento"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
+    where[Op.or] = ["numero", "proveedor_nombre", "documento", "notas"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
   const data = await OrdenCompra.findAll({ where, order: [["id", "DESC"]] });
-  res.json({ ok: true, data });
+  // Venta o proyecto para el que se compró (para agrupar en la lista)
+  const ventaIds = [...new Set(data.map((o) => o.venta_id).filter(Boolean))];
+  const proyIds = [...new Set(data.map((o) => o.proyecto_id).filter(Boolean))];
+  const [ventas, proyectos] = await Promise.all([
+    ventaIds.length ? Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "fecha", "subtotal", "empresa", "proyecto_id"], raw: true }) : [],
+    proyIds.length ? Proyecto.findAll({ where: { id: proyIds }, attributes: ["id", "numero", "nombre", "cliente_nombre"], raw: true }) : [],
+  ]);
+  const v = new Map(ventas.map((x) => [x.id, x]));
+  const pr = new Map(proyectos.map((x) => [x.id, x]));
+  res.json({ ok: true, data: data.map((o) => ({ ...o.toJSON(), venta: v.get(o.venta_id) || null, proyecto: pr.get(o.proyecto_id) || null })) });
 });
 
 // GET /api/ordenes-compra/:id  (incluye pagos)
@@ -55,15 +66,31 @@ const getOrden = handler(async (req, res) => {
   res.json({ ok: true, data: { ...oc.toJSON(), pagos } });
 });
 
+// PUT /api/ordenes-compra/:id/venta   { venta_id | null }   -> para qué venta se compró (sirve en cualquier estado)
+const asignarVenta = handler(async (req, res) => {
+  const oc = await OrdenCompra.findByPk(req.params.id);
+  if (!oc) throw new ErrorNegocio("Orden no encontrada", 404);
+  const ventaId = req.body?.venta_id ? Number(req.body.venta_id) : null;
+  if (ventaId) {
+    const v = await Venta.findByPk(ventaId);
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    await oc.update({ venta_id: v.id, proyecto_id: null });
+  } else {
+    await oc.update({ venta_id: null });
+  }
+  res.json({ ok: true, data: oc });
+});
+
 // POST /api/ordenes-compra   -> queda en "borrador"
 const crearOrden = handler(async (req, res) => {
   const { proveedor_id, items, fecha_vencimiento, documento, notas } = req.body;
+  const venta_id = req.body.venta_id ? Number(req.body.venta_id) : null;
   const oc = await sequelize.transaction(async (t) => {
     const prov = await datosProveedor(proveedor_id, t);
     const itemsOk = await prepararItems(items, t);
     const nueva = await OrdenCompra.create({
       ...prov, items: itemsOk, ...calcularTotales(itemsOk),
-      fecha_vencimiento: fecha_vencimiento || null, documento, notas,
+      fecha_vencimiento: fecha_vencimiento || null, documento, notas, venta_id,
       creado_por: req.usuario.nombre,
     }, { transaction: t });
     await nueva.update({ numero: numeroOC(nueva.id) }, { transaction: t });
@@ -169,5 +196,6 @@ const registrarPago = handler(async (req, res) => {
 });
 
 module.exports = {
+  asignarVenta,
   getOrdenes, getOrden, crearOrden, actualizarOrden, recibirOrden, anularOrden, eliminarOrden, registrarPago,
 };

@@ -213,6 +213,7 @@ const styles = `
   .textarea { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; font-family: var(--sans); font-size: 12px; color: var(--text); outline: none; width: 100%; resize: vertical; }
   .select-linea { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-family: var(--mono); font-size: 11px; color: var(--text); max-width: 340px; width: 100%; }
   .nav-btn { padding: 6px 10px; }
+  .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
   .fila-alerta td { background: rgba(232,197,71,0.13); }
   .link { background: none; border: none; color: var(--info); cursor: pointer; font-family: var(--mono); font-size: 11px; padding: 2px 4px; text-align: left; }
   .link:hover:not(:disabled) { text-decoration: underline; }
@@ -349,7 +350,6 @@ function App({ usuario, onLogout }) {
     <>
       <div className="app">
         <header className="header">
-          <div className="header-brand"><span>▣</span> KENOTT <span>/</span> VENTAS</div>
           <nav className="header-nav">
             {nav("dashboard", "Inicio")}
             {nav("catalogo", "Catálogo")}
