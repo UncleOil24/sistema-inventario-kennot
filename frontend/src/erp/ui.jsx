@@ -38,6 +38,7 @@ const ESTADOS = {
   equivalente: ["Equivalente", "info"],
   parecido: ["Parecido", "warn"],
   sin_producto: ["Sin producto", "warn"],
+  nuevo: ["Nuevo en catálogo", "info"],
   activo: ["Activo", "ok"],
   inactivo: ["Inactivo", "muted"],
   abierto: ["En curso", "info"],

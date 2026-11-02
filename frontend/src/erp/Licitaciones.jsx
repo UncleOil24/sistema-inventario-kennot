@@ -145,7 +145,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar }) {
 
       {abierta && <DetalleLicitacion codigo={abierta.codigo} ficha={abierta.ficha} tipo={tipoDe(abierta)} notify={notify} onClose={() => { setAbierta(null); cargar(); }} onCotizar={(l) => { setAbierta(null); setCotizar(l); }} />}
       {cotizar && (
-        <ImportarLista tipo="convenio" notify={notify} titulo={`// Cotizar ${tipoDe(cotizar)} ${cotizar.codigo}`}
+        <ImportarLista tipo="convenio" esAdmin={esAdmin} notify={notify} titulo={`// Cotizar ${tipoDe(cotizar)} ${cotizar.codigo}`}
           cargar={() => api(`/ia/licitacion/${encodeURIComponent(cotizar.codigo)}`, { method: "POST" })}
           onClose={() => setCotizar(null)}
           onAgregar={(nuevas) => { const l = cotizar; setCotizar(null); alCotizador(l, nuevas); }} />
