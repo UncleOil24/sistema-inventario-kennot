@@ -2,6 +2,40 @@ import { useState, useEffect, useCallback } from "react";
 import { Estado, Cargando } from "./ui";
 import { api, fmt, fecha } from "./lib";
 
+const ICONOS = { oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞" };
+const GRUPOS = [["oportunidad", "Oportunidades"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["cobrar", "Cobrar"], ["pagar", "Pagar"], ["llamar", "Llamar a clientes"]];
+
+// Lista de lo que hay que hacer, lo urgente primero
+function QueHacer({ tareas, irA }) {
+  const [todas, setTodas] = useState(false);
+  const urgentes = tareas.filter((t) => t.urgencia === 0).length;
+  const visibles = todas ? tareas : tareas.slice(0, 8);
+  return (
+    <div className="panel que-hacer">
+      <div className="panel-titulo" style={{ fontSize: 14 }}>
+        Qué hacer hoy
+        <span className="mini">{tareas.length === 0 ? "" : `${tareas.length} pendiente(s)${urgentes ? ` · ${urgentes} urgente(s)` : ""}`}</span>
+      </div>
+      {tareas.length === 0 ? <div className="tarea-vacia">✓ Todo al día. No hay nada pendiente.</div> : (
+        <div className="tareas">
+          {visibles.map((t, k) => (
+            <div key={k} className={`tarea ${t.urgencia === 0 ? "urgente" : ""}`}>
+              <span className="tarea-icono">{ICONOS[t.tipo] || "•"}</span>
+              <div className="tarea-texto">
+                <div>{t.texto}</div>
+                {t.detalle && <div className="mini">{t.detalle}</div>}
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => irA(t.vista, t.id)}>{t.boton || "Ir"} →</button>
+            </div>
+          ))}
+          {tareas.length > 8 && <button className="link" onClick={() => setTodas((v) => !v)}>{todas ? "Ver menos" : `Ver las ${tareas.length - 8} restantes`}</button>}
+        </div>
+      )}
+      <div className="mini" style={{ marginTop: 4 }}>{GRUPOS.filter(([g]) => tareas.some((t) => t.tipo === g)).map(([g, n]) => `${ICONOS[g]} ${n}: ${tareas.filter((t) => t.tipo === g).length}`).join("   ")}</div>
+    </div>
+  );
+}
+
 const MESES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 const MESES_LARGO = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 const mesLargo = (m) => MESES_LARGO[Number(String(m).split("-")[1]) - 1] || "mes";
@@ -17,6 +51,8 @@ export default function Dashboard({ notify, irA, esAdmin }) {
   const [data, setData] = useState(null);
   const [meses, setMeses] = useState(6);
 
+  const [verMas, setVerMas] = useState(() => { try { return localStorage.getItem("inicio_ver_mas") === "1"; } catch { return false; } });
+  const cambiarVerMas = () => setVerMas((v) => { try { localStorage.setItem("inicio_ver_mas", v ? "0" : "1"); } catch { /* */ } return !v; });
   const cargar = useCallback(async () => {
     try { setData(await api(`/dashboard?meses=${meses}`)); }
     catch (e) { notify(e.message, "danger"); }
@@ -28,6 +64,20 @@ export default function Dashboard({ notify, irA, esAdmin }) {
 
   return (
     <>
+      <QueHacer tareas={data.tareas || []} irA={irA} />
+
+      <div className="kpis">
+        <Kpi label={`Ventas de ${mesLargo(m.mes)} (neto)`} valor={fmt(m.ventas)} sub={`${m.cantidad} venta(s)`} acento onClick={() => irA("ventas")} />
+        {esAdmin && <Kpi label={`Ganancia de ${mesLargo(m.mes)}`} valor={fmt(m.utilidad)} sub={`margen ${fmt(m.margen)} (${m.margen_pct}%) − gastos ${fmt(m.gastos)}`} alerta={m.utilidad < 0} />}
+        <Kpi label="Nos deben (por cobrar)" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} ya vencido` : `${cxc.documentos} venta(s) por cobrar`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
+        {esAdmin && <Kpi label="Debemos (por pagar)" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} ya vencido` : `${cxp.documentos} compra(s) por pagar`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 16px" }}>
+        <button className="btn btn-ghost" onClick={cambiarVerMas}>{verMas ? "▲ Ocultar números y gráficos" : "▼ Ver todos los números y gráficos"}</button>
+      </div>
+
+      {verMas && <>
       <div className="toolbar" style={{ justifyContent: "space-between" }}>
         <div className="dash-titulo">Resumen · {nombreMes(m.mes)}</div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -37,17 +87,12 @@ export default function Dashboard({ notify, irA, esAdmin }) {
           <button className="btn btn-ghost" onClick={cargar}>↻</button>
         </div>
       </div>
-
       <div className="kpis">
-        <Kpi label={`Ventas de ${mesLargo(m.mes)} (neto)`} valor={fmt(m.ventas)} sub={`${m.cantidad} ventas · ticket ${fmt(m.ticket_promedio)}`} acento />
         {esAdmin && <Kpi label={`Margen de ${mesLargo(m.mes)}`} valor={fmt(m.margen)} sub={`${m.margen_pct}% sobre ventas`} />}
-        {esAdmin && <Kpi label={`Utilidad de ${mesLargo(m.mes)}`} valor={fmt(m.utilidad)} sub={`margen − gastos (${fmt(m.gastos)})`} alerta={m.utilidad < 0} onClick={() => irA("gastos")} />}
         <Kpi label="Cotizaciones abiertas" valor={fmt(cotizaciones.monto_abierto)} sub={`${cotizaciones.abiertas} por responder · neto`} onClick={() => irA("cotizaciones")} />
- <Kpi label="Licitaciones nuevas" valor={lic.nuevas} sub={lic.ultima_revision ? `revisado ${new Date(lic.ultima_revision).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "aún sin revisar"} alerta={lic.nuevas > 0} onClick={() => irA("licitaciones")} />
-        <Kpi label="Clientes por llamar" valor={porSeguir.cantidad} sub="cotizaciones sin respuesta" alerta={porSeguir.cantidad > 0} onClick={() => irA("cotizaciones-seguir")} />
-        {esAdmin && <Kpi label="Ventas por comprar" valor={porComprar.cantidad} sub="sin órdenes de compra" alerta={porComprar.cantidad > 0} onClick={() => irA("ventas")} />}
-        <Kpi label="Por cobrar (todas)" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} vencido` : `${cxc.documentos} ventas pendientes, de cualquier mes`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
-        {esAdmin && <Kpi label="Por pagar (todas)" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} vencido` : `${cxp.documentos} órdenes`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
+        <Kpi label="Oportunidades nuevas" valor={lic.nuevas} sub={lic.ultima_revision ? `revisado ${new Date(lic.ultima_revision).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "aún sin revisar"} onClick={() => irA("licitaciones")} />
+        <Kpi label="Clientes por llamar" valor={porSeguir.cantidad} sub="cotizaciones sin respuesta" onClick={() => irA("cotizaciones-seguir")} />
+        {esAdmin && <Kpi label="Ventas por comprar" valor={porComprar.cantidad} sub="sin órdenes de compra" onClick={() => irA("ventas")} />}
         {esAdmin && <Kpi label={`Caja de ${mesLargo(m.mes)}`} valor={fmt(caja.neto)} sub={`+${fmt(caja.cobros)} / −${fmt(caja.pagos)}`} />}
         <Kpi label="Catálogo" valor={catalogo.productos.toLocaleString("es-CL")} sub={`${catalogo.sin_precio} sin precio · ${catalogo.con_aviso} por revisar · ${catalogo.antiguos} precios de +${catalogo.meses_antiguo} meses`} onClick={() => irA("catalogo")} />
       </div>
@@ -184,6 +229,7 @@ export default function Dashboard({ notify, irA, esAdmin }) {
           )}
         </div>
       </div>
+      </>}
     </>
   );
 }

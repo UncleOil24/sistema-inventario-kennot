@@ -158,7 +158,40 @@ const getDashboard = handler(async (req, res) => {
     borradores: cotizaciones.filter((c) => c.estado === "borrador").length,
   };
 
+  // --- Qué hacer hoy: acciones concretas, lo más urgente primero ---
+  // urgencia: 0 = hoy/vencido, 1 = pronto, 2 = cuando se pueda
+  const admin = esAdmin(req);
+  const dias = (d) => (d ? Math.round((new Date(`${String(d).slice(0, 10)}T12:00:00`) - new Date(`${hoyStr}T12:00:00`)) / 864e5) : null);
+  const cuando = (dd) => (dd === 0 ? "hoy" : dd === 1 ? "mañana" : dd < 0 ? `hace ${-dd} día(s)` : `en ${dd} días`);
+  const tareas = [];
+  const [ocBorrador, cotPorVencer] = await Promise.all([
+    admin ? OrdenCompra.findAll({ where: { estado: "borrador" }, attributes: ["id", "numero", "proveedor_nombre", "fecha", "subtotal"], order: [["fecha", "ASC"]], limit: 20 }) : [],
+    Cotizacion.findAll({ where: { estado: "cotizacion", fecha_validez: { [Op.between]: [hoyStr, ymd(new Date(Date.now() + 3 * 864e5))] } }, attributes: ["id", "numero", "cliente", "fecha_validez", "empresa"], order: [["fecha_validez", "ASC"]], limit: 10 }),
+  ]);
+  // Oportunidades que cierran pronto (sin cotizar)
+  for (const l of licNuevas) {
+    const dd = l.fecha_cierre ? Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) : null;
+    if (dd !== null && dd <= 1) tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, detalle: `${l.organismo || ""} · cierra ${dd <= 0 ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}${l.monto_estimado ? ` · ${"$" + n(l.monto_estimado).toLocaleString("es-CL")}` : ""}`, vista: "licitaciones", boton: "Ver oportunidad" });
+  }
+  const otrasNuevas = licNuevas.filter((l) => !(l.fecha_cierre && Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) <= 1)).length;
+  if (otrasNuevas) tareas.push({ tipo: "oportunidad", urgencia: 1, texto: `Revisar ${otrasNuevas} oportunidad(es) nueva(s) de Mercado Público`, detalle: "Compra Ágil y licitaciones que calzan con lo que vendemos", vista: "licitaciones", boton: "Revisar" });
+  // Cobrar
+  for (const v of porCobrar.filter(vencida).slice(0, 8)) {
+    tareas.push({ tipo: "cobrar", urgencia: 0, texto: `Cobrar ${v.numero} a ${v.cliente_nombre || "cliente"}`, detalle: `$${n(saldo(v)).toLocaleString("es-CL")} · venció ${cuando(dias(v.fecha_vencimiento))}`, vista: "ventas", id: v.id, boton: "Ver venta" });
+  }
+  // Comprar a proveedores
+  if (admin) {
+    for (const v of porComprar.slice(0, 8)) tareas.push({ tipo: "comprar", urgencia: 0, texto: `Comprar los productos de ${v.numero}`, detalle: `${v.cliente_nombre || ""} · vendida el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}`, vista: "ventas", id: v.id, boton: "Ver qué comprar" });
+    for (const o of ocBorrador.filter((o) => dias(o.fecha) <= -2).slice(0, 8)) tareas.push({ tipo: "recibir", urgencia: 1, texto: `¿Llegó el pedido ${o.numero} de ${o.proveedor_nombre}?`, detalle: `Pedido ${cuando(dias(o.fecha))}: márcalo recibido cuando llegue`, vista: "compras", id: o.id, boton: "Ver pedido" });
+    for (const o of porPagar.filter(vencida).slice(0, 8)) tareas.push({ tipo: "pagar", urgencia: 0, texto: `Pagar ${o.numero} a ${o.proveedor_nombre}`, detalle: `$${n(saldo(o)).toLocaleString("es-CL")} · venció ${cuando(dias(o.fecha_vencimiento))}`, vista: "compras", id: o.id, boton: "Ver orden" });
+  }
+  // Llamar a clientes
+  for (const c of porSeguir.slice(0, 8)) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });
+  for (const c of cotPorVencer.filter((c) => !porSeguir.some((p) => p.id === c.id))) tareas.push({ tipo: "llamar", urgencia: 1, texto: `La cotización N° ${c.numero} (${c.cliente || "sin cliente"}) vence ${cuando(dias(c.fecha_validez))}`, detalle: "Llama al cliente antes de que venza", vista: "cotizaciones", boton: "Ver" });
+  tareas.sort((a, b) => a.urgencia - b.urgencia);
+
   const data = {
+    tareas,
     generado: new Date().toISOString(),
     mes_actual: {
       mes: mesActual.mes,
