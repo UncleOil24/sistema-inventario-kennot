@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal } from "./ui";
+import { Modal, SelectorCategoria } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
 import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses } from "./lib";
 
@@ -229,8 +229,7 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
       <div className="fields-row">
         <div className="field">
           <label>Categoría</label>
-          <input list="lista-categorias" value={form.categoria || ""} onChange={(e) => set("categoria", e.target.value.toUpperCase())} />
-          <datalist id="lista-categorias">{categorias.map((c) => <option key={c.categoria} value={c.categoria} />)}</datalist>
+          <SelectorCategoria value={form.categoria || ""} onChange={(v) => set("categoria", v)} categorias={categorias} />
         </div>
         <div className="field">
           <label>Unidad</label>

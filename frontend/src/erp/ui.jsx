@@ -258,3 +258,26 @@ export function Recorrido({ etapa }) {
     </div>
   );
 }
+
+// Categoría del catálogo: lista desplegable con las existentes y opción de crear una nueva.
+// (Antes era un campo con sugerencias que solo mostraba las que calzaban con lo escrito.)
+export function SelectorCategoria({ value, onChange, categorias }) {
+  const lista = (categorias || []).map((c) => c.categoria).filter(Boolean);
+  const [nueva, setNueva] = useState(false);
+  const enLista = lista.includes(value);
+  if (nueva || (value && !enLista && lista.length)) {
+    return (
+      <div style={{ display: "flex", gap: 6 }}>
+        <input autoFocus style={{ flex: 1, minWidth: 0 }} value={value || ""} placeholder="Nueva categoría" onChange={(e) => onChange(e.target.value.toUpperCase())} />
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setNueva(false); onChange(""); }} title="Volver a la lista">Lista</button>
+      </div>
+    );
+  }
+  return (
+    <select value={enLista ? value : ""} onChange={(e) => (e.target.value === "__nueva" ? (setNueva(true), onChange("")) : onChange(e.target.value))}>
+      <option value="">— Elegir categoría —</option>
+      {lista.map((c) => <option key={c} value={c}>{c}</option>)}
+      <option value="__nueva">+ Nueva categoría…</option>
+    </select>
+  );
+}

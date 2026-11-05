@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Modal, Estado, SelectorProducto } from "./ui";
+import { Modal, Estado, SelectorProducto, SelectorCategoria } from "./ui";
 import { api, fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses, invalidarProductos, sinTildes } from "./lib";
 
 // Unidades de Mercado Público y listas de clientes -> las del catálogo
@@ -12,11 +12,13 @@ const unidadCatalogo = (u) => UNIDADES[sinTildes(u || "").replace(/[^A-Z0-9]/g, 
 const nombreSugerido = (desc) => {
   let t = String(desc || "").trim();
   const partes = t.split(/\s+-\s+/);
-  if (partes.length > 1 && partes[0].length < 60) t = partes.slice(1).join(" - ");
+  const generico = /\b(materiales?|adquisici[oó]n|compra|insumos|suministro|para el|para la|para los|establecimiento|liceo|escuela|colegio|municipalidad|hospital)\b/i;
+  if (partes.length > 1 && partes[0].length < 60) t = generico.test(partes.slice(1).join(" ")) ? partes[0] : partes.slice(1).join(" - ");
   t = t.replace(/[,;.]?\s*(similar|o similar|similar\s+o|o\s+equivalente|equivalente)\b.*$/i, "").replace(/\s+/g, " ").trim().replace(/[.,;:]$/, "");
   return t.toUpperCase().slice(0, 250);
 };
-const categoriaSugerida = (l) => l.candidatos?.find((c) => c.categoria)?.categoria || "General";
+// Solo se sugiere la categoría si el producto calzado es el mismo o muy parecido; si no, se elige a mano
+const categoriaSugerida = (l) => (l.producto && l.calce !== "nuevo" ? l.producto.categoria : "") || "";
 
 // Sube la lista del cliente (Excel, PDF, Word o foto), Claude calza cada línea con el catálogo
 // y aquí se revisa antes de agregarla a la cotización. Los precios los pone el sistema.
@@ -76,14 +78,14 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
 
   // Crea en el catálogo todas las líneas sin producto (sin precio: se cotizan después en Catálogo → Precios)
   const crearTodas = async () => {
-    if (!confirm(`¿Agregar al catálogo los ${sinProducto.length} productos que no existen? Quedan sin precio de compra hasta que los cotices (Catálogo → Precios).`)) return;
+    if (!confirm(`¿Agregar al catálogo los ${sinProducto.length} productos que no existen? Quedan sin precio de compra hasta que los cotices (Catálogo → Precios) y en la categoría POR CLASIFICAR si no se reconoce la suya.`)) return;
     setCreandoTodas(true);
     let n = 0;
     try {
       for (const l of sinProducto) {
         const nombre = nombreSugerido(l.descripcion);
         const existente = (productos || []).find((p) => sinTildes(p.nombre) === sinTildes(nombre));
-        const p = existente || await api("/productos", { method: "POST", body: { nombre, unidad: unidadCatalogo(l.unidad), categoria: categoriaSugerida(l), forzar: true } });
+        const p = existente || await api("/productos", { method: "POST", body: { nombre, unidad: unidadCatalogo(l.unidad), categoria: categoriaSugerida(l) || "POR CLASIFICAR", forzar: true } });
         usarNuevo(l, p);
         n++;
       }
@@ -223,7 +225,7 @@ function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado 
     <Modal titulo="// Agregar al catálogo" onClose={onClose} ancho={640}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={guardando || !form.nombre.trim()} onClick={guardar}>{guardando ? "Guardando..." : "Agregar y usar en esta línea"}</button>
+        <button className="btn btn-primary" disabled={guardando || !form.nombre.trim() || !form.categoria.trim()} onClick={guardar}>{guardando ? "Guardando..." : "Agregar y usar en esta línea"}</button>
       </>}>
       <div className="mini">El cliente pidió: <strong>{linea.descripcion}</strong>{linea.unidad ? ` (${linea.unidad})` : ""}</div>
       <div className="field"><label>Descripción en nuestro catálogo</label><input value={form.nombre} onChange={(e) => set("nombre", e.target.value.toUpperCase())} /></div>
@@ -237,8 +239,7 @@ function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado 
         <div className="field"><label>Unidad</label><select value={form.unidad} onChange={(e) => set("unidad", e.target.value)}>{["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLIEGO", "TIRA", "M3"].map((u) => <option key={u}>{u}</option>)}</select></div>
         <div className="field">
           <label>Categoría</label>
-          <input list="cats-nuevo" value={form.categoria} onChange={(e) => set("categoria", e.target.value)} />
-          <datalist id="cats-nuevo">{categorias.map((c) => <option key={c.categoria} value={c.categoria} />)}</datalist>
+          <SelectorCategoria value={form.categoria} onChange={(v) => set("categoria", v)} categorias={categorias} />
         </div>
       </div>
       {esAdmin && <>
