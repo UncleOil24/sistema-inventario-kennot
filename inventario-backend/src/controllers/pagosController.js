@@ -42,6 +42,8 @@ const eliminarPago = handler(async (req, res) => {
     const docId = pago.venta_id || pago.orden_compra_id;
     const doc = await Modelo.findByPk(docId, { transaction: t, lock: t.LOCK.UPDATE });
     await pago.destroy({ transaction: t });
+    // Si era factoring, también se borra el gasto de la comisión
+    if (pago.gasto_id) await sequelize.query(`DELETE FROM gastos WHERE id = :id`, { replacements: { id: pago.gasto_id }, transaction: t });
     if (doc) {
       const pagado = Math.max(0, Number(doc.monto_pagado) - Number(pago.monto));
       await doc.update({ monto_pagado: pagado, estado_pago: estadoPago(pagado, doc.total) }, { transaction: t });

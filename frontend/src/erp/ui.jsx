@@ -127,13 +127,13 @@ export function Totales({ subtotal, iva, total }) {
 // Lista de pagos/cobros + formulario para registrar uno nuevo
 export function PagosPanel({ doc, tipo, onRegistrar, onEliminar }) {
   const saldo = Number(doc.total) - Number(doc.monto_pagado);
-  const [form, setForm] = useState({ monto: Math.round(saldo), fecha: hoyISO(), medio: "transferencia", nota: "" });
+  const [form, setForm] = useState({ monto: Math.round(saldo), fecha: hoyISO(), medio: "transferencia", nota: "", factoring_entidad: "", factoring_comision: "" });
   const [enviando, setEnviando] = useState(false);
   const verbo = tipo === "cobro" ? "cobro" : "pago";
 
   const registrar = async () => {
     setEnviando(true);
-    try { await onRegistrar({ ...form, monto: Number(form.monto) }); }
+    try { await onRegistrar({ ...form, monto: Number(form.monto), factoring_comision: Number(form.factoring_comision) || 0 }); }
     finally { setEnviando(false); }
   };
 
@@ -150,7 +150,7 @@ export function PagosPanel({ doc, tipo, onRegistrar, onEliminar }) {
             {doc.pagos.map((p) => (
               <tr key={p.id}>
                 <td className="mini">{fecha(p.fecha)}</td>
-                <td className="mini">{p.medio}{p.nota ? ` · ${p.nota}` : ""}</td>
+                <td className="mini">{p.medio}{p.factoring_entidad ? ` ${p.factoring_entidad}` : ""}{Number(p.factoring_comision) > 0 ? ` · comisión ${fmt(p.factoring_comision)}` : ""}{p.nota ? ` · ${p.nota}` : ""}</td>
                 <td className="price-cell">{fmt(p.monto)}</td>
                 <td className="mini">{p.creado_por || ""}</td>
                 <td>{onEliminar && <button className="btn btn-danger btn-sm" title={`Eliminar ${verbo}`} onClick={() => onEliminar(p)}>✕</button>}</td>
@@ -164,8 +164,12 @@ export function PagosPanel({ doc, tipo, onRegistrar, onEliminar }) {
           <input type="number" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} title="Monto" />
           <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} />
           <select value={form.medio} onChange={(e) => setForm({ ...form, medio: e.target.value })}>
-            {["transferencia", "efectivo", "cheque", "tarjeta", "otro"].map((m) => <option key={m}>{m}</option>)}
+            {["transferencia", "efectivo", "cheque", "tarjeta", "vale vista", ...(tipo === "cobro" ? ["factoring"] : []), "otro"].map((m) => <option key={m}>{m}</option>)}
           </select>
+          {form.medio === "factoring" && <>
+            <input placeholder="Entidad de factoring" value={form.factoring_entidad} onChange={(e) => setForm({ ...form, factoring_entidad: e.target.value })} />
+            <input type="number" placeholder="Comisión ($)" value={form.factoring_comision} onChange={(e) => setForm({ ...form, factoring_comision: e.target.value })} title="Queda como gasto financiero de la venta" />
+          </>}
           <button className="btn btn-success btn-sm" disabled={enviando || !(Number(form.monto) > 0)} onClick={registrar}>
             + Registrar {verbo}
           </button>

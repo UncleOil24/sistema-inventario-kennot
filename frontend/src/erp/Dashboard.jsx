@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Estado, Cargando } from "./ui";
 import { api, fmt, fecha, nombreCot } from "./lib";
 
-const ICONOS = { oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞", aceptar: "✋", confirmar: "✅", facturar: "🧾", despachar: "🚚", entregar: "🏁" };
-const GRUPOS = [["oportunidad", "Oportunidades"], ["llamar", "Llamar a clientes"], ["facturar", "Facturar"], ["aceptar", "Aceptar ventas"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["confirmar", "Confirmar ventas"], ["despachar", "Despachar"], ["entregar", "Confirmar entregas"], ["cobrar", "Cobrar"], ["pagar", "Pagar"]];
+const ICONOS = { avisar_cobro: "📅", recordar_cobro: "📞", moroso: "⛔", iva: "🏛", margen: "📉", oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞", aceptar: "✋", confirmar: "✅", facturar: "🧾", despachar: "🚚", entregar: "🏁" };
+const GRUPOS = [["oportunidad", "Oportunidades"], ["llamar", "Llamar a clientes"], ["facturar", "Facturar"], ["aceptar", "Aceptar ventas"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["confirmar", "Confirmar ventas"], ["despachar", "Despachar"], ["entregar", "Confirmar entregas"], ["avisar_cobro", "Facturas por vencer"], ["recordar_cobro", "Recordar pagos"], ["moroso", "Morosidad crítica"], ["iva", "IVA"], ["margen", "Margen bajo"], ["cobrar", "Cobrar"], ["pagar", "Pagar"]];
 
 // Lista de lo que hay que hacer, lo urgente primero
 function QueHacer({ tareas, irA }) {

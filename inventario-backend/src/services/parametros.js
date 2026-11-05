@@ -6,6 +6,14 @@ const DEFAULTS = {
   margen_particular: "50",        // % sobre el precio de compra
   ultimo_numero_cotizacion: "0",  // la próxima cotización usa el siguiente número
   validez_cotizacion_dias: "30",
+  // --- Finanzas y Control (decisiones de gerencia, 5-nov-2026) ---
+  saldo_minimo_caja_kenott: "5200000",
+  saldo_minimo_caja_tactics: "5200000",
+  iva_dia_pago: "20",                 // el IVA se paga a más tardar este día del mes siguiente
+  regimen_kenott: "Pro Pyme Transparente (14 D N°8) – microempresa",
+  regimen_tactics: "Pro Pyme Transparente (14 D N°8) – microempresa",
+  margen_minimo: "23.1",              // % sobre el neto: bajo esto la venta se marca (equivale a compra × 1,30)
+  dias_aviso_vencimiento: "5",        // aviso a Comercial antes de que venza una factura
   // Plazo de entrega que se imprime en las condiciones comerciales (se puede cambiar en cada cotización)
   plazo_entrega: "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra",
   meses_precio_antiguo: "6",        // un precio más viejo que esto se marca para volver a cotizar

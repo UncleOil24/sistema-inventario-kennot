@@ -5,7 +5,7 @@ import { api, fmt, fecha, nombreCot, sinTildes } from "./lib";
 const VACIO = {
   codigo: "", nombre: "", organismo: "", rut: "", tipo: "convenio", empresa: "ambas",
   contacto: "", telefono: "", email: "", comuna: "", direccion: "",
-  plazo_pago_dias: 30, base_vencimiento: "factura", contacto_finanzas: "", limite_credito: "", estado_credito: "activo", notas: "",
+  plazo_pago_dias: 30, base_vencimiento: "factura", contacto_finanzas: "", limite_credito: "", estado_credito: "activo", usa_factoring: false, notas: "",
 };
 const EMPRESAS = [["ambas", "Ambas"], ["kenott", "Kenott"], ["tactics", "Tactics"]];
 const plazoTxt = (c) => (Number(c.plazo_pago_dias) === 0 ? "Contado" : `${c.plazo_pago_dias ?? 30} días${c.base_vencimiento === "recepcion" ? " desde recepción" : ""}`);
@@ -140,6 +140,11 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
             </div>
           </div>
           {campo("contacto_finanzas", "Contacto de finanzas (para cobrar)", "Ej: Tesorería · tesoreria@...")}
+          <label className="check" style={{ marginBottom: 10 }}>
+            <input type="checkbox" checked={!!form.usa_factoring} onChange={(e) => setForm({ ...form, usa_factoring: e.target.checked })} />
+            A veces sus facturas se ceden a factoring (ej. Ejército de Chile, Linares)
+          </label>
+          {form.estado_credito === "suspendido" && form.motivo_credito && <div className="aviso">Crédito suspendido: {form.motivo_credito}</div>}
           {esAdmin && (
             <div className="fields-row">
               {campo("limite_credito", "Límite de crédito ($, opcional)", "Sin límite", { type: "number" })}

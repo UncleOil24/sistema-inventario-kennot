@@ -88,6 +88,24 @@ export default function Config({ notify }) {
   return (
     <div className="dash-grid">
       <div className="panel">
+        <div className="panel-titulo">Finanzas y Control</div>
+        {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
+          <div className="fields-row">
+            {campo("saldo_minimo_caja_kenott", "Saldo mínimo de caja Kenott ($)")}
+            {campo("saldo_minimo_caja_tactics", "Saldo mínimo de caja Tactics ($)")}
+          </div>
+          <div className="fields-row">
+            {campo("iva_dia_pago", "Día de pago del IVA", "A más tardar este día del mes siguiente; si cae fin de semana pasa al lunes")}
+            {campo("margen_minimo", "Margen mínimo (% sobre el neto)", "23,1% equivale a compra × 1,30")}
+            {campo("dias_aviso_vencimiento", "Avisar a Comercial antes del vencimiento (días)")}
+          </div>
+          <div className="fields-row">
+            {campo("regimen_kenott", "Régimen tributario Kenott", "", "text")}
+            {campo("regimen_tactics", "Régimen tributario Tactics", "", "text")}
+          </div>
+        </>}
+      </div>
+      <div className="panel">
         <div className="panel-titulo">Márgenes y cotizaciones</div>
         {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
           <div className="fields-row">

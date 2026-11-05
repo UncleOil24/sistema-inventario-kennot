@@ -42,7 +42,7 @@ export async function api(path, { method = "GET", body } = {}) {
 
 export const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
 export const pct = (n) => `${Math.round(Number(n) || 0)}%`;
-export const TIPOS_GASTO = { flete: "Flete", combustible: "Combustible", comision: "Comisión", general: "General" };
+export const TIPOS_GASTO = { flete: "Flete", combustible: "Combustible", comision: "Comisión", financiero: "Financiero (factoring, intereses)", general: "General" };
 
 // Catálogo completo en memoria (≈2.200 productos) para buscar al cotizar o comprar.
 // Se comparte entre vistas y se recarga cuando cambian los precios.
