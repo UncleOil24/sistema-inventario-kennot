@@ -127,7 +127,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
             return (
               <div key={l.codigo} className={`hist-card ${l.estado_interno === "nueva" ? "lic-nueva" : ""}`}>
                 <div className="hist-info">
-                  <div className="hist-nombre">{l.prioridad && <span title="Organismo prioritario" style={{ color: "var(--accent, #e3b341)" }}>★ </span>}{l.nombre}</div>
+                  <div className="hist-nombre">{l.prioridad && <span title="Organismo prioritario" style={{ color: "var(--warn)" }}>★ </span>}{l.nombre}</div>
                   <div className="hist-meta">
                     <span className={`estado ${l.fuente === "compra_agil" ? "estado-ok" : "estado-neutral"}`}>{tipoDe(l)}</span>
                     <a className="link" href={l.ficha} target="_blank" rel="noreferrer">{l.codigo} ↗</a>
