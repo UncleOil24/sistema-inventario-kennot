@@ -27,6 +27,11 @@ const Producto = sequelize.define("Producto", {
   opcion3_fecha: { type: DataTypes.DATEONLY, allowNull: true },
   revisar: { type: DataTypes.TEXT, allowNull: true }, // avisos (columna REVISAR)
   confirmado: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Datos técnicos (M16, sobre todo EPP): las licitaciones los piden
+  certificacion: { type: DataTypes.STRING(255), allowNull: true }, // ej. "ISP, NCh 461"
+  ficha_tecnica: { type: DataTypes.STRING(500), allowNull: true }, // enlace a la ficha técnica (PDF)
+  modelo_equivalente: { type: DataTypes.STRING(255), allowNull: true }, // ej. "tipo MSA V-Gard"
+  fusionado_en: { type: DataTypes.INTEGER, allowNull: true }, // si se fusionó con otro producto (M9), su id
   fecha_confirmado: { type: DataTypes.DATE, allowNull: true }, // momento en que se confirmó
 
   // Columnas antiguas: ya no se usan (sin control de stock). Se conservan para no borrar datos.

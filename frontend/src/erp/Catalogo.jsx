@@ -3,7 +3,9 @@ import { Modal } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
 import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses } from "./lib";
 
-const UNIDADES = ["UNIDAD", "METRO", "KG", "CAJA", "ROLLO", "M3", "M2", "BOLSA", "SACO", "PACK", "PLANCHA", "JUEGO", "LITRO", "GALÓN"];
+// Unidad de medida: lista cerrada (M11)
+const UNIDADES = ["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLIEGO", "TIRA", "M3"];
+const ORIGENES = [["", "Cotización de proveedor"], ["web", "Tienda / web (con IVA)"], ["oc_cliente", "Referencia: OC de cliente"], ["factura_sin_proveedor", "Referencia: factura sin proveedor"]];
 const POR_PAGINA = 150;
 const FILTROS = [
   ["", "Todos"],
@@ -12,6 +14,7 @@ const FILTROS = [
   ["sin_confirmar", "Con precio sin confirmar"],
   ["confirmados", "Confirmados"],
   ["antiguo", "Precio antiguo (volver a cotizar)"],
+  ["sin_medida", "Sin medida (candados, cables...)"],
 ];
 
 export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, onCotizar, proveedores }) {
@@ -120,7 +123,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
                     <td className="id-cell">{p.codigo ?? "—"}</td>
                     <td>
                       {p.nombre}
-                      <div className="mini">{p.categoria}{esAdmin && p.fecha_precio ? ` · act. ${fecha(p.fecha_precio)}` : ""}{p.precio_antiguo && <span className="antiguo" title="Precio antiguo: conviene pedir cotización nueva"> · ⏱ precio {haceMeses(p.fecha_precio)}</span>}</div>
+                      <div className="mini">{p.categoria}{p.certificacion ? ` · ${p.certificacion}` : ""}{p.modelo_equivalente ? ` · ${p.modelo_equivalente}` : ""}{esAdmin && p.fecha_precio ? ` · act. ${fecha(p.fecha_precio)}` : ""}{p.precio_antiguo && <span className="antiguo" title="Precio antiguo: conviene pedir cotización nueva"> · ⏱ precio {haceMeses(p.fecha_precio)}</span>}</div>
                     </td>
                     <td className="mini">{p.unidad}</td>
                     {esAdmin && <td className="price-cell compra">{sinPrecio ? "—" : fmt(p.precio_compra)}{p.confirmado && <span className="ok-confirm" title="Precio confirmado">✓</span>}</td>}
@@ -162,6 +165,8 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
 function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores, notify, onClose, onGuardado }) {
   const nuevo = !producto.id;
   const [form, setForm] = useState({ ...producto, precio_compra: "", proveedor: "" });
+  const [similares, setSimilares] = useState(null); // M9: parecidos encontrados antes de crear
+  const [fusionar, setFusionar] = useState(null); // gerencia: producto repetido a juntar con este
   const [guardando, setGuardando] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -169,10 +174,24 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
     if (!form.nombre?.trim()) return notify("La descripción es obligatoria", "danger");
     setGuardando(true);
     try {
-      const body = { nombre: form.nombre, categoria: form.categoria, unidad: form.unidad, codigo: form.codigo || undefined };
+      const body = {
+        nombre: form.nombre, categoria: form.categoria, unidad: form.unidad, codigo: form.codigo || undefined,
+        certificacion: form.certificacion || "", ficha_tecnica: form.ficha_tecnica || "", modelo_equivalente: form.modelo_equivalente || "",
+      };
       if (nuevo) {
         if (esAdmin && Number(form.precio_compra) > 0) Object.assign(body, { precio_compra: Number(form.precio_compra), proveedor: form.proveedor });
-        await api("/productos", { method: "POST", body });
+        try {
+          await api("/productos", { method: "POST", body: { ...body, forzar: !!similares } });
+        } catch (e) {
+          // M9: hay productos parecidos; se muestran y se puede crear igual (M10: otra marca, calidad o medida)
+          if (e.status === 409 && !similares) {
+            const r = await api(`/productos/similares?nombre=${encodeURIComponent(form.nombre)}&categoria=${encodeURIComponent(form.categoria || "")}`);
+            setSimilares(r);
+            notify(e.message, "danger");
+            return;
+          }
+          throw e;
+        }
       } else {
         await api(`/productos/${producto.id}`, { method: "PUT", body });
       }
@@ -196,6 +215,13 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
         <button className="btn btn-primary" onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar"}</button>
       </>}>
       {nuevo && <div className="mini">Un producto parecido pero distinto (otra calidad, marca o medida) va como línea aparte.</div>}
+      {similares && (
+        <div className="aviso">
+          <strong>¿Ya existe?</strong> Hay productos parecidos:
+          <ul style={{ margin: "6px 0 6px 18px" }}>{similares.map((x) => <li key={x.id}>N° {x.codigo ?? x.id} · {x.nombre} <span className="mini">({x.unidad}{x.precio_compra ? ` · ${fmt(x.precio_compra)}` : ""} · {x.parecido}% parecido)</span></li>)}</ul>
+          Si es el mismo, cancela y usa ese. Si es otra marca, calidad o medida, pulsa <strong>Guardar</strong> otra vez para crearlo como línea aparte.
+        </div>
+      )}
       <div className="field">
         <label>Descripción estándar</label>
         <input value={form.nombre || ""} onChange={(e) => set("nombre", e.target.value)} placeholder='Ej: TUBERÍA PVC HIDRÁULICA PRESIÓN 20 MM X 6 MT' />
@@ -208,10 +234,41 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
         </div>
         <div className="field">
           <label>Unidad</label>
-          <input list="lista-unidades" value={form.unidad || ""} onChange={(e) => set("unidad", e.target.value.toUpperCase())} />
-          <datalist id="lista-unidades">{UNIDADES.map((u) => <option key={u} value={u} />)}</datalist>
+          <select value={UNIDADES.includes(form.unidad) ? form.unidad : "UNIDAD"} onChange={(e) => set("unidad", e.target.value)}>
+            {UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
         </div>
       </div>
+      <details open={!!(form.certificacion || form.ficha_tecnica || form.modelo_equivalente) || /EPP/i.test(form.categoria || "")}>
+        <summary className="mini" style={{ cursor: "pointer", marginBottom: 8 }}>Datos técnicos (EPP y licitaciones)</summary>
+        <div className="fields-row">
+          <div className="field"><label>Certificación</label><input value={form.certificacion || ""} onChange={(e) => set("certificacion", e.target.value)} placeholder="Ej: ISP, NCh 461" /></div>
+          <div className="field"><label>Modelo equivalente</label><input value={form.modelo_equivalente || ""} onChange={(e) => set("modelo_equivalente", e.target.value)} placeholder='Ej: tipo MSA V-Gard' /></div>
+        </div>
+        <div className="field"><label>Ficha técnica (enlace al PDF)</label><input value={form.ficha_tecnica || ""} onChange={(e) => set("ficha_tecnica", e.target.value)} placeholder="https://..." />
+          {form.ficha_tecnica && /^https?:\/\//.test(form.ficha_tecnica) && <a className="link" href={form.ficha_tecnica} target="_blank" rel="noreferrer">Abrir ficha ↗</a>}</div>
+      </details>
+      {!nuevo && esGerencia && (
+        <div className="panel">
+          <div className="panel-titulo">¿Está repetido?</div>
+          {!fusionar
+            ? <button className="btn btn-ghost btn-sm" onClick={async () => { try { setFusionar(await api(`/productos/similares?nombre=${encodeURIComponent(producto.nombre)}&categoria=${encodeURIComponent(producto.categoria || "")}&excluir=${producto.id}`)); } catch (e) { notify(e.message, "danger"); } }}>Buscar repetidos de este producto</button>
+            : fusionar.length === 0 ? <div className="mini">No encontré productos parecidos.</div>
+            : <>
+              <div className="mini">Fusionar junta el historial de precios del repetido en este producto; las cotizaciones, ventas y compras que lo usaban pasan a este, y el repetido queda inactivo.</div>
+              {fusionar.map((x) => (
+                <div key={x.id} className="pago-form" style={{ marginTop: 6 }}>
+                  <span style={{ flex: 1 }}>N° {x.codigo ?? x.id} · {x.nombre} <span className="mini">({x.parecido}%)</span></span>
+                  <button className="btn btn-danger btn-sm" onClick={async () => {
+                    if (!confirm(`¿Fusionar "${x.nombre}" dentro de "${producto.nombre}"? El repetido queda inactivo.`)) return;
+                    try { await api(`/productos/${producto.id}/fusionar`, { method: "POST", body: { duplicado_id: x.id } }); notify("✓ Productos fusionados"); onGuardado(); }
+                    catch (e) { notify(e.message, "danger"); }
+                  }}>Fusionar aquí</button>
+                </div>
+              ))}
+            </>}
+        </div>
+      )}
       {nuevo && esAdmin && (
         <div className="fields-row">
           <div className="field">
@@ -230,7 +287,7 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
   );
 }
 
-const PRECIO_VACIO = { proveedor: "", precio: "", con_iva: false, total_linea: "", cantidad: "", fecha: "", documento: "", descripcion_proveedor: "", marca: "", calce: "exacto" };
+const PRECIO_VACIO = { proveedor: "", precio: "", con_iva: false, total_linea: "", cantidad: "", fecha: "", documento: "", descripcion_proveedor: "", marca: "", calce: "exacto", origen: "", descuento_pct: "", descuento_desde: "" };
 
 function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notify, onClose, onCambio }) {
   const [producto, setProducto] = useState(inicial);
@@ -326,6 +383,20 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
           </div>
         </div>
         <div className="field"><label>Descripción del proveedor (tal cual viene)</label><input value={form.descripcion_proveedor} onChange={(e) => set("descripcion_proveedor", e.target.value)} /></div>
+        <div className="fields-row tres">
+          <div className="field">
+            <label>Origen del precio</label>
+            <select value={form.origen} onChange={(e) => { set("origen", e.target.value); if (e.target.value === "web") set("con_iva", true); }}>
+              {ORIGENES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>Descuento por volumen (%)</label><input type="number" value={form.descuento_pct} onChange={(e) => set("descuento_pct", e.target.value)} placeholder="Opcional" /></div>
+          <div className="field"><label>Desde cantidad</label><input type="number" value={form.descuento_desde} onChange={(e) => set("descuento_desde", e.target.value)} placeholder="Ej: 50" /></div>
+        </div>
+        {(form.descuento_pct || form.origen.startsWith("oc") || form.origen.startsWith("factura")) && <div className="mini">
+          {form.descuento_pct ? "El descuento queda anotado, pero el precio de compra se guarda a precio lista (no siempre se compra volumen). " : ""}
+          {form.origen === "oc_cliente" || form.origen === "factura_sin_proveedor" ? "Precio de referencia: cualquier cotización real de proveedor lo reemplaza." : ""}
+        </div>}
         <div className="pago-form">
           <label className="check"><input type="checkbox" checked={form.con_iva} onChange={(e) => set("con_iva", e.target.checked)} />Precio con IVA (web/tienda) — se divide por 1,19</label>
           <label className="check"><input type="checkbox" checked={porTotal} onChange={(e) => setPorTotal(e.target.checked)} />Solo tengo el total de la línea</label>
@@ -355,7 +426,7 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
             <tbody>{hist.precios.map((pr) => (
               <tr key={pr.id} className={pr.descartado ? "fila-anulada" : ""}>
                 <td className="mini">{fecha(pr.fecha)}</td>
-                <td className="mini">{pr.proveedor}{pr.origen === "web" ? " (web)" : ""}</td>
+                <td className="mini">{pr.proveedor}{pr.origen === "web" ? " (web)" : pr.origen === "oc_cliente" ? " (ref. OC cliente)" : pr.origen === "factura_sin_proveedor" ? " (ref. factura)" : ""}{pr.descuento_pct ? <div>dcto {Number(pr.descuento_pct)}%{pr.descuento_desde ? ` desde ${Number(pr.descuento_desde)}` : ""}</div> : null}</td>
                 <td className="price-cell compra">{fmt(pr.precio)}</td>
                 <td className="mini">{pr.documento || "—"}</td>
                 <td className="mini">{pr.descripcion_proveedor || ""}{pr.marca ? ` · ${pr.marca}` : ""}{pr.descartado ? ` · DESCARTADO: ${pr.motivo || ""}` : ""}</td>

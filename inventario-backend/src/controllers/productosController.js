@@ -7,6 +7,7 @@ const { handler, ErrorNegocio } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { recalcular, precioNetoUnitario, origenDe, registrar, normProv, SQL_AVISO } = require("../services/precios");
 const { esAdmin, veCostos } = require("../middlewares/auth");
+const { UNIDADES, normalizarUnidad } = require("../services/unidades");
 
 // Campos de costo que el rol "usuario" no ve
 const CAMPOS_COSTO = [
@@ -48,9 +49,13 @@ const filtroPalabras = (busqueda) => {
   });
 };
 
+// Familias que se venden por medida: si la descripción no trae ninguna cifra, falta la medida (M12)
+const SQL_SIN_MEDIDA = `(nombre !~ '[0-9]' AND nombre ~* '^(CANDADO|CABLE|TUBO|TUBERIA|CA[NÑ]ERIA|MANGUERA|CADENA|ALAMBRE|PERNO|TORNILLO|CLAVO|BROCA|DISCO|CODO|TEE|COPLA|ABRAZADERA|BISAGRA|LLAVE DE PASO|FIERRO|PERFIL|PLANCHA|TERCIADO|PINO)')`;
+
 // GET /api/productos?busqueda=&categoria=&revision=sin_precio|aviso|confirmados|sin_confirmar&activos=1&sort=&dir=&limite=
 const getProductos = handler(async (req, res) => {
-  const { busqueda, categoria, revision, sort = "codigo", dir = "ASC", limite } = req.query;
+  // M13: el orden por defecto es por categoría y descripción (el N° de la planilla puede cambiar)
+  const { busqueda, categoria, revision, sort = "categoria", dir = "ASC", limite } = req.query;
   const where = {};
   const y = [];
   if (busqueda) y.push(...filtroPalabras(busqueda));
@@ -59,6 +64,8 @@ const getProductos = handler(async (req, res) => {
   if (revision === "sin_precio") y.push({ [Op.or]: [{ precio_compra: null }, { precio_compra: { [Op.lte]: 0 } }] });
   if (revision === "aviso") y.push(literal(SQL_AVISO));
   if (revision === "confirmados") where.confirmado = true;
+  // M12: productos genéricos (candados, cables...) que no indican medida
+  if (revision === "sin_medida") y.push(literal(SQL_SIN_MEDIDA));
   if (revision === "sin_confirmar") y.push({ confirmado: false, precio_compra: { [Op.gt]: 0 } });
   const params0 = await getParametros();
   if (revision === "antiguo") y.push({ precio_compra: { [Op.gt]: 0 }, fecha_precio: { [Op.lt]: limiteAntiguo(params0) } });
@@ -71,7 +78,7 @@ const getProductos = handler(async (req, res) => {
   const [productos] = await Promise.all([
     Producto.findAll({
       where,
-      order: [[literal(`"${ordenBy}" IS NULL`), "ASC"], [ordenBy, ordenDir], ["id", "ASC"]],
+      order: [[literal(`"${ordenBy}" IS NULL`), "ASC"], [ordenBy, ordenDir], ...(ordenBy === "categoria" ? [["nombre", "ASC"]] : []), ["id", "ASC"]],
       limit: Math.min(Number(limite) || 5000, 5000),
     }),
   ]);
@@ -100,7 +107,8 @@ const getResumen = handler(async (req, res) => {
       COUNT(*) FILTER (WHERE confirmado)::int AS confirmados,
       COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
       COUNT(*) FILTER (WHERE NOT confirmado AND precio_compra > 0)::int AS sin_confirmar,
-      COUNT(*) FILTER (WHERE precio_compra > 0 AND fecha_precio < :lim)::int AS antiguos
+      COUNT(*) FILTER (WHERE precio_compra > 0 AND fecha_precio < :lim)::int AS antiguos,
+      COUNT(*) FILTER (WHERE ${SQL_SIN_MEDIDA})::int AS sin_medida
     FROM productos WHERE activo GROUP BY categoria ORDER BY categoria`, { replacements: { lim } });
   res.json({ ok: true, data: filas });
 });
@@ -112,7 +120,70 @@ const getProducto = handler(async (req, res) => {
   res.json({ ok: true, data: vista(req, await getParametros())(producto) });
 });
 
-const CAMPOS_EDITABLES = ["codigo", "nombre", "categoria", "unidad", "activo"];
+const CAMPOS_EDITABLES = ["codigo", "nombre", "categoria", "unidad", "activo", "certificacion", "ficha_tecnica", "modelo_equivalente"];
+const unidadValida = (u) => {
+  const n = normalizarUnidad(u);
+  if (!n) throw new ErrorNegocio(`Unidad "${u}" no válida. Usa una de: ${UNIDADES.join(", ")}`);
+  return n;
+};
+
+// --- Repetidos (M9) ---
+const PALABRAS_VACIAS = new Set(["DE", "PARA", "CON", "EN", "Y", "EL", "LA", "LOS", "LAS", "DEL", "AL", "X", "TIPO", "C", "S"]);
+const tokens = (s) => new Set(sinTildes(String(s || "").toUpperCase()).replace(/[^A-Z0-9.,/]+/g, " ").split(" ").map((w) => w.replace(/[.,]$/, "")).filter((w) => w && !PALABRAS_VACIAS.has(w)));
+const parecido = (a, b) => {
+  const A = tokens(a); const B = tokens(b);
+  if (!A.size || !B.size) return 0;
+  let comun = 0;
+  for (const w of A) if (B.has(w)) comun += 1;
+  return comun / Math.min(A.size, B.size); // cuánto del más corto está contenido en el otro
+};
+// Busca productos activos con descripción parecida (misma categoría primero)
+const buscarSimilares = async (nombre, categoria, excluirId) => {
+  const A = [...tokens(nombre)];
+  if (!A.length) return [];
+  const candidatos = await Producto.findAll({
+    where: { activo: true, ...(excluirId ? { id: { [Op.ne]: excluirId } } : {}), [Op.or]: A.filter((w) => w.length >= 3).slice(0, 8).map((w) => ({ nombre: { [Op.iLike]: `%${w}%` } })) },
+    attributes: ["id", "codigo", "nombre", "categoria", "unidad", "precio_compra", "proveedor"], limit: 400,
+  });
+  return candidatos
+    .map((p) => ({ ...p.toJSON(), parecido: Math.round((parecido(nombre, p.nombre) + (categoria && p.categoria === categoria ? 0.1 : 0)) * 100) }))
+    .filter((p) => p.parecido >= 60)
+    .sort((a, b) => b.parecido - a.parecido)
+    .slice(0, 6);
+};
+
+// GET /api/productos/similares?nombre=&categoria=&excluir=
+const getSimilares = handler(async (req, res) => {
+  const data = await buscarSimilares(req.query.nombre, req.query.categoria, Number(req.query.excluir) || null);
+  res.json({ ok: true, data: veCostos(req) ? data : data.map(({ precio_compra, proveedor, ...r }) => r) });
+});
+
+// POST /api/productos/:id/fusionar   { duplicado_id }   (gerencia)
+// Junta el historial de precios del repetido en este producto; las cotizaciones, ventas y compras que usaban
+// el repetido pasan a este; el repetido queda inactivo con la marca de fusionado.
+const fusionar = handler(async (req, res) => {
+  const dupId = Number(req.body?.duplicado_id);
+  if (!dupId || dupId === Number(req.params.id)) throw new ErrorNegocio("Elige el producto repetido");
+  const resultado = await sequelize.transaction(async (t) => {
+    const [p, dup] = await Promise.all([Producto.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE }), Producto.findByPk(dupId, { transaction: t, lock: t.LOCK.UPDATE })]);
+    if (!p || !dup) throw new ErrorNegocio("Producto no encontrado", 404);
+    const [, precios] = await sequelize.query(`UPDATE precios_proveedor SET producto_id = :p WHERE producto_id = :d`, { replacements: { p: p.id, d: dup.id }, transaction: t });
+    // Líneas de cotizaciones, ventas y órdenes de compra (items en JSON)
+    for (const tabla of ["cotizaciones", "ventas", "ordenes_compra"]) {
+      await sequelize.query(`UPDATE ${tabla} SET items = (
+          SELECT jsonb_agg(CASE WHEN (e->>'producto_id')::int = :d THEN jsonb_set(e, '{producto_id}', to_jsonb(:p::int)) ELSE e END)
+          FROM jsonb_array_elements(items) e)
+        WHERE items @> :filtro::jsonb`, { replacements: { p: p.id, d: dup.id, filtro: JSON.stringify([{ producto_id: dup.id }]) }, transaction: t });
+    }
+    await dup.update({ activo: false, fusionado_en: p.id, revisar: `Fusionado con N° ${p.codigo ?? p.id} ${p.nombre}` }, { transaction: t });
+    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: p.id, campo: "fusion", antes: `${dup.codigo ?? dup.id} ${dup.nombre}`, despues: p.nombre, motivo: "Fusionado (repetido)" }, t);
+    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: dup.id, campo: "activo", antes: "true", despues: "false", motivo: `Fusionado en ${p.codigo ?? p.id} ${p.nombre}` }, t);
+    if (p.confirmado) await p.update({ confirmado: p.confirmado }, { transaction: t });
+    await recalcular(p, { t, usuario: req.usuario.nombre, motivo: "Fusión de repetidos" });
+    return { producto: p, precios_movidos: precios?.rowCount ?? null };
+  });
+  res.json({ ok: true, data: { ...resultado, producto: vista(req, await getParametros())(resultado.producto) } });
+});
 
 // POST /api/productos
 // Un producto parecido pero distinto (otra calidad, marca o medida) se crea como línea aparte.
@@ -120,6 +191,16 @@ const crearProducto = handler(async (req, res) => {
   const datos = Object.fromEntries(CAMPOS_EDITABLES.filter((c) => c in req.body).map((c) => [c, req.body[c]]));
   if (!datos.nombre) throw new ErrorNegocio("La descripción es obligatoria");
   datos.nombre = String(datos.nombre).trim().toUpperCase();
+  datos.unidad = unidadValida(datos.unidad || "UNIDAD");
+  // M9: antes de crear, avisa si hay descripciones parecidas (salvo que el usuario confirme que es otro producto, M10)
+  if (!req.body.forzar) {
+    const similares = await buscarSimilares(datos.nombre, datos.categoria);
+    const igual = similares.find((x) => sinTildes(x.nombre) === sinTildes(datos.nombre));
+    if (igual) throw new ErrorNegocio(`Ya existe "${igual.nombre}" (N° ${igual.codigo ?? igual.id}).`, 409);
+    if (similares.length) {
+      return res.status(409).json({ ok: false, error: `Hay ${similares.length} producto(s) parecido(s): ${similares.slice(0, 3).map((x) => `"${x.nombre}"`).join(", ")}. Si es otra marca, calidad o medida, créalo igual como línea aparte.`, similares });
+    }
+  }
   if (!datos.codigo) {
     const max = await Producto.max("codigo");
     datos.codigo = (Number(max) || 0) + 1;
@@ -150,6 +231,8 @@ const actualizarProducto = handler(async (req, res) => {
       if (!(c in req.body)) continue;
       let v = req.body[c];
       if (c === "nombre") v = String(v).trim().toUpperCase();
+      if (c === "unidad") v = unidadValida(v);
+      if (["certificacion", "ficha_tecnica", "modelo_equivalente"].includes(c)) v = String(v || "").trim() || null;
       if (String(v) !== String(p[c])) cambios[c] = v;
     }
     for (const [campo, v] of Object.entries(cambios)) {
@@ -192,7 +275,8 @@ const agregarPrecio = handler(async (req, res) => {
   const resultado = await sequelize.transaction(async (t) => {
     const p = await Producto.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!p) throw new ErrorNegocio("Producto no encontrado", 404);
-    const origen = b.origen || (b.con_iva ? "web" : await origenDe(b.proveedor, t));
+    const ORIGENES = ["proveedor", "web", "oc_cliente", "factura_sin_proveedor"];
+    const origen = ORIGENES.includes(b.origen) ? b.origen : (b.con_iva ? "web" : await origenDe(b.proveedor, t));
     const precio = await PrecioProveedor.create({
       producto_id: p.id,
       proveedor: normProv(b.proveedor),
@@ -205,6 +289,9 @@ const agregarPrecio = handler(async (req, res) => {
       cantidad: b.cantidad || null,
       calce: b.calce || null,
       origen,
+      // M2: el descuento por volumen se anota, pero el precio de compra queda a precio lista
+      descuento_pct: Number(b.descuento_pct) > 0 ? Number(b.descuento_pct) : null,
+      descuento_desde: Number(b.descuento_desde) > 0 ? Number(b.descuento_desde) : null,
       creado_por: req.usuario.nombre,
     }, { transaction: t });
     await recalcular(p, { t, usuario: req.usuario.nombre, motivo: `Precio ${precio.proveedor} ${b.documento || ""}`.trim() });
@@ -268,7 +355,11 @@ const desconfirmarPrecio = handler(async (req, res) => {
   res.json({ ok: true, data: vista(req, await getParametros())(producto) });
 });
 
+// GET /api/productos/unidades
+const getUnidades = (req, res) => res.json({ ok: true, data: UNIDADES });
+
 module.exports = {
+  getSimilares, fusionar, getUnidades,
   limiteAntiguo,
   getProductos, getCategorias, getResumen, getProducto, crearProducto, actualizarProducto, eliminarProducto,
   getPrecios, agregarPrecio, descartarPrecio, confirmarPrecio, desconfirmarPrecio, vista,

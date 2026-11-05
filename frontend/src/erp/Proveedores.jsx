@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Modal, Estado } from "./ui";
 import { api } from "./lib";
 
-const VACIO = { nombre: "", razon_social: "", rut: "", contacto: "", telefono: "", email: "", direccion: "", rubro: "", tipo: "proveedor", notas: "" };
+const VACIO = { nombre: "", razon_social: "", rut: "", contacto: "", telefono: "", email: "", direccion: "", comuna: "", rubro: "", tipo: "proveedor", notas: "", excluido: false, motivo_exclusion: "" };
 
 export default function Proveedores({ esAdmin, proveedores, loading, recargar, notify }) {
   const [form, setForm] = useState(null); // null | objeto en edición
@@ -11,7 +11,7 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
 
   const lista = proveedores.filter((p) => {
     const q = busqueda.toLowerCase();
-    return !q || [p.nombre, p.razon_social, p.rut, p.rubro, p.contacto].some((v) => (v || "").toLowerCase().includes(q));
+    return !q || [p.nombre, p.razon_social, p.rut, p.rubro, p.contacto, p.comuna].some((v) => (v || "").toLowerCase().includes(q));
   });
 
   const guardar = async () => {
@@ -45,7 +45,7 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
       <div className="toolbar">
         <div className="search-wrap">
           <span className="search-icon">⌕</span>
-          <input className="search-input" placeholder="Buscar por nombre, RUT o rubro..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          <input className="search-input" placeholder="Buscar por nombre, RUT, rubro o comuna (ej. eléctrico, pinturas, EPP)..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
         <div className="mini">{proveedores.length} proveedores</div>
         <button className="btn btn-primary" onClick={() => setForm({ ...VACIO })}>+ Nuevo proveedor</button>
@@ -58,12 +58,13 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
               : lista.length === 0 ? <tr className="empty-row"><td colSpan={7}>// sin proveedores</td></tr>
               : lista.map((p) => (
                 <tr key={p.id}>
-                  <td style={{ fontWeight: 500 }}>{p.nombre}{p.rubro && <div className="mini">{p.rubro}</div>}</td>
+                  <td style={{ fontWeight: 500 }}>{p.nombre}{p.rubro && <div className="mini">{p.rubro}</div>}
+                    {p.excluido && <div><span className="estado estado-warn" title={p.motivo_exclusion || ""}>Excluido del precio vigente</span></div>}</td>
                   <td className="mini">{p.razon_social || "—"}{p.rut ? ` · ${p.rut}` : ""}</td>
                   <td><Estado valor={p.tipo || "proveedor"} /></td>
                   <td className="mini" style={{ maxWidth: 280 }}>{p.contacto || "—"}</td>
                   <td className="mini">{p.telefono || "No disponible"}</td>
-                  <td className="mini">{p.email || "—"}</td>
+                  <td className="mini">{p.email || "—"}{p.comuna && <div>{p.comuna}</div>}</td>
                   <td>
                     <div className="actions">
                       <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...p })}>Editar</button>
@@ -83,7 +84,7 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
             <button className="btn btn-primary" onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar"}</button>
           </>}>
           <div className="fields-row">{campo("nombre", "Nombre corto", "Ej: MADESUR")}{campo("razon_social", "Razón social", "Ferretería Madesur SpA")}</div>
-          <div className="fields-row">{campo("rut", "RUT", "76.000.000-0")}{campo("rubro", "Rubro", "Ferretería, Eléctrico...")}</div>
+          <div className="fields-row">{campo("rut", "RUT", "76.000.000-0")}{campo("rubro", "Rubros (separados por coma)", "Eléctrico, gasfitería, pinturas, EPP...")}</div>
           <div className="field">
             <label>Tipo</label>
             <select value={form.tipo || "proveedor"} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
@@ -93,7 +94,16 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
           </div>
           {campo("contacto", "Contacto / vendedor", "Nombre, teléfono, correo")}
           <div className="fields-row">{campo("telefono", "Teléfono", "+569...")}{campo("email", "Email", "ventas@...")}</div>
-          {campo("direccion", "Dirección", "Calle, ciudad")}
+          <div className="fields-row">{campo("direccion", "Dirección", "Ej: 14 Oriente 1186")}{campo("comuna", "Comuna", "Talca")}</div>
+          {esAdmin && (
+            <div className="field">
+              <label className="check">
+                <input type="checkbox" checked={!!form.excluido} onChange={(e) => setForm({ ...form, excluido: e.target.checked })} />
+                Excluir del precio vigente (sus cotizaciones quedan como historial, pero no compiten)
+              </label>
+              {form.excluido && <input value={form.motivo_exclusion || ""} onChange={(e) => setForm({ ...form, motivo_exclusion: e.target.value })} placeholder="Motivo (ej. es de Santiago, el flete sale más caro)" />}
+            </div>
+          )}
           {campo("notas", "Notas", "Condiciones de pago, vendedor, etc.")}
         </Modal>
       )}

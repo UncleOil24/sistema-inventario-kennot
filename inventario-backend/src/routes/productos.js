@@ -6,10 +6,13 @@ const c = require("../controllers/productosController");
 router.get("/", c.getProductos);
 router.get("/categorias", c.getCategorias);
 router.get("/resumen", c.getResumen);
+router.get("/similares", c.getSimilares);
+router.get("/unidades", c.getUnidades);
 router.get("/:id", c.getProducto);
 router.post("/", c.crearProducto);
 router.put("/:id", c.actualizarProducto);
 router.delete("/:id", soloAdmin, c.eliminarProducto);
+router.post("/:id/fusionar", soloAdmin, c.fusionar);
 
 // Precios (encargado de precios = admin)
 router.get("/:id/precios", catalogoPrecios, c.getPrecios);
