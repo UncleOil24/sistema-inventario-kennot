@@ -14,6 +14,10 @@ const Proveedor = sequelize.define("Proveedor", {
   contacto: { type: DataTypes.STRING(255), allowNull: true }, // vendedor / datos de contacto
   tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "proveedor" }, // proveedor | web
   comuna: { type: DataTypes.STRING(100), allowNull: true },
+  // Plazo de pago que nos da el proveedor (días desde la factura; vacío o 0 = contado) y descuento por pronto pago
+  plazo_pago_dias: { type: DataTypes.INTEGER, allowNull: true },
+  descuento_pronto_pago: { type: DataTypes.DECIMAL(5, 2), allowNull: true }, // %
+  dias_pronto_pago: { type: DataTypes.INTEGER, allowNull: true }, // si se paga dentro de estos días desde la factura
   // Excluido (M7): sus cotizaciones quedan como historial pero no compiten por el precio vigente (ej. flete caro)
   excluido: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   motivo_exclusion: { type: DataTypes.STRING(255), allowNull: true },

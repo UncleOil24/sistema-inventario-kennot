@@ -41,6 +41,11 @@ async function migrar() {
   await q(`UPDATE licitaciones l SET estado_interno = 'revisada' WHERE estado_interno = 'cotizada'
     AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo) AND c.estado NOT IN ('rechazada','vencida'))`);
   await idsDeClientes(q);
+  // Finanzas fase 2: cada compra y gasto pertenece a la empresa de su venta; la fecha de la factura del proveedor
+  // (para el IVA) es la de recepción si no se anotó otra
+  await q(`UPDATE ordenes_compra o SET empresa = v.empresa FROM ventas v WHERE o.venta_id = v.id AND o.empresa IS NULL`);
+  await q(`UPDATE ordenes_compra SET fecha_factura = COALESCE(fecha_recepcion::date, fecha) WHERE documento IS NOT NULL AND fecha_factura IS NULL`);
+  await q(`UPDATE gastos g SET empresa = v.empresa FROM ventas v WHERE g.venta_id = v.id AND g.empresa IS NULL`);
   // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
 }

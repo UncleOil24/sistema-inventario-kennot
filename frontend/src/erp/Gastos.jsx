@@ -21,7 +21,7 @@ export default function Gastos({ notify }) {
 
   const guardar = async () => {
     try {
-      const body = { ...form, monto: Number(form.monto), venta_id: form.venta_id || null };
+      const body = { ...form, monto: Number(form.monto), venta_id: form.venta_id || null, iva: Number(form.iva) || null };
       if (form.id) await api(`/gastos/${form.id}`, { method: "PUT", body });
       else await api("/gastos", { method: "POST", body });
       notify("✓ Gasto guardado");
@@ -53,22 +53,23 @@ export default function Gastos({ notify }) {
           <input type="month" className="filter-select" value={mes} onChange={(e) => setMes(e.target.value || mesActual())} />
         </div>
         <div style={{ flex: 1 }} />
-        <button className="btn btn-primary" onClick={() => setForm({ fecha: hoyISO(), tipo: "flete", monto: "", descripcion: "", venta_id: "", comprobante: "" })}>+ Nuevo gasto</button>
+        <button className="btn btn-primary" onClick={() => setForm({ fecha: hoyISO(), tipo: "flete", monto: "", descripcion: "", venta_id: "", comprobante: "", empresa: "", iva: "" })}>+ Nuevo gasto</button>
       </div>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Venta</th><th>Comprobante</th><th>Monto</th><th>Por</th><th></th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Empresa</th><th>Tipo</th><th>Detalle</th><th>Venta</th><th>Comprobante</th><th>Monto</th><th>Por</th><th></th></tr></thead>
           <tbody>
-            {loading ? <tr className="empty-row"><td colSpan={8}><span className="spinner"></span>Cargando...</td></tr>
-              : gastos.length === 0 ? <tr className="empty-row"><td colSpan={8}>// sin gastos este mes</td></tr>
+            {loading ? <tr className="empty-row"><td colSpan={9}><span className="spinner"></span>Cargando...</td></tr>
+              : gastos.length === 0 ? <tr className="empty-row"><td colSpan={9}>// sin gastos este mes</td></tr>
               : gastos.map((g) => (
                 <tr key={g.id}>
                   <td className="mini">{fecha(g.fecha)}</td>
+                  <td className="mini">{g.empresa === "kenott" ? "Kenott" : g.empresa === "tactics" ? "Tactics" : <span style={{ color: "var(--warn)" }}>sin empresa</span>}</td>
                   <td><span className="cat-badge">{TIPOS_GASTO[g.tipo] || g.tipo}</span></td>
                   <td>{g.descripcion || "—"}</td>
                   <td className="mini">{g.venta_numero ? `${g.venta_numero} · ${g.venta_cliente || ""}` : "General"}</td>
                   <td className="mini">{g.comprobante || "—"}</td>
-                  <td className="price-cell">{fmt(g.monto)}</td>
+                  <td className="price-cell">{fmt(g.monto)}{Number(g.iva) > 0 && <div className="mini">IVA {fmt(g.iva)}</div>}</td>
                   <td className="mini">{g.creado_por || ""}</td>
                   <td><div className="actions">
                     <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...g, venta_id: g.venta_id || "" })}>Editar</button>
@@ -95,7 +96,18 @@ export default function Gastos({ notify }) {
             </div>
           </div>
           <div className="fields-row">
-            <div className="field"><label>Monto</label><input type="number" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} /></div>
+            <div className="field"><label>Empresa</label>
+              <select value={form.empresa || ""} onChange={(e) => setForm({ ...form, empresa: e.target.value })}>
+                <option value="">{form.venta_id ? "La de la venta" : "— Elegir —"}</option><option value="kenott">Kenott</option><option value="tactics">Tactics</option>
+              </select></div>
+            <div className="field"><label>IVA de la factura (si tiene)</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input type="number" min="0" style={{ flex: 1, minWidth: 0 }} value={form.iva || ""} onChange={(e) => setForm({ ...form, iva: e.target.value })} placeholder="Vacío si es boleta" />
+                {Number(form.monto) > 0 && <button type="button" className="btn btn-ghost btn-sm" title="Calcular: monto total × 19/119" onClick={() => setForm({ ...form, iva: Math.round(Number(form.monto) * 19 / 119) })}>19%</button>}
+              </div></div>
+          </div>
+          <div className="fields-row">
+            <div className="field"><label>Monto total (con IVA)</label><input type="number" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} /></div>
             <div className="field"><label>Comprobante</label><input value={form.comprobante || ""} onChange={(e) => setForm({ ...form, comprobante: e.target.value })} placeholder="N° boleta / factura" /></div>
           </div>
           <div className="field"><label>Detalle</label><input value={form.descripcion || ""} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} placeholder="Ej: Flete a Curicó" /></div>

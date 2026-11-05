@@ -14,6 +14,13 @@ const DEFAULTS = {
   regimen_tactics: "Pro Pyme Transparente (14 D N°8) – microempresa",
   margen_minimo: "23.1",              // % sobre el neto: bajo esto la venta se marca (equivale a compra × 1,30)
   dias_aviso_vencimiento: "5",        // aviso a Comercial antes de que venza una factura
+  dias_aviso_pago_proveedor: "5",     // aviso a Finanzas antes de que venza la factura de un proveedor
+  // IVA mensual por empresa (Finanzas fase 2). El remanente de crédito fiscal se arrastra mes a mes desde "iva_desde";
+  // el de partida lo informa el contador (el del último F29 antes de usar el sistema). Nunca se compensa entre empresas.
+  iva_desde: "2026-10",
+  iva_remanente_kenott: "0",
+  iva_remanente_tactics: "0",
+  iva_pagos: "{}",                    // {"kenott:2026-10": {fecha, monto, folio, por}} — F29 pagados
   // Plazo de entrega que se imprime en las condiciones comerciales (se puede cambiar en cada cotización)
   plazo_entrega: "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra",
   meses_precio_antiguo: "6",        // un precio más viejo que esto se marca para volver a cotizar

@@ -13,6 +13,14 @@ const {
 const { recalcular, origenDe, normProv } = require("../services/precios");
 
 const numeroOC = (id) => `OC-${String(id).padStart(4, "0")}`;
+const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+const sumarDias = (f, n) => { const d = new Date(`${String(f).slice(0, 10)}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + (Number(n) || 0)); return d.toISOString().slice(0, 10); };
+const empresaValida = (e) => (["kenott", "tactics"].includes(e) ? e : null);
+// Vencimiento de la factura del proveedor: fecha de la factura + su plazo de pago (vacío = contado)
+const vencimientoDe = async (proveedorId, fechaFactura, t) => {
+  const prov = proveedorId ? await Proveedor.findByPk(proveedorId, { transaction: t, attributes: ["plazo_pago_dias"] }) : null;
+  return sumarDias(fechaFactura, prov?.plazo_pago_dias || 0);
+};
 
 // Completa nombre/unidad desde la BD y valida que los productos existan
 const prepararItems = async (itemsBody, t) => {
@@ -41,6 +49,7 @@ const getOrdenes = handler(async (req, res) => {
   if (estado) where.estado = estado;
   if (estado_pago) where.estado_pago = estado_pago;
   if (proveedor_id) where.proveedor_id = proveedor_id;
+  if (["kenott", "tactics"].includes(req.query.empresa)) where.empresa = req.query.empresa;
   if (busqueda) {
     where[Op.or] = ["numero", "proveedor_nombre", "documento", "notas"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
@@ -82,8 +91,11 @@ const crearOrden = handler(async (req, res) => {
   const oc = await sequelize.transaction(async (t) => {
     const prov = await datosProveedor(proveedor_id, t);
     const itemsOk = await prepararItems(items, t);
+    const venta = venta_id ? await Venta.findByPk(venta_id, { transaction: t, attributes: ["empresa"] }) : null;
     const nueva = await OrdenCompra.create({
       ...prov, items: itemsOk, ...calcularTotales(itemsOk),
+      empresa: empresaValida(req.body.empresa) || venta?.empresa || null,
+      fecha_factura: documento ? (req.body.fecha_factura || hoyISO()) : null,
       fecha_vencimiento: fecha_vencimiento || null, documento, notas, venta_id,
       creado_por: firma(req),
     }, { transaction: t });
@@ -105,7 +117,8 @@ const actualizarOrden = handler(async (req, res) => {
       const itemsOk = await prepararItems(req.body.items, t);
       Object.assign(cambios, { items: itemsOk, ...calcularTotales(itemsOk) });
     }
-    for (const c of ["fecha_vencimiento", "documento", "notas"]) if (c in req.body) cambios[c] = req.body[c] || null;
+    for (const c of ["fecha_vencimiento", "documento", "notas", "fecha_factura"]) if (c in req.body) cambios[c] = req.body[c] || null;
+    if ("empresa" in req.body) cambios.empresa = empresaValida(req.body.empresa);
     await orden.update(cambios, { transaction: t });
     return orden;
   });
@@ -122,9 +135,14 @@ const recibirOrden = handler(async (req, res) => {
     const orden = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!orden) throw new ErrorNegocio("Orden no encontrada", 404);
     if (orden.estado !== "borrador") throw new ErrorNegocio(`La orden ya está ${orden.estado}`);
+    const conFactura = documento || orden.documento;
+    const fechaFactura = conFactura ? (req.body.fecha_factura || orden.fecha_factura || hoyISO()) : null;
     await orden.update({
       estado: "recibida", fecha_recepcion: new Date(),
       ...(documento ? { documento } : {}),
+      ...(fechaFactura ? { fecha_factura: fechaFactura } : {}),
+      // Si no se anotó el vencimiento, se calcula con el plazo del proveedor (desde la factura o, sin ella, desde hoy)
+      ...(orden.fecha_vencimiento ? {} : { fecha_vencimiento: await vencimientoDe(orden.proveedor_id, fechaFactura || hoyISO(), t) }),
     }, { transaction: t });
     if (registrar) {
       const origen = await origenDe(orden.proveedor_nombre, t);
@@ -140,6 +158,27 @@ const recibirOrden = handler(async (req, res) => {
         await recalcular(p, { t, usuario: firma(req), motivo: `Compra ${orden.numero}` });
       }
     }
+    return orden;
+  });
+  res.json({ ok: true, data: oc });
+});
+
+// PUT /api/ordenes-compra/:id/factura   { documento, fecha_factura, fecha_vencimiento, empresa }
+// La factura del proveedor se puede anotar en cualquier momento (borrador o recibida). Es lo que suma al
+// crédito fiscal del IVA del mes de la factura, en la empresa que compra.
+const registrarFactura = handler(async (req, res) => {
+  const oc = await sequelize.transaction(async (t) => {
+    const orden = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!orden) throw new ErrorNegocio("Orden no encontrada", 404);
+    if (orden.estado === "anulada") throw new ErrorNegocio("La orden está anulada");
+    const b = req.body || {};
+    const documento = String(b.documento ?? orden.documento ?? "").trim() || null;
+    const fechaFactura = documento ? (b.fecha_factura || orden.fecha_factura || hoyISO()) : null;
+    const empresa = "empresa" in b ? empresaValida(b.empresa) : orden.empresa;
+    if (documento && !empresa) throw new ErrorNegocio("Indica qué empresa compra (Kenott o Tactics): el IVA de la factura se descuenta en esa empresa");
+    let vence = b.fecha_vencimiento || null;
+    if (!vence && fechaFactura) vence = await vencimientoDe(orden.proveedor_id, fechaFactura, t);
+    await orden.update({ documento, fecha_factura: fechaFactura, empresa, fecha_vencimiento: vence || orden.fecha_vencimiento }, { transaction: t });
     return orden;
   });
   res.json({ ok: true, data: oc });
@@ -190,6 +229,6 @@ const registrarPago = handler(async (req, res) => {
 });
 
 module.exports = {
-  asignarVenta,
+  asignarVenta, registrarFactura,
   getOrdenes, getOrden, crearOrden, actualizarOrden, recibirOrden, anularOrden, eliminarOrden, registrarPago,
 };

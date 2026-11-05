@@ -19,7 +19,7 @@ const recalcularDeProveedor = async (nombre, usuario, motivo) => {
   return filas.length;
 };
 
-const CAMPOS = ["nombre", "razon_social", "rut", "contacto", "telefono", "email", "direccion", "comuna", "rubro", "tipo", "notas", "excluido", "motivo_exclusion"];
+const CAMPOS = ["nombre", "razon_social", "rut", "contacto", "telefono", "email", "direccion", "comuna", "rubro", "tipo", "notas", "excluido", "motivo_exclusion", "plazo_pago_dias", "descuento_pronto_pago", "dias_pronto_pago"];
 const pick = (body) => {
   const d = Object.fromEntries(CAMPOS.filter((c) => c in body).map((c) => [c, body[c]]));
   if (d.nombre) d.nombre = String(d.nombre).trim().toUpperCase(); // nombre corto: MADESUR, CYC...

@@ -21,15 +21,20 @@ const datos = async (b) => {
   if ("comprobante" in b) d.comprobante = b.comprobante || null;
   if ("venta_id" in b) {
     d.venta_id = b.venta_id ? Number(b.venta_id) : null;
-    if (d.venta_id && !(await Venta.findByPk(d.venta_id))) throw new ErrorNegocio("Venta no encontrada", 404);
+    const v = d.venta_id ? await Venta.findByPk(d.venta_id) : null;
+    if (d.venta_id && !v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v && !b.empresa) d.empresa = v.empresa; // el gasto de una venta es de la empresa que vendió
   }
+  if ("empresa" in b && b.empresa) d.empresa = ["kenott", "tactics"].includes(b.empresa) ? b.empresa : null;
+  if ("iva" in b) d.iva = Number(b.iva) > 0 ? Math.round(Number(b.iva)) : null;
   return d;
 };
 
 // GET /api/gastos?mes=2026-10&venta_id=&tipo=
 const getGastos = handler(async (req, res) => {
-  const { mes, venta_id, tipo } = req.query;
+  const { mes, venta_id, tipo, empresa } = req.query;
   const where = {};
+  if (["kenott", "tactics"].includes(empresa)) where.empresa = empresa;
   if (mes && /^\d{4}-\d{2}$/.test(mes)) {
     const [y, m] = mes.split("-").map(Number);
     const fin = new Date(y, m, 0).getDate();

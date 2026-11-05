@@ -133,7 +133,7 @@ export default function Dashboard({ notify, irA, esAdmin, depto }) {
         <Kpi label={`Ventas de ${mesLargo(m.mes)} (neto)`} valor={fmt(m.ventas)} sub={`${m.cantidad} venta(s)`} acento onClick={() => irA("ventas")} />
         {esAdmin && <Kpi label={`Ganancia de ${mesLargo(m.mes)}`} valor={fmt(m.utilidad)} sub={`margen ${fmt(m.margen)} (${m.margen_pct}%) − gastos ${fmt(m.gastos)}`} alerta={m.utilidad < 0} />}
         <Kpi label="Nos deben (por cobrar)" valor={fmt(cxc.total)} sub={cxc.vencido > 0 ? `⚠ ${fmt(cxc.vencido)} ya vencido` : `${cxc.documentos} venta(s) por cobrar`} alerta={cxc.vencido > 0} onClick={() => irA("ventas")} />
-        {esAdmin && <Kpi label="Debemos (por pagar)" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} ya vencido` : `${cxp.documentos} compra(s) por pagar`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
+        {esAdmin && <Kpi label="Debemos (por pagar)" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} ya vencido` : `${cxp.documentos} compra(s) por pagar`} alerta={cxp.vencido > 0} onClick={() => irA("por-pagar")} />}
       </div>
 
       {depto !== "finanzas" && <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 16px" }}>

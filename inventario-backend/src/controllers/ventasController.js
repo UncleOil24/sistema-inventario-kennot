@@ -275,7 +275,7 @@ const registrarCobro = handler(async (req, res) => {
     const comision = medio === "factoring" ? Math.round(Number(req.body.factoring_comision) || 0) : 0;
     // Factoring: la factura queda saldada por el monto cedido; la comisión es un gasto financiero de la venta
     const gasto = comision > 0 ? await Gasto.create({
-      fecha: req.body.fecha || new Date(), tipo: "financiero", monto: comision, venta_id: v.id,
+      fecha: req.body.fecha || new Date(), tipo: "financiero", monto: comision, venta_id: v.id, empresa: v.empresa,
       descripcion: `Comisión factoring ${req.body.factoring_entidad || ""} · ${v.numero}`.replace(/\s+·/, " ·").trim(), creado_por: firma(req),
     }, { transaction: t }) : null;
     const pago = await Pago.create({
@@ -431,7 +431,7 @@ const generarOrdenes = handler(async (req, res) => {
         cantidad: Number(i.cantidad), precio: Number(i.costo),
       }));
       const oc = await OrdenCompra.create({
-        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v.id,
+        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v.id, empresa: v.empresa,
         items: lineas, ...calcularTotales(lineas),
         notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`,
         creado_por: firma(req),

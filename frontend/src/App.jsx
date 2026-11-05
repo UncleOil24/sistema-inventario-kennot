@@ -13,6 +13,8 @@ import Config from "./erp/Config";
 import Licitaciones from "./erp/Licitaciones";
 import { Facturacion, Despachos } from "./erp/Flujo";
 import Cobranza from "./erp/Cobranza";
+import PorPagar from "./erp/PorPagar";
+import Iva from "./erp/Iva";
 import Produccion from "./erp/Produccion";
 import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
@@ -349,7 +351,7 @@ const DEPTOS = [
   { id: "operativo", nombre: "Operativo", roles: ["operativo"], secciones: [
     ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
   { id: "finanzas", nombre: "Finanzas y Control", roles: [], secciones: [
-    ["inicio", "Resumen"], ["produccion", "Producción"], ["cobranza", "Cobranza"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
+    ["inicio", "Resumen"], ["produccion", "Producción"], ["cobranza", "Cobranza"], ["por-pagar", "Por pagar"], ["iva", "IVA"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
 ];
 const ROL_TEXTO = { admin: "administrador", gerencia: "gerencia", comercial: "comercial", operativo: "operativo", usuario: "usuario" };
 
@@ -517,6 +519,8 @@ function App({ usuario: usuarioInicial, onLogout }) {
             <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
           {view === "produccion" && esGerencia && <Produccion notify={showNotif} irA={irA} />}
+          {view === "por-pagar" && esGerencia && <PorPagar notify={showNotif} />}
+          {view === "iva" && esGerencia && <Iva notify={showNotif} />}
           {view === "cobranza" && esGerencia && <Cobranza notify={showNotif} verVenta={(id) => { setVentaAbrir(id); setView("ventas"); }} irA={irA} />}
           {view === "gastos" && esGerencia && <Gastos notify={showNotif} />}
           {view === "reportes" && esGerencia && <Reportes notify={showNotif} />}
