@@ -172,6 +172,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
           <label>{empresa === "tactics" ? "Proyecto" : "Descripción"} (se imprime)</label>
           <input value={borrador.nombre_cotizacion} onChange={(e) => set({ nombre_cotizacion: e.target.value })} placeholder="Ej: Materiales mantención Liceo Laura Urrutia" />
         </div>
+        {cliente?.estado_credito === "suspendido" && <div className="aviso">⚠ {cliente.nombre} tiene el crédito suspendido (deuda vencida). Se puede cotizar, pero al registrar la venta el sistema pedirá confirmación.</div>}
         {!cliente && <div className="mini">Sin cliente se usa precio convenio. Si es institución, usa convenio; en duda, convenio.</div>}
       </div>
 

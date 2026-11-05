@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura } from "./ui";
 import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
-import { AccionesVenta, PanelFacturas } from "./Recorrido";
+import { AccionesVenta, PanelFacturas, conConfirmacion } from "./Recorrido";
 
 // Períodos para filtrar (fechas en hora local de Chile)
 const PERIODOS = [["todo", "Todas las fechas"], ["mes", "Este mes"], ["mes_pasado", "Mes pasado"], ["anio", "Este año"]];
@@ -151,15 +151,12 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   const guardar = async () => {
     setGuardando(true);
     try {
-      const v = await api("/ventas", {
-        method: "POST",
-        body: {
-          ...form,
-          cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
-          cliente_nombre: cli?.codigo === "CG" ? form.cliente_nombre || null : null,
-          dias_credito: form.pagada_al_contado ? 0 : Number(form.dias_credito),
-          items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio) })),
-        },
+      const v = await conConfirmacion("/ventas", {
+        ...form,
+        cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
+        cliente_nombre: cli?.codigo === "CG" ? form.cliente_nombre || null : null,
+        dias_credito: form.pagada_al_contado ? 0 : Number(form.dias_credito),
+        items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio) })),
       });
       notify(`✓ Venta ${v.numero} registrada`);
       onCreada(v);
@@ -181,7 +178,11 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
       <div className="fields-row">
         <div className="field">
           <label>Cliente</label>
-          <select value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })}>
+          <select value={form.cliente_id} onChange={(e) => {
+            // El plazo de pago viene de la ficha del cliente
+            const c = clientes.find((x) => String(x.id) === e.target.value);
+            setForm({ ...form, cliente_id: e.target.value, dias_credito: c ? c.plazo_pago_dias ?? 30 : 30 });
+          }}>
             <option value="">— Sin cliente —</option>
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} · ` : ""}{c.nombre}</option>)}
           </select>
@@ -215,7 +216,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
           </div>
         ) : (
           <div className="field">
-            <label>Días de crédito</label>
+            <label>Plazo de pago (días){cli ? ` · ficha: ${cli.plazo_pago_dias ?? 30}${cli.base_vencimiento === "recepcion" ? " desde recepción" : ""}` : ""}</label>
             <input type="number" min="0" value={form.dias_credito} onChange={(e) => setForm({ ...form, dias_credito: e.target.value })} />
           </div>
         )}
@@ -227,7 +228,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
 function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar, puedeVender, notify, onClose, onCambio, irACompra }) {
   const [cuadro, setCuadro] = useState(false);
   const editaDatos = puedeVender && modo === "comercial";
-  const [datos, setDatos] = useState({ orden_compra_cliente: venta.orden_compra_cliente || "", id_solicitud: venta.id_solicitud || "" });
+  const [datos, setDatos] = useState({ plazo_pago_dias: venta.plazo_pago_dias ?? "", base_vencimiento: venta.base_vencimiento || "factura", orden_compra_cliente: venta.orden_compra_cliente || "", id_solicitud: venta.id_solicitud || "" });
   const r = venta.resumen;
 
   const accion = async (fn, ok) => {
@@ -237,8 +238,15 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
     if (!confirm(`¿Anular la venta ${venta.numero}? La cotización vuelve a quedar abierta.`)) return;
     accion(() => api(`/ventas/${venta.id}/anular`, { method: "POST" }), "Venta anulada");
   };
-  const guardarDatos = () => accion(() => api(`/ventas/${venta.id}/datos`, { method: "PUT", body: datos }), "✓ Datos guardados");
-  const cambioDatos = datos.orden_compra_cliente !== (venta.orden_compra_cliente || "") || datos.id_solicitud !== (venta.id_solicitud || "");
+  const guardarDatos = () => {
+    // El plazo solo se manda si cambió (recalcula el vencimiento)
+    const { plazo_pago_dias, base_vencimiento, ...resto } = datos;
+    const body = { ...resto };
+    if (String(plazo_pago_dias) !== String(venta.plazo_pago_dias ?? "") && plazo_pago_dias !== "") body.plazo_pago_dias = Number(plazo_pago_dias);
+    if (base_vencimiento !== (venta.base_vencimiento || "factura")) body.base_vencimiento = base_vencimiento;
+    accion(() => api(`/ventas/${venta.id}/datos`, { method: "PUT", body }), "✓ Datos guardados");
+  };
+  const cambioDatos = String(datos.plazo_pago_dias) !== String(venta.plazo_pago_dias ?? "") || datos.base_vencimiento !== (venta.base_vencimiento || "factura") || datos.orden_compra_cliente !== (venta.orden_compra_cliente || "") || datos.id_solicitud !== (venta.id_solicitud || "");
 
   return (
     <Modal titulo={`// Venta ${venta.numero}`} onClose={onClose} ancho={780}
@@ -251,6 +259,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         <span>{fecha(venta.fecha)}</span>
         <span>{venta.cliente_nombre || "Sin cliente"}</span>
         {venta.id_solicitud && <span className="id-solicitud">ID {venta.id_solicitud}</span>}
+        {venta.plazo_pago_dias != null && <span>Plazo {Number(venta.plazo_pago_dias) === 0 ? "contado" : `${venta.plazo_pago_dias} días desde ${venta.base_vencimiento === "recepcion" ? "la recepción" : "la factura"}`}</span>}
         {venta.fecha_vencimiento && <span>Vence {fecha(venta.fecha_vencimiento)}</span>}
         {venta.creado_por && <span>Por {venta.creado_por}</span>}
         {venta.orden_compra_cliente && <span>OC {venta.orden_compra_cliente}</span>}
@@ -264,6 +273,16 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
           <div className="field">
             <label>N° orden de compra del cliente</label>
             <input value={datos.orden_compra_cliente} onChange={(e) => setDatos({ ...datos, orden_compra_cliente: e.target.value })} />
+          </div>
+          <div className="field" style={{ maxWidth: 120 }}>
+            <label>Plazo (días)</label>
+            <input type="number" min="0" value={datos.plazo_pago_dias} onChange={(e) => setDatos({ ...datos, plazo_pago_dias: e.target.value })} />
+          </div>
+          <div className="field" style={{ maxWidth: 150 }}>
+            <label>Desde</label>
+            <select value={datos.base_vencimiento} onChange={(e) => setDatos({ ...datos, base_vencimiento: e.target.value })}>
+              <option value="factura">la factura</option><option value="recepcion">la recepción</option>
+            </select>
           </div>
           <div className="field">
             <label>ID del cliente o solicitud</label>

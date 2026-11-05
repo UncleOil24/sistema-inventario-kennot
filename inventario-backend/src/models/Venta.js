@@ -19,6 +19,9 @@ const Venta = sequelize.define("Venta", {
   orden_compra_cliente: { type: DataTypes.STRING(60), allowNull: true }, // N° OC que envía el cliente
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   fecha_vencimiento: { type: DataTypes.DATEONLY, allowNull: true },
+  // Plazo de pago (se copia del cliente): el vencimiento se cuenta desde la factura o desde la recepción conforme
+  plazo_pago_dias: { type: DataTypes.INTEGER, allowNull: true },
+  base_vencimiento: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "factura" },
   documento: { type: DataTypes.STRING(255), allowNull: true }, // N° de las facturas (resumen; el detalle está en "facturas")
   etapa: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "registrada" },
   aceptada_fecha: { type: DataTypes.DATE, allowNull: true },

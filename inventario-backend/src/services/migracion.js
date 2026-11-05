@@ -36,6 +36,8 @@ async function migrar() {
   await reinicioCotizaciones(q);
   await codigosClientes(q);
   await recorridoVentas();
+  // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
+  await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
 }
 
 // Una sola vez (paso 3, nov-2026): cada venta toma su etapa según cómo va, el N° de factura que tenía pasa

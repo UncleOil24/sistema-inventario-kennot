@@ -12,7 +12,11 @@ const diasPara = (d) => (d ? Math.ceil((new Date(d) - new Date()) / 864e5) : nul
 // Licitaciones de Mercado Público que calzan con nuestras palabras clave y región.
 const rutLimpio = (r) => String(r || "").replace(/[^0-9kK]/g, "").toUpperCase();
 // ¿El organismo de la licitación ya está en Clientes? (por RUT o por nombre)
+// Cliente de la licitación: primero por unidad de compra (cifras antes del primer guion del código), luego por RUT o nombre
 const clienteDe = (l, clientes) => {
+  const unidad = String(l.codigo || "").split("-")[0];
+  const porUnidad = unidad && clientes.find((c) => c.codigo && c.codigo === unidad);
+  if (porUnidad) return porUnidad;
   const org = sinTildes(l.organismo || "");
   return clientes.find((c) => (l.rut_unidad && c.rut && rutLimpio(c.rut) === rutLimpio(l.rut_unidad)) || (org && sinTildes(c.nombre) === org));
 };
@@ -211,7 +215,7 @@ function ClienteDesdeLicitacion({ l, notify, onClose, onCreado }) {
   const [form, setForm] = useState({
     // ID del cliente = unidad de compra (lo que va antes del primer guion en el código, p.ej. 1422-20-COT26 → 1422)
     codigo: String(l.codigo || "").split("-")[0] || "",
-    nombre: (l.organismo || "").trim(), rut: l.rut_unidad || "", tipo: "convenio",
+    nombre: (l.organismo || "").trim(), organismo: (l.organismo || "").trim(), rut: l.rut_unidad || "", tipo: "convenio",
     contacto: l.unidad || "", direccion: l.fuente === "compra_agil" ? (l.comuna || "") : "", comuna: l.fuente === "compra_agil" ? "" : (l.comuna || ""),
     telefono: "", email: "",
   });

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, Totales } from "./ui";
+import { conConfirmacion } from "./Recorrido";
 import { api, fmt, fecha, descargar, cargarProductos, hoyISO, idCot, nombreCot } from "./lib";
 
 const FILTROS = [
@@ -192,16 +193,22 @@ function DetalleCotizacion({ cot, esAdmin, onClose, onVencer }) {
 
 function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
   const [form, setForm] = useState({ orden_compra_cliente: "", dias_credito: 30, pagada_al_contado: false, medio_pago: "transferencia" });
+  const [cliente, setCliente] = useState(null);
+  // El plazo de pago viene de la ficha del cliente
+  useEffect(() => {
+    if (!cot.cliente_id) return;
+    api("/clientes").then((l) => {
+      const c = l.find((x) => x.id === cot.cliente_id);
+      if (c) { setCliente(c); setForm((f) => ({ ...f, dias_credito: c.plazo_pago_dias ?? 30 })); }
+    }).catch(() => {});
+  }, [cot.cliente_id]);
   const [enviando, setEnviando] = useState(false);
   const confirmar = async () => {
     setEnviando(true);
     try {
-      const venta = await api(`/ventas/desde-cotizacion/${cot.id}`, {
-        method: "POST",
-        body: {
-          orden_compra_cliente: form.orden_compra_cliente || null,
-          ...(form.pagada_al_contado ? { pagada_al_contado: true, medio_pago: form.medio_pago } : { dias_credito: Number(form.dias_credito) || 0 }),
-        },
+      const venta = await conConfirmacion(`/ventas/desde-cotizacion/${cot.id}`, {
+        orden_compra_cliente: form.orden_compra_cliente || null,
+        ...(form.pagada_al_contado ? { pagada_al_contado: true, medio_pago: form.medio_pago } : { dias_credito: Number(form.dias_credito) || 0 }),
       });
       notify(`✓ Venta ${venta.numero} creada — Operativo la verá para aceptarla y comprar`);
       onHecho(venta);
@@ -230,7 +237,7 @@ function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
           </select>
         </div>
       ) : (
-        <div className="field"><label>Días de crédito (plazo de pago)</label>
+        <div className="field"><label>Plazo de pago (días){cliente ? ` · ficha: ${cliente.plazo_pago_dias ?? 30}${cliente.base_vencimiento === "recepcion" ? " desde recepción" : ""}` : ""}</label>
           <input type="number" min="0" value={form.dias_credito} onChange={(e) => setForm({ ...form, dias_credito: e.target.value })} />
         </div>
       )}
