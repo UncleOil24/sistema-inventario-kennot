@@ -11,6 +11,7 @@ import Gastos from "./erp/Gastos";
 import Reportes from "./erp/Reportes";
 import Config from "./erp/Config";
 import Licitaciones from "./erp/Licitaciones";
+import { Facturacion, Despachos } from "./erp/Flujo";
 import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
 import Usuarios from "./erp/Usuarios";
@@ -74,6 +75,12 @@ const styles = `
   .table tr:last-child td { border-bottom: none; }
   .table tr:hover td { background: rgba(255,255,255,0.02); }
   .id-cell { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .recorrido { display: flex; gap: 4px; margin: 10px 0 14px; flex-wrap: wrap; }
+  .recorrido .paso { flex: 1; min-width: 110px; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; color: var(--text3); }
+  .recorrido .paso.hecho { color: var(--success); border-color: rgba(76,175,125,0.35); }
+  .recorrido .paso.actual { color: var(--accent); border-color: var(--accent); background: rgba(232,197,71,0.07); font-weight: 600; }
+  .paso-num { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; font-size: 10px; flex-shrink: 0; }
+  .accion-etapa { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 12px; }
   .id-solicitud { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 600; }
   .price-cell { font-family: var(--mono); font-size: 12px; color: var(--accent); }
   .price-cell.compra { color: var(--text2); }
@@ -316,14 +323,6 @@ export default function Root() {
   );
 }
 
-function Proximamente({ titulo, texto }) {
-  return (
-    <div className="panel" style={{ maxWidth: 760 }}>
-      <div className="panel-titulo">{titulo}</div>
-      <div className="mini" style={{ fontSize: 13, lineHeight: 1.7 }}>{texto}</div>
-    </div>
-  );
-}
 
 const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", items: [] };
 
@@ -407,7 +406,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
       const otro = deptos.find((d) => d.secciones.some(([s]) => s === base));
       if (otro) { setDepto(otro.id); try { localStorage.setItem("depto", otro.id); } catch { /* */ } }
     }
-    if (v === "ventas" && id) setVentaAbrir(id);
+    if (["ventas", "facturacion", "despachos"].includes(v) && id) setVentaAbrir(id);
     if (v === "compras" && id) setOrdenAbrir(id);
     setView(v);
   };
@@ -489,12 +488,8 @@ function App({ usuario: usuarioInicial, onLogout }) {
             <Ventas key={dep.id} modo={dep.id} notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} puedeVender={puedeVender} clientes={clientes}
               abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />
           )}
-          {view === "facturacion" && (
-            <Proximamente titulo="Facturación" texto="Aquí aparecerán las ventas que Operativo marque como listas para despacho o retiro, para emitir su factura. Una venta podrá tener varias facturas. Se activa en el paso 3 (Ventas, Operativo y Facturación)." />
-          )}
-          {view === "despachos" && (
-            <Proximamente titulo="Despachos" texto="Aquí Operativo verá el estado de cada pedido (compras por realizar, compra recibida, listo para despacho o retiro, despachada, entregada) y avisará a Comercial para facturar. Se activa en el paso 3." />
-          )}
+          {view === "facturacion" && <Facturacion notify={showNotif} esAdmin={esGerencia} verVenta={verVenta} abrirId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />}
+          {view === "despachos" && <Despachos notify={showNotif} esAdmin={esGerencia} verVenta={verVenta} abrirId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />}
           {view === "clientes" && <Clientes esAdmin={esGerencia} clientes={clientes} loading={loadingClientes} recargar={fetchClientes} notify={showNotif} />}
           {view === "compras" && (
             <Compras notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} proveedores={proveedores} onPreciosCambio={invalidarProductos}

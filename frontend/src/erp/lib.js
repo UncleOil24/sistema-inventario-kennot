@@ -36,7 +36,7 @@ export async function api(path, { method = "GET", body } = {}) {
   });
   let data;
   try { data = await res.json(); } catch { throw new Error(`Error ${res.status} del servidor`); }
-  if (!res.ok || !data.ok) throw new Error(data.error || `Error ${res.status}`);
+  if (!res.ok || !data.ok) throw Object.assign(new Error(data.error || `Error ${res.status}`), { status: res.status });
   return data.data ?? data;
 }
 
