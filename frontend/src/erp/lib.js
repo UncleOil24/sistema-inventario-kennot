@@ -116,3 +116,7 @@ export const haceMeses = (iso) => {
   const m = (h.getFullYear() - d.getFullYear()) * 12 + h.getMonth() - d.getMonth();
   return m <= 0 ? "este mes" : m === 1 ? "hace 1 mes" : `hace ${m} meses`;
 };
+
+// ID de la cotización: Cotizacion_KENOTT_N100 (las de antes de partir en N°100: "Kenott N276 (anterior)")
+export const idCot = (c) => `Cotizacion_${String(c?.empresa || "kenott").toUpperCase()}_N${c?.numero}`;
+export const nombreCot = (c) => c?.id_cotizacion || (c?.anterior ? `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero} (anterior)` : idCot(c));

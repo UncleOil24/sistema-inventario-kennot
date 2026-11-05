@@ -103,7 +103,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
       <div className="toolbar">
         <div className="search-wrap">
           <span className="search-icon">⌕</span>
-          <input className="search-input" placeholder="Buscar por N°, cliente o documento..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          <input className="search-input" placeholder="Buscar por N°, ID, OC, cliente o factura..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
         <select className="filter-select" value={periodo} onChange={(e) => setPeriodo(e.target.value)} title="Período de las ventas listadas">
           {PERIODOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
@@ -122,7 +122,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
 
       <div className="table-wrap">
         <table className="table">
-          <thead><tr>{esAdmin && <th></th>}<th>N°</th><th>Fecha</th><th>Cliente</th><th>OC cliente</th>{esAdmin && <th>Proyecto</th>}<th>Factura</th><th>Total</th>{modo === "finanzas" && <th>Saldo</th>}{modo === "finanzas" && <th>Vence</th>}{modo === "finanzas" && <th>Estado</th>}{modo !== "finanzas" && <th>Compra</th>}<th></th></tr></thead>
+          <thead><tr>{esAdmin && <th></th>}<th>N°</th><th>Fecha</th><th>Cliente</th><th>OC / ID</th>{esAdmin && <th>Proyecto</th>}<th>Factura</th><th>Total</th>{modo === "finanzas" && <th>Saldo</th>}{modo === "finanzas" && <th>Vence</th>}{modo === "finanzas" && <th>Estado</th>}{modo !== "finanzas" && <th>Compra</th>}<th></th></tr></thead>
           <tbody>
             {loading ? <tr className="empty-row"><td colSpan={12}><span className="spinner"></span>Cargando...</td></tr>
               : ventas.length === 0 ? <tr className="empty-row"><td colSpan={12}>// sin ventas — conviértelas desde Cotizaciones o crea una nueva</td></tr>
@@ -135,7 +135,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
                     <td className="id-cell">{v.numero}{v.empresa === "tactics" && <div><Estado valor="tactics" /></div>}</td>
                     <td className="mini">{fecha(v.fecha)}</td>
                     <td>{v.cliente_nombre || <span className="mini">Sin cliente</span>}</td>
-                    <td className="mini">{v.orden_compra_cliente || "—"}</td>
+                    <td className="mini">{v.orden_compra_cliente || "—"}{v.id_solicitud && <div className="id-solicitud">ID {v.id_solicitud}</div>}</td>
                     {esAdmin && <td>{v.proyecto ? <button className="link" title={v.proyecto.nombre} onClick={() => setProyecto(v.proyecto.id)}>{v.proyecto.numero}</button> : <span className="mini">—</span>}</td>}
                     <td className="mini">{v.documento || "—"}</td>
                     <td className="price-cell">{fmt(v.total)}</td>
@@ -161,8 +161,9 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
 function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   const productos = useProductos();
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ empresa: "kenott", cliente_id: "", documento: "", orden_compra_cliente: "", dias_credito: 30, pagada_al_contado: false, medio_pago: "efectivo", notas: "" });
-  const tipo = clientes.find((c) => String(c.id) === String(form.cliente_id))?.tipo || "convenio";
+  const [form, setForm] = useState({ empresa: "kenott", cliente_id: "", cliente_nombre: "", id_solicitud: "", documento: "", orden_compra_cliente: "", dias_credito: 30, pagada_al_contado: false, medio_pago: "efectivo", notas: "" });
+  const cli = clientes.find((c) => String(c.id) === String(form.cliente_id));
+  const tipo = cli?.tipo || "convenio";
   const [guardando, setGuardando] = useState(false);
 
   const guardar = async () => {
@@ -173,6 +174,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
         body: {
           ...form,
           cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
+          cliente_nombre: cli?.codigo === "CG" ? form.cliente_nombre || null : null,
           dias_credito: form.pagada_al_contado ? 0 : Number(form.dias_credito),
           items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio) })),
         },
@@ -199,11 +201,18 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
           <label>Cliente</label>
           <select value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })}>
             <option value="">— Sin cliente —</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {clientes.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} · ` : ""}{c.nombre}</option>)}
           </select>
+          {cli?.codigo === "CG" && <input style={{ marginTop: 6 }} value={form.cliente_nombre} onChange={(e) => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente para esta venta" />}
         </div>
         <div className="field">
-          <label>N° orden de compra del cliente</label>
+          <label>ID del cliente o de la solicitud</label>
+          <input value={form.id_solicitud} onChange={(e) => setForm({ ...form, id_solicitud: e.target.value })} placeholder={cli?.codigo && cli.codigo !== "CG" ? `${cli.codigo} (del cliente)` : "Ej: 1422-20-COT26"} />
+        </div>
+      </div>
+      <div className="fields-row">
+        <div className="field">
+          <label>N° orden de compra del cliente (si no hay OC, se identifica con el ID)</label>
           <input value={form.orden_compra_cliente} onChange={(e) => setForm({ ...form, orden_compra_cliente: e.target.value })} placeholder="Ej: 2401-55-SE26" />
         </div>
       </div>
@@ -238,7 +247,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
 
 function DetalleVenta({ venta, esAdmin, verCompras, verCobros, puedeVender, notify, onClose, onCambio, irACompra, verProyecto }) {
   const [cuadro, setCuadro] = useState(false);
-  const [datos, setDatos] = useState({ documento: venta.documento || "", orden_compra_cliente: venta.orden_compra_cliente || "" });
+  const [datos, setDatos] = useState({ documento: venta.documento || "", orden_compra_cliente: venta.orden_compra_cliente || "", id_solicitud: venta.id_solicitud || "" });
   const r = venta.resumen;
 
   const accion = async (fn, ok) => {
@@ -249,7 +258,7 @@ function DetalleVenta({ venta, esAdmin, verCompras, verCobros, puedeVender, noti
     accion(() => api(`/ventas/${venta.id}/anular`, { method: "POST" }), "Venta anulada");
   };
   const guardarDatos = () => accion(() => api(`/ventas/${venta.id}/datos`, { method: "PUT", body: datos }), "✓ Datos guardados");
-  const cambioDatos = datos.documento !== (venta.documento || "") || datos.orden_compra_cliente !== (venta.orden_compra_cliente || "");
+  const cambioDatos = datos.documento !== (venta.documento || "") || datos.orden_compra_cliente !== (venta.orden_compra_cliente || "") || datos.id_solicitud !== (venta.id_solicitud || "");
 
   return (
     <Modal titulo={`// Venta ${venta.numero}`} onClose={onClose} ancho={780}
@@ -261,6 +270,7 @@ function DetalleVenta({ venta, esAdmin, verCompras, verCobros, puedeVender, noti
       <div className="hist-meta">
         <span>{fecha(venta.fecha)}</span>
         <span>{venta.cliente_nombre || "Sin cliente"}</span>
+        {venta.id_solicitud && <span className="id-solicitud">ID {venta.id_solicitud}</span>}
         {venta.fecha_vencimiento && <span>Vence {fecha(venta.fecha_vencimiento)}</span>}
         {venta.creado_por && <span>Por {venta.creado_por}</span>}
         <Estado valor={venta.empresa || "kenott"} /> <Estado valor={venta.estado} /> <Estado valor={venta.estado_pago} />
@@ -272,6 +282,10 @@ function DetalleVenta({ venta, esAdmin, verCompras, verCobros, puedeVender, noti
           <div className="field">
             <label>N° orden de compra del cliente</label>
             <input value={datos.orden_compra_cliente} onChange={(e) => setDatos({ ...datos, orden_compra_cliente: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>ID del cliente o solicitud</label>
+            <input value={datos.id_solicitud} onChange={(e) => setDatos({ ...datos, id_solicitud: e.target.value })} />
           </div>
           <div className="field">
             <label>N° factura emitida</label>

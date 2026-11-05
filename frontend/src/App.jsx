@@ -74,6 +74,7 @@ const styles = `
   .table tr:last-child td { border-bottom: none; }
   .table tr:hover td { background: rgba(255,255,255,0.02); }
   .id-cell { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .id-solicitud { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 600; }
   .price-cell { font-family: var(--mono); font-size: 12px; color: var(--accent); }
   .price-cell.compra { color: var(--text2); }
   .stock-cell { font-family: var(--mono); font-size: 12px; }
@@ -324,7 +325,7 @@ function Proximamente({ titulo, texto }) {
   );
 }
 
-const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] };
+const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", items: [] };
 
 // Departamentos (Estructura del sistema, 4-nov-2026). Cada uno con sus secciones; cada persona ve solo el suyo y gerencia todo.
 const DEPTOS = [

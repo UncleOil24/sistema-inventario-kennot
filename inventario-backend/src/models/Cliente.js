@@ -7,6 +7,9 @@ const Cliente = sequelize.define("Cliente", {
     primaryKey: true,
     autoIncrement: true,
   },
+  // ID del cliente: unidad de compra de Mercado Público (p.ej. 1422 = CONAF), P-001... para el resto,
+  // y "CG" para el Cliente general (ventas sueltas, el nombre se escribe en cada documento)
+  codigo: { type: DataTypes.STRING(30), allowNull: true },
   nombre: {
     type: DataTypes.STRING(255),
     allowNull: false,
@@ -34,6 +37,7 @@ const Cliente = sequelize.define("Cliente", {
 }, {
   tableName: "clientes",
   timestamps: true,
+  indexes: [{ name: "clientes_codigo_uq", unique: true, fields: ["codigo"] }],
 });
 
 module.exports = Cliente;

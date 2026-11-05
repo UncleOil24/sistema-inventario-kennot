@@ -11,6 +11,7 @@ const Venta = sequelize.define("Venta", {
   cotizacion_id: { type: DataTypes.INTEGER, allowNull: true },
   proyecto_id: { type: DataTypes.INTEGER, allowNull: true }, // licitación/proyecto al que pertenece
   empresa: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "kenott" }, // kenott | tactics
+  id_solicitud: { type: DataTypes.STRING(60), allowNull: true }, // ID del cliente o de la solicitud (viene de la cotización)
   orden_compra_cliente: { type: DataTypes.STRING(60), allowNull: true }, // N° OC que envía el cliente
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   fecha_vencimiento: { type: DataTypes.DATEONLY, allowNull: true },

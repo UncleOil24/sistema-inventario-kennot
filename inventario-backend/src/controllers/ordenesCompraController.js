@@ -50,7 +50,7 @@ const getOrdenes = handler(async (req, res) => {
   const ventaIds = [...new Set(data.map((o) => o.venta_id).filter(Boolean))];
   const proyIds = [...new Set(data.map((o) => o.proyecto_id).filter(Boolean))];
   const [ventas, proyectos] = await Promise.all([
-    ventaIds.length ? Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "fecha", "subtotal", "empresa", "proyecto_id"], raw: true }) : [],
+    ventaIds.length ? Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "id_solicitud", "fecha", "subtotal", "empresa", "proyecto_id"], raw: true }) : [],
     proyIds.length ? Proyecto.findAll({ where: { id: proyIds }, attributes: ["id", "numero", "nombre", "cliente_nombre"], raw: true }) : [],
   ]);
   const v = new Map(ventas.map((x) => [x.id, x]));

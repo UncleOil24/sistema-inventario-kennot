@@ -1,5 +1,3 @@
-const ExcelJS = require("exceljs");
-const path = require("path");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/database");
 const Cotizacion = require("../models/Cotizacion");
@@ -8,11 +6,8 @@ const Producto = require("../models/Producto");
 const { handler, ErrorNegocio, calcularTotales, normalizarItems } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
-const { generarPdfCotizacion } = require("../services/pdfCotizacion");
-
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
-const { excelTactics } = require("../services/excelTactics");
-const PLANTILLA = path.join(__dirname, "../../plantillas/plantilla_cotizacion.xlsx");
+const { excelCotizacion, pdfCotizacion, idCotizacion } = require("../services/cotizacionFormato");
 const ESTADOS = ["borrador", "cotizacion", "aceptada", "rechazada", "vencida"];
 const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const sumarDias = (iso, dias) => {
@@ -23,6 +18,7 @@ const sumarDias = (iso, dias) => {
 // El rol "usuario" no ve costos, proveedores ni márgenes
 const vista = (req) => (c) => {
   const j = typeof c.toJSON === "function" ? c.toJSON() : { ...c };
+  j.id_cotizacion = j.anterior ? `${j.empresa === "tactics" ? "Tactics" : "Kenott"} N${j.numero} (anterior)` : idCotizacion(j);
   if (veCostos(req)) {
     j.margen = Math.round(Number(j.subtotal) - Number(j.costo_total || 0));
     j.margen_pct = Number(j.subtotal) ? Math.round((j.margen / Number(j.subtotal)) * 100) : 0;
@@ -33,11 +29,12 @@ const vista = (req) => (c) => {
   return j;
 };
 
-// Correlativo de cada empresa: el mayor entre el último usado y su parámetro de "último N°", + 1
+// Correlativo de cada empresa: el mayor entre el último usado y su parámetro de "último N°", + 1.
+// Las cotizaciones "anteriores" (antes de partir en N°100) no cuentan.
 const siguienteNumero = async (t, empresa = "kenott") => {
   const params = await getParametros(t);
   const [[fila]] = await sequelize.query(
-    `SELECT COALESCE(MAX(CASE WHEN numero ~ '^[0-9]+$' THEN numero::int END), 0) AS max FROM cotizaciones WHERE empresa = :empresa`,
+    `SELECT COALESCE(MAX(CASE WHEN numero ~ '^[0-9]+$' THEN numero::int END), 0) AS max FROM cotizaciones WHERE empresa = :empresa AND anterior = false`,
     { transaction: t, replacements: { empresa } }
   );
   const n = Math.max(Number(fila.max) || 0, Number(datosEmpresa(empresa, params).ultimo_numero) || 0) + 1;
@@ -85,9 +82,11 @@ const datosCliente = async (body, t) => {
   if (body.cliente_id) {
     const c = await Cliente.findByPk(body.cliente_id, { transaction: t });
     if (!c) throw new ErrorNegocio("Cliente no encontrado", 404);
-    return { cliente_id: c.id, cliente: c.nombre, tipo_precio: body.tipo_precio || c.tipo || "convenio" };
+    // Cliente general: el nombre se escribe solo para este documento
+    const nombre = c.codigo === "CG" && String(body.cliente || "").trim() && body.cliente !== c.nombre ? String(body.cliente).trim() : c.nombre;
+    return { cliente_id: c.id, cliente: nombre, codigo_cliente: c.codigo, tipo_precio: body.tipo_precio || c.tipo || "convenio" };
   }
-  return { cliente_id: null, cliente: body.cliente || null, tipo_precio: body.tipo_precio || "convenio" };
+  return { cliente_id: null, cliente: body.cliente || null, codigo_cliente: null, tipo_precio: body.tipo_precio || "convenio" };
 };
 
 // Cotizaciones abiertas a las que hay que llamar: la próxima fecha de contacto llegó, o no se ha
@@ -113,8 +112,8 @@ const getCotizaciones = handler(async (req, res) => {
   const where = req.query.seguimiento === "1" ? await wherePorSeguir() : {};
   if (estado) where.estado = estado;
   if (req.query.empresa) where.empresa = req.query.empresa;
-  if (busqueda) where[Op.or] = ["numero", "cliente", "nombre_cotizacion"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
-  const data = await Cotizacion.findAll({ where, order: [["createdAt", "DESC"]] });
+  if (busqueda) where[Op.or] = ["numero", "cliente", "nombre_cotizacion", "id_solicitud"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
+  const data = await Cotizacion.findAll({ where, order: [["anterior", "ASC"], ["createdAt", "DESC"]] });
   res.json({ ok: true, data: data.map(vista(req)) });
 });
 
@@ -131,7 +130,7 @@ const getCotizacion = handler(async (req, res) => {
 const crearCotizacion = handler(async (req, res) => {
   const b = req.body || {};
   const cot = await sequelize.transaction(async (t) => {
-    const cliente = await datosCliente(b, t);
+    const { codigo_cliente, ...cliente } = await datosCliente(b, t);
     const items = await armarItems(b.items, cliente.tipo_precio, null, t);
     const params = await getParametros(t);
     const fecha = hoyISO();
@@ -140,7 +139,10 @@ const crearCotizacion = handler(async (req, res) => {
     const numero = await siguienteNumero(t, empresa);
     return Cotizacion.create({
       numero, empresa, ...cliente,
-      nombre_cotizacion: b.nombre_cotizacion || `Cotización ${numero}`,
+      // ID impreso: el de la solicitud (licitación / compra ágil) o, si no hay, el del cliente
+      id_solicitud: String(b.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null),
+      plazo_entrega: String(b.plazo_entrega || "").trim() || params.plazo_entrega || null,
+      nombre_cotizacion: b.nombre_cotizacion || null, // se imprime como "Descripción" (Kenott) o "Proyecto" (Tactics)
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
       estado: b.estado === "borrador" ? "borrador" : "cotizacion",
       notas: b.notas || null,
@@ -162,8 +164,13 @@ const actualizarCotizacion = handler(async (req, res) => {
     if (!["borrador", "cotizacion"].includes(c.estado)) throw new ErrorNegocio(`No se puede editar una cotización ${c.estado}`);
     const cambios = {};
     if ("cliente_id" in b || "cliente" in b || "tipo_precio" in b) {
-      Object.assign(cambios, await datosCliente({ cliente_id: c.cliente_id, cliente: c.cliente, ...b }, t));
+      const { codigo_cliente, ...cli } = await datosCliente({ cliente_id: c.cliente_id, cliente: c.cliente, ...b }, t);
+      Object.assign(cambios, cli);
+      // Si cambia el cliente y no se indicó otro ID, toma el del cliente nuevo
+      if (cli.cliente_id !== c.cliente_id && !("id_solicitud" in b) && codigo_cliente && codigo_cliente !== "CG") cambios.id_solicitud = codigo_cliente;
     }
+    if (b.id_solicitud !== undefined) cambios.id_solicitud = String(b.id_solicitud || "").trim() || null;
+    if (b.plazo_entrega !== undefined) cambios.plazo_entrega = String(b.plazo_entrega || "").trim() || null;
     if (b.items) {
       const items = await armarItems(b.items, cambios.tipo_precio || c.tipo_precio, b.actualizar_costos ? null : c.items, t);
       Object.assign(cambios, { items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0) });
@@ -177,6 +184,7 @@ const actualizarCotizacion = handler(async (req, res) => {
     if (b.estado && ["borrador", "cotizacion"].includes(b.estado)) cambios.estado = b.estado;
     // Cambiar de empresa le da el número siguiente de la otra empresa
     if (b.empresa && validarEmpresa(b.empresa) !== c.empresa) {
+      if (c.anterior) throw new ErrorNegocio("Una cotización anterior no se puede cambiar de empresa");
       cambios.empresa = validarEmpresa(b.empresa);
       cambios.numero = await siguienteNumero(t, cambios.empresa);
       if ((c.nombre_cotizacion || "") === `Cotización ${c.numero}`) cambios.nombre_cotizacion = `Cotización ${cambios.numero}`;
@@ -232,69 +240,16 @@ const eliminarCotizacion = handler(async (req, res) => {
   res.json({ ok: true, message: "Cotización eliminada" });
 });
 
-// GET /api/cotizaciones/:id/excel   (formato Kenott, sin costos)
+// GET /api/cotizaciones/:id/excel   (plantilla de la empresa, sin costos)
+const limpioArchivo = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s.-]/g, "").trim().slice(0, 60) || "cliente";
+const nombreArchivo = (cot, ext) => `${idCotizacion(cot)}${cot.anterior ? "_anterior" : ""}-${limpioArchivo(cot.cliente)}.${ext}`;
 const descargarExcel = async (req, res) => {
   try {
     const cot = await Cotizacion.findByPk(req.params.id);
     if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
-    // Tactics tiene su propio formato
-    if (cot.empresa === "tactics") {
-      const wbT = await excelTactics(cot.toJSON(), datosEmpresa("tactics", await getParametros()));
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename="Cotizacion_TACTICS_N${cot.numero}-${limpioArchivo(cot.cliente)}.xlsx"`);
-      await wbT.xlsx.write(res);
-      return res.end();
-    }
-    const items = cot.items || [];
-    const fecha = cot.fecha ? new Date(`${cot.fecha}T12:00:00`) : new Date(cot.createdAt);
-    const validez = cot.fecha_validez ? new Date(`${cot.fecha_validez}T12:00:00`) : new Date(fecha.getTime() + 30 * 864e5);
-
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(PLANTILLA);
-    const ws = wb.getWorksheet("Cotización") || wb.worksheets[0];
-    ws.getCell("H5").value = cot.numero;
-    ws.getCell("D8").value = cot.cliente || "Sin nombre";
-    ws.getCell("H8").value = fecha.toLocaleDateString("es-CL");
-    ws.getCell("H9").value = validez.toLocaleDateString("es-CL");
-    ws.getCell("D9").value = cot.nombre_cotizacion || "";
-
-    const FILA_INICIO = 12;
-    const FILA_TOTALES_ORIG = 42;
-    const FILAS_DISPONIBLES = FILA_TOTALES_ORIG - FILA_INICIO;
-    if (items.length > FILAS_DISPONIBLES) {
-      ws.spliceRows(FILA_TOTALES_ORIG, 0, ...Array(items.length - FILAS_DISPONIBLES).fill([]));
-    }
-    const fuente = { name: "Arial", size: 9 };
-    items.forEach((item, idx) => {
-      const fila = ws.getRow(FILA_INICIO + idx);
-      fila.getCell(2).value = item.nombre;
-      fila.getCell(2).font = fuente;
-      fila.getCell(5).value = item.unidad || "UNID";
-      fila.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
-      fila.getCell(5).font = fuente;
-      fila.getCell(6).value = Number(item.cantidad);
-      fila.getCell(6).alignment = { horizontal: "center", vertical: "middle" };
-      fila.getCell(6).font = { ...fuente, bold: true };
-      fila.getCell(7).value = Number(item.precio);
-      fila.getCell(7).numFmt = "#,##0";
-      fila.getCell(7).alignment = { horizontal: "right", vertical: "middle" };
-      fila.getCell(7).font = fuente;
-      fila.getCell(8).value = Math.round(Number(item.precio) * Number(item.cantidad));
-      fila.getCell(8).numFmt = "#,##0";
-      fila.getCell(8).alignment = { horizontal: "right", vertical: "middle" };
-      fila.getCell(8).font = fuente;
-    });
-    const FILA_TOT = FILA_INICIO + Math.max(items.length, FILAS_DISPONIBLES);
-    [[0, cot.subtotal], [1, cot.iva], [2, cot.total]].forEach(([k, v]) => {
-      const cell = ws.getCell(`H${FILA_TOT + k}`);
-      cell.value = Math.round(Number(v));
-      cell.numFmt = "#,##0";
-    });
-    ws.getCell(`H${FILA_TOT + 2}`).font = { name: "Arial", bold: true, size: 10 };
-
-    const limpio = (s) => String(s || "").replace(/[^\w\s.-]/g, "").trim().slice(0, 60) || "cliente";
+    const wb = await excelCotizacion(cot.toJSON(), datosEmpresa(cot.empresa, await getParametros()));
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="COT-${cot.numero}-${limpio(cot.cliente)}.xlsx"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${nombreArchivo(cot, "xlsx")}"`);
     await wb.xlsx.write(res);
     res.end();
   } catch (error) {
@@ -303,16 +258,15 @@ const descargarExcel = async (req, res) => {
   }
 };
 
-// GET /api/cotizaciones/:id/pdf   (formato Kenott, sin costos)
-const limpioArchivo = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s.-]/g, "").trim().slice(0, 60) || "cliente";
+// GET /api/cotizaciones/:id/pdf   (plantilla de la empresa, sin costos)
 const descargarPdf = async (req, res) => {
   try {
     const cot = await Cotizacion.findByPk(req.params.id);
     if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
-    const empresa = await getParametros();
+    const emp = datosEmpresa(cot.empresa, await getParametros());
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${cot.empresa === "tactics" ? "Cotizacion_TACTICS_N" : "COT-"}${cot.numero}-${limpioArchivo(cot.cliente)}.pdf"`);
-    generarPdfCotizacion(cot.toJSON(), empresa, res);
+    res.setHeader("Content-Disposition", `attachment; filename="${nombreArchivo(cot, "pdf")}"`);
+    pdfCotizacion(cot.toJSON(), emp, res);
   } catch (error) {
     console.error(error);
     if (!res.headersSent) res.status(500).json({ ok: false, error: error.message });

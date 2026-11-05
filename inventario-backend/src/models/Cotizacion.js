@@ -9,6 +9,12 @@ const Cotizacion = sequelize.define("Cotizacion", {
   empresa: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "kenott" }, // kenott | tactics
   cliente_id: { type: DataTypes.INTEGER, allowNull: true },
   cliente: { type: DataTypes.STRING(255), allowNull: true }, // nombre (se conserva aunque se borre la ficha)
+  // ID que se imprime en la cotización: código del cliente (p.ej. 1422, P-001) o ID de la solicitud
+  // de Mercado Público (p.ej. 1422-20-COT26). Queda también en la venta y sus compras.
+  id_solicitud: { type: DataTypes.STRING(60), allowNull: true },
+  plazo_entrega: { type: DataTypes.STRING(255), allowNull: true }, // texto de "Plazo de entrega" en las condiciones
+  // Cotizaciones de antes de partir la numeración en 100: se conservan pero no cuentan para el correlativo
+  anterior: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   tipo_precio: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "convenio" }, // convenio | particular
   nombre_cotizacion: { type: DataTypes.STRING(255), allowNull: true },
   fecha: { type: DataTypes.DATEONLY, allowNull: true, defaultValue: DataTypes.NOW },
@@ -35,7 +41,8 @@ const Cotizacion = sequelize.define("Cotizacion", {
 }, {
   tableName: "cotizaciones",
   timestamps: true,
-  indexes: [{ name: "cotizaciones_empresa_numero_uq", unique: true, fields: ["empresa", "numero"] }],
+  // El N° es único por empresa entre las cotizaciones nuevas (las "anteriores" pueden repetir número)
+  indexes: [{ name: "cotizaciones_empresa_numero_nuevas_uq", unique: true, fields: ["empresa", "numero"], where: { anterior: false } }],
 });
 
 module.exports = Cotizacion;
