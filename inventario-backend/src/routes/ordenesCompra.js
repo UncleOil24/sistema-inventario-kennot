@@ -9,6 +9,7 @@ router.get("/:id", c.getOrden);
 router.post("/", operativo, c.crearOrden);
 router.put("/:id", operativo, c.actualizarOrden);
 router.put("/:id/venta", operativo, c.asignarVenta);
+router.put("/:id/factura", operativo, c.registrarFactura);
 router.post("/:id/recibir", operativo, c.recibirOrden);
 router.post("/:id/anular", operativo, c.anularOrden);
 router.post("/:id/pagos", soloAdmin, c.registrarPago);

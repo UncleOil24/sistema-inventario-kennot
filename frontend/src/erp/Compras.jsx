@@ -177,6 +177,7 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
     fecha_vencimiento: orden?.fecha_vencimiento || "",
     notas: orden?.notas || "",
     venta_id: orden?.venta_id || null,
+    empresa: orden?.empresa || "",
   });
   const [guardando, setGuardando] = useState(false);
 
@@ -217,12 +218,22 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
           <input value={form.documento} onChange={(e) => setForm({ ...form, documento: e.target.value })} placeholder="Ej: 88123" />
         </div>
       </div>
-      {!orden && (
+      <div className="fields-row">
+        {!orden && (
+          <div className="field">
+            <label>Para la venta (opcional)</label>
+            <SelectorVenta valor={form.venta_id} onChange={(venta_id) => setForm({ ...form, venta_id })} />
+          </div>
+        )}
         <div className="field">
-          <label>Para la venta (opcional)</label>
-          <SelectorVenta valor={form.venta_id} onChange={(venta_id) => setForm({ ...form, venta_id })} />
+          <label>Empresa que compra</label>
+          <select value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })}>
+            <option value="">{form.venta_id ? "La de la venta" : "— Elegir —"}</option>
+            <option value="kenott">Kenott</option>
+            <option value="tactics">Tactics</option>
+          </select>
         </div>
-      )}
+      </div>
       <ItemsEditor items={items} setItems={setItems} productos={productos} precioDe={(p) => p.precio_compra} etiquetaPrecio="Costo neto" />
       <div className="fields-row">
         <div className="field">
@@ -239,9 +250,14 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
   );
 }
 
-function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada }) {
+export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada }) {
   const [registrarPrecios, setRegistrarPrecios] = useState(true);
   const [factura, setFactura] = useState(orden.documento || "");
+  const [fact, setFact] = useState({ fecha_factura: orden.fecha_factura || "", fecha_vencimiento: orden.fecha_vencimiento || "", empresa: orden.empresa || "" });
+  const guardarFactura = () => accion(
+    () => api(`/ordenes-compra/${orden.id}/factura`, { method: "PUT", body: { documento: factura, fecha_factura: fact.fecha_factura || undefined, fecha_vencimiento: fact.fecha_vencimiento || undefined, empresa: fact.empresa || null } }),
+    factura ? "✓ Factura del proveedor guardada" : "✓ Guardado"
+  );
 
   const accion = async (fn, ok, precios = false) => {
     try { await fn(); notify(ok); onCambio(precios); } catch (e) { notify(e.message, "danger"); }
@@ -274,7 +290,8 @@ function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, 
         <span>{fecha(orden.fecha)}</span>
         <span>{orden.proveedor_nombre}</span>
         {orden.notas && orden.venta_id && <span>{orden.notas}</span>}
-        {orden.documento && <span>Factura {orden.documento}</span>}
+        {orden.documento && <span>Factura {orden.documento}{orden.fecha_factura ? ` del ${fecha(orden.fecha_factura)}` : ""}</span>}
+        {orden.empresa && <span>{orden.empresa === "kenott" ? "Kenott" : "Tactics"}</span>}
         {orden.fecha_recepcion && <span>Recibida {fecha(orden.fecha_recepcion)}</span>}
         {orden.fecha_vencimiento && <span>Vence {fecha(orden.fecha_vencimiento)}</span>}
         {orden.creado_por && <span>Por {orden.creado_por}</span>}
@@ -302,19 +319,33 @@ function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, 
         </table>
       </div>
       <Totales subtotal={orden.subtotal} iva={orden.iva} total={orden.total} />
+      {orden.estado !== "anulada" && puedeOperar && (
+        <div className="panel" style={{ marginTop: 10 }}>
+          <div className="panel-titulo">Factura del proveedor</div>
+          <div className="fields-row">
+            <div className="field"><label>N° factura</label><input value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej: 88123" /></div>
+            <div className="field"><label>Fecha factura</label><input type="date" value={fact.fecha_factura} onChange={(e) => setFact({ ...fact, fecha_factura: e.target.value })} /></div>
+          </div>
+          <div className="fields-row">
+            <div className="field"><label>Empresa que compra</label>
+              <select value={fact.empresa} onChange={(e) => setFact({ ...fact, empresa: e.target.value })}>
+                <option value="">— Elegir —</option><option value="kenott">Kenott</option><option value="tactics">Tactics</option>
+              </select></div>
+            <div className="field"><label>Vence el pago</label><input type="date" value={fact.fecha_vencimiento} onChange={(e) => setFact({ ...fact, fecha_vencimiento: e.target.value })} /></div>
+          </div>
+          <div className="mini">Si dejas el vencimiento vacío se calcula con el plazo de pago del proveedor. El IVA de la factura se descuenta en el mes de la factura, en la empresa que compra.</div>
+          <div style={{ textAlign: "right", marginTop: 6 }}><button className="btn btn-ghost btn-sm" onClick={guardarFactura}>Guardar factura</button></div>
+        </div>
+      )}
       {orden.estado === "borrador" && (
         <>
-          <div className="field">
-            <label>N° factura del proveedor</label>
-            <input value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej: 88123" />
-          </div>
           <label className="check">
             <input type="checkbox" checked={registrarPrecios} onChange={(e) => setRegistrarPrecios(e.target.checked)} />
             Al recibir, guardar lo pagado en el historial de precios del proveedor (recalcula el precio vigente)
           </label>
         </>
       )}
-      {esAdmin && orden.estado === "recibida" && (
+      {esAdmin && (orden.estado === "recibida" || (orden.documento && orden.estado !== "anulada")) && (
         <PagosPanel
           key={orden.monto_pagado}
           doc={orden}

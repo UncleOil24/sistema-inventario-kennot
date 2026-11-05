@@ -14,6 +14,8 @@ const OrdenCompra = sequelize.define("OrdenCompra", {
   fecha_recepcion: { type: DataTypes.DATE, allowNull: true },
   fecha_vencimiento: { type: DataTypes.DATEONLY, allowNull: true },
   documento: { type: DataTypes.STRING(50), allowNull: true }, // N° factura del proveedor
+  fecha_factura: { type: DataTypes.DATEONLY, allowNull: true }, // fecha de la factura del proveedor (crédito fiscal del IVA de ese mes)
+  empresa: { type: DataTypes.STRING(20), allowNull: true }, // kenott | tactics: la empresa que compra (la de la venta)
   estado: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "borrador" },
   // items: [{ producto_id, nombre, unidad, cantidad, precio }]
   items: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },

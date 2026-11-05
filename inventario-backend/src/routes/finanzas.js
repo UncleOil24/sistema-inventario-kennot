@@ -2,6 +2,10 @@ const router = require("express").Router();
 const { soloAdmin } = require("../middlewares/auth");
 const { handler } = require("../services/erp");
 const { calcularCobranza, suspenderMorosos } = require("../services/cobranza");
+const { calcularPorPagar, calcularIva, registrarPagoIva } = require("../services/porPagar");
+const { firma } = require("../middlewares/auth");
+const { ErrorNegocio } = require("../services/erp");
+const emp = (e) => (["kenott", "tactics"].includes(e) ? e : undefined);
 
 // Finanzas y Control: solo gerencia
 router.use(soloAdmin);
@@ -11,6 +15,24 @@ router.get("/cobranza", handler(async (req, res) => {
   const suspendidos = await suspenderMorosos();
   const data = await calcularCobranza({ empresa: ["kenott", "tactics"].includes(req.query.empresa) ? req.query.empresa : undefined });
   res.json({ ok: true, data: { ...data, suspendidos_ahora: suspendidos } });
+}));
+
+// GET /api/finanzas/por-pagar?empresa=   -> deuda con proveedores, antigüedad, calendario y pronto pago
+router.get("/por-pagar", handler(async (req, res) => {
+  res.json({ ok: true, data: await calcularPorPagar({ empresa: emp(req.query.empresa) }) });
+}));
+
+// GET /api/finanzas/iva?empresa=&mes=YYYY-MM   -> débito, crédito, remanente y monto a pagar por empresa
+router.get("/iva", handler(async (req, res) => {
+  res.json({ ok: true, data: await calcularIva({ empresa: emp(req.query.empresa), mes: req.query.mes }) });
+}));
+
+// POST /api/finanzas/iva/pago   { empresa, mes, fecha, monto, folio }  (monto null = deshacer)
+router.post("/iva/pago", handler(async (req, res) => {
+  const { empresa, mes, fecha, monto, folio } = req.body || {};
+  if (!emp(empresa) || !/^\d{4}-\d{2}$/.test(mes || "")) throw new ErrorNegocio("Empresa o mes inválido");
+  const data = await registrarPagoIva({ empresa, mes, fecha, monto: monto === null ? null : Number(monto) || 0, folio, por: firma(req) });
+  res.json({ ok: true, data });
 }));
 
 // GET /api/finanzas/produccion?desde=&hasta=   -> control de producción por persona (Comercial y Operativo)

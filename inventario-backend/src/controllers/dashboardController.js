@@ -8,6 +8,7 @@ const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
 const { handler } = require("../services/erp");
 const { calcularCobranza, suspenderMorosos } = require("../services/cobranza");
+const { calcularPorPagar, calcularIva } = require("../services/porPagar");
 const { esAdmin, tieneRol } = require("../middlewares/auth");
 const { SQL_AVISO } = require("../services/precios");
 const { getParametros } = require("../services/parametros");
@@ -209,8 +210,23 @@ const getDashboard = handler(async (req, res) => {
       for (const c of cob.clientes.filter((x) => ["critica", "incobrable"].includes(x.peor_tramo)).slice(0, 8)) {
         tareas.push({ tipo: "moroso", urgencia: 0, texto: `${c.cliente}: ${pesosTxt(c.vencido)} vencido hace ${c.max_dias} días`, detalle: c.peor_tramo === "incobrable" ? "Más de 90 días: decidir cobranza externa o castigo" : `Morosidad crítica · crédito ${c.estado_credito === "suspendido" ? "suspendido" : "activo"}`, vista: "cobranza", boton: "Ver cobranza" });
       }
+      // IVA: aviso 5 días antes y el día anterior, por empresa y con el monto calculado (lo confirma el contador)
       if (cob.iva.dias <= 5) {
-        tareas.push({ tipo: "iva", urgencia: cob.iva.dias <= 1 ? 0 : 1, texto: `Pagar el IVA de ${cob.iva.periodo} (Kenott y Tactics, cada una por separado)`, detalle: `Vence ${cuando(cob.iva.dias)} (${new Date(`${cob.iva.fecha}T12:00:00`).toLocaleDateString("es-CL")}) · el monto lo confirma el contador`, vista: "cobranza", boton: "Ver" });
+        const iva = await calcularIva();
+        for (const e of ["kenott", "tactics"]) {
+          const m = iva.empresas[e]?.meses.find((x) => x.vence === cob.iva.fecha);
+          if (!m || m.pagado) continue;
+          tareas.push({ tipo: "iva", urgencia: cob.iva.dias <= 1 ? 0 : 1, texto: `Pagar el IVA de ${m.nombre} de ${e === "kenott" ? "Kenott" : "Tactics"}: ${m.a_pagar > 0 ? pesosTxt(m.a_pagar) : "sin pago (queda remanente)"}`, detalle: `Vence ${cuando(cob.iva.dias)} (${new Date(`${cob.iva.fecha}T12:00:00`).toLocaleDateString("es-CL")}) · cálculo del sistema, confirmar con el contador`, vista: "iva", boton: "Ver IVA" });
+        }
+      }
+      // Proveedores: facturas por vencer y vencidas
+      const pp = await calcularPorPagar();
+      const avisoProv = Number(params.dias_aviso_pago_proveedor) || 5;
+      for (const d of pp.documentos.filter((x) => x.dias_vencida > 0).slice(0, 8)) {
+        tareas.push({ tipo: "pagar", urgencia: 0, texto: `Pagar ${d.factura ? `factura ${d.factura}` : d.numero} a ${d.proveedor}`, detalle: `${pesosTxt(d.saldo)} · venció ${cuando(-d.dias_vencida)}${d.empresa ? ` · ${d.empresa === "kenott" ? "Kenott" : "Tactics"}` : ""}`, vista: "por-pagar", boton: "Ver" });
+      }
+      for (const d of pp.documentos.filter((x) => x.dias_vencida <= 0 && x.dias_vencida >= -avisoProv).slice(0, 8)) {
+        tareas.push({ tipo: "pagar", urgencia: 1, texto: `Vence el pago a ${d.proveedor}${d.factura ? ` (factura ${d.factura})` : ""}`, detalle: `${pesosTxt(d.saldo)} · vence ${cuando(-d.dias_vencida)}${d.pronto_pago ? ` · pagando antes del ${new Date(`${d.pronto_pago.hasta}T12:00:00`).toLocaleDateString("es-CL")} ahorras ${pesosTxt(d.pronto_pago.ahorro)}` : ""}`, vista: "por-pagar", boton: "Ver" });
       }
       const semana = new Date(Date.now() - 7 * 864e5).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
       for (const v of cob.margen_bajo.filter((x) => String(x.fecha) >= semana).slice(0, 5)) {
@@ -230,7 +246,6 @@ const getDashboard = handler(async (req, res) => {
     for (const v of porEntregar.slice(0, 8)) tareas.push({ tipo: "entregar", urgencia: 2, texto: `¿Recibió el cliente ${v.numero}?`, detalle: `Despachada el ${new Date(`${v.despacho_fecha}T12:00:00`).toLocaleDateString("es-CL")} · márcala entregada`, vista: "despachos", id: v.id, boton: "Ver" });
     for (const v of porComprar.filter((x) => x.etapa === "aceptada").slice(0, 8)) tareas.push({ tipo: "comprar", urgencia: 0, texto: `Comprar los productos de ${v.numero}`, detalle: `${v.cliente_nombre || ""} · vendida el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}`, vista: "ventas", id: v.id, boton: "Ver qué comprar" });
     for (const o of ocBorrador.filter((o) => dias(o.fecha) <= -2).slice(0, 8)) tareas.push({ tipo: "recibir", urgencia: 1, texto: `¿Llegó el pedido ${o.numero} de ${o.proveedor_nombre}?`, detalle: `Pedido ${cuando(dias(o.fecha))}: márcalo recibido cuando llegue`, vista: "compras", id: o.id, boton: "Ver pedido" });
-    for (const o of admin ? porPagar.filter(vencida).slice(0, 8) : []) tareas.push({ tipo: "pagar", urgencia: 0, texto: `Pagar ${o.numero} a ${o.proveedor_nombre}`, detalle: `$${n(saldo(o)).toLocaleString("es-CL")} · venció ${cuando(dias(o.fecha_vencimiento))}`, vista: "compras", id: o.id, boton: "Ver orden" });
   }
   // Llamar a clientes
   for (const c of comercial ? porSeguir.slice(0, 8) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });

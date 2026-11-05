@@ -58,7 +58,7 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
               : lista.length === 0 ? <tr className="empty-row"><td colSpan={7}>// sin proveedores</td></tr>
               : lista.map((p) => (
                 <tr key={p.id}>
-                  <td style={{ fontWeight: 500 }}>{p.nombre}{p.rubro && <div className="mini">{p.rubro}</div>}
+                  <td style={{ fontWeight: 500 }}>{p.nombre}{p.rubro && <div className="mini">{p.rubro}</div>}{p.plazo_pago_dias > 0 && <div className="mini">paga a {p.plazo_pago_dias} días{Number(p.descuento_pronto_pago) > 0 ? ` · ${Number(p.descuento_pronto_pago)}% pronto pago` : ""}</div>}
                     {p.excluido && <div><span className="estado estado-warn" title={p.motivo_exclusion || ""}>Excluido del precio vigente</span></div>}</td>
                   <td className="mini">{p.razon_social || "—"}{p.rut ? ` · ${p.rut}` : ""}</td>
                   <td><Estado valor={p.tipo || "proveedor"} /></td>
@@ -95,6 +95,14 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
           {campo("contacto", "Contacto / vendedor", "Nombre, teléfono, correo")}
           <div className="fields-row">{campo("telefono", "Teléfono", "+569...")}{campo("email", "Email", "ventas@...")}</div>
           <div className="fields-row">{campo("direccion", "Dirección", "Ej: 14 Oriente 1186")}{campo("comuna", "Comuna", "Talca")}</div>
+          <div className="fields-row tres">
+            <div className="field"><label>Plazo de pago (días)</label>
+              <input type="number" min="0" value={form.plazo_pago_dias ?? ""} onChange={(e) => setForm({ ...form, plazo_pago_dias: e.target.value === "" ? null : Number(e.target.value) })} placeholder="0 = contado" /></div>
+            <div className="field"><label>Dcto. pronto pago (%)</label>
+              <input type="number" min="0" step="0.5" value={form.descuento_pronto_pago ?? ""} onChange={(e) => setForm({ ...form, descuento_pronto_pago: e.target.value === "" ? null : Number(e.target.value) })} placeholder="Ej: 2" /></div>
+            <div className="field"><label>Si se paga dentro de (días)</label>
+              <input type="number" min="0" value={form.dias_pronto_pago ?? ""} onChange={(e) => setForm({ ...form, dias_pronto_pago: e.target.value === "" ? null : Number(e.target.value) })} placeholder="Ej: 10" /></div>
+          </div>
           {esAdmin && (
             <div className="field">
               <label className="check">

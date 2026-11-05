@@ -103,6 +103,14 @@ export default function Config({ notify }) {
             {campo("regimen_kenott", "Régimen tributario Kenott", "", "text")}
             {campo("regimen_tactics", "Régimen tributario Tactics", "", "text")}
           </div>
+          <div className="fields-row">
+            {campo("iva_desde", "IVA: calcular desde el mes", "Formato AAAA-MM (ej. 2026-10)", "text")}
+            {campo("iva_remanente_kenott", "Remanente de crédito fiscal Kenott ($)", "El del último F29 antes de ese mes (lo informa el contador)")}
+            {campo("iva_remanente_tactics", "Remanente de crédito fiscal Tactics ($)", "El del último F29 antes de ese mes")}
+          </div>
+          <div className="fields-row">
+            {campo("dias_aviso_pago_proveedor", "Avisar antes de que venza el pago a un proveedor (días)")}
+          </div>
         </>}
       </div>
       <div className="panel">
