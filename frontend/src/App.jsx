@@ -21,12 +21,12 @@ const styles = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
-    /* Tema claro con el verde de Kenott */
-    --bg: #f3f5f1; --surface: #ffffff; --surface2: #eef2ec;
-    --border: #d8dfd4; --border2: #bfcab9;
-    --accent: #4a7a4c; --accent2: #3c6540; --accent-rgb: 74,122,76;
-    --danger: #c0392b; --success: #2e8b57;
-    --text: #1f2a22; --text2: #4c5850; --text3: #7a857c;
+    /* Tema azul grisáceo con el turquesa de Tactics (algo más oscuro que claro) */
+    --bg: #d8dfe7; --surface: #e9edf2; --surface2: #dbe2ea;
+    --border: #c2ccd7; --border2: #a8b4c2;
+    --accent: #26747b; --accent2: #1f5f65; --accent-rgb: 38,116,123;
+    --danger: #b8382c; --success: #2a7f50;
+    --text: #1a2330; --text2: #46536a; --text3: #6f7c8d;
     --mono: 'IBM Plex Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
   }
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; color-scheme: light; }
