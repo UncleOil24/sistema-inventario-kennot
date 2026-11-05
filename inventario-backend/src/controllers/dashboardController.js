@@ -7,6 +7,7 @@ const Cotizacion = require("../models/Cotizacion");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
 const { handler } = require("../services/erp");
+const { calcularCobranza, suspenderMorosos } = require("../services/cobranza");
 const { esAdmin, tieneRol } = require("../middlewares/auth");
 const { SQL_AVISO } = require("../services/precios");
 const { getParametros } = require("../services/parametros");
@@ -181,9 +182,34 @@ const getDashboard = handler(async (req, res) => {
   }
   const otrasNuevas = licNuevas.filter((l) => !(l.fecha_cierre && Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) <= 1)).length;
   if (comercial && otrasNuevas) tareas.push({ tipo: "oportunidad", urgencia: 1, texto: `Revisar ${otrasNuevas} oportunidad(es) nueva(s) de Mercado Público`, detalle: "Compra Ágil y licitaciones que calzan con lo que vendemos", vista: "licitaciones", boton: "Revisar" });
-  // Cobrar
-  for (const v of admin ? porCobrar.filter(vencida).slice(0, 8) : []) {
-    tareas.push({ tipo: "cobrar", urgencia: 0, texto: `Cobrar ${v.numero} a ${v.cliente_nombre || "cliente"}`, detalle: `$${n(saldo(v)).toLocaleString("es-CL")} · venció ${cuando(dias(v.fecha_vencimiento))}`, vista: "ventas", id: v.id, boton: "Ver venta" });
+  // Cobranza por área (traspaso financiero 3.4): Comercial avisa antes del vencimiento y recuerda la morosidad
+  // temprana; Finanzas (gerencia) ve la morosidad crítica (crédito suspendido), el IVA y los márgenes bajos.
+  if (comercial || admin) {
+    await suspenderMorosos();
+    const cob = await calcularCobranza();
+    const avisoDias = Number(params.dias_aviso_vencimiento) || 5;
+    const pesosTxt = (x) => `$${n(x).toLocaleString("es-CL")}`;
+    if (comercial) {
+      for (const d of cob.documentos.filter((x) => !x.provisorio && x.dias_vencida != null && x.dias_vencida <= 0 && x.dias_vencida >= -avisoDias).slice(0, 8)) {
+        tareas.push({ tipo: "avisar_cobro", urgencia: 1, texto: `Factura de ${d.numero} (${d.cliente || "cliente"}) vence ${cuando(-d.dias_vencida)}`, detalle: `${pesosTxt(d.saldo)} · confirma con el cliente que esté en pago`, vista: "ventas", id: d.id, boton: "Ver venta" });
+      }
+      for (const d of cob.documentos.filter((x) => x.tramo === "temprana").slice(0, 8)) {
+        const c = cob.clientes.find((x) => x.cliente_id === d.cliente_id);
+        tareas.push({ tipo: "recordar_cobro", urgencia: 0, texto: `Recordar el pago de ${d.numero} a ${d.cliente || "cliente"}`, detalle: `${pesosTxt(d.saldo)} · ${d.dias_vencida} día(s) vencida${c?.contacto_finanzas ? ` · ${c.contacto_finanzas}` : ""}`, vista: "ventas", id: d.id, boton: "Ver venta" });
+      }
+    }
+    if (admin) {
+      for (const c of cob.clientes.filter((x) => ["critica", "incobrable"].includes(x.peor_tramo)).slice(0, 8)) {
+        tareas.push({ tipo: "moroso", urgencia: 0, texto: `${c.cliente}: ${pesosTxt(c.vencido)} vencido hace ${c.max_dias} días`, detalle: c.peor_tramo === "incobrable" ? "Más de 90 días: decidir cobranza externa o castigo" : `Morosidad crítica · crédito ${c.estado_credito === "suspendido" ? "suspendido" : "activo"}`, vista: "cobranza", boton: "Ver cobranza" });
+      }
+      if (cob.iva.dias <= 5) {
+        tareas.push({ tipo: "iva", urgencia: cob.iva.dias <= 1 ? 0 : 1, texto: `Pagar el IVA de ${cob.iva.periodo} (Kenott y Tactics, cada una por separado)`, detalle: `Vence ${cuando(cob.iva.dias)} (${new Date(`${cob.iva.fecha}T12:00:00`).toLocaleDateString("es-CL")}) · el monto lo confirma el contador`, vista: "cobranza", boton: "Ver" });
+      }
+      const semana = new Date(Date.now() - 7 * 864e5).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+      for (const v of cob.margen_bajo.filter((x) => String(x.fecha) >= semana).slice(0, 5)) {
+        tareas.push({ tipo: "margen", urgencia: 1, texto: `Venta ${v.numero} con margen ${String(v.margen_pct).replace(".", ",")}%`, detalle: `${v.cliente || ""} · bajo el mínimo de ${String(cob.margen_minimo).replace(".", ",")}%`, vista: "ventas", id: v.id, boton: "Ver venta" });
+      }
+    }
   }
   // Comprar a proveedores
   const oc = (v) => (v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : "");
@@ -203,7 +229,7 @@ const getDashboard = handler(async (req, res) => {
   for (const c of comercial ? porSeguir.slice(0, 8) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });
   for (const c of comercial ? cotPorVencer.filter((c) => !porSeguir.some((p) => p.id === c.id)) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `La cotización N° ${c.numero} (${c.cliente || "sin cliente"}) vence ${cuando(dias(c.fecha_validez))}`, detalle: "Llama al cliente antes de que venza", vista: "cotizaciones", boton: "Ver" });
   // Departamento de cada tarea (cada pestaña muestra las suyas)
-  const DEPTO = { oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
+  const DEPTO = { avisar_cobro: "comercial", recordar_cobro: "comercial", moroso: "finanzas", iva: "finanzas", margen: "finanzas", oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
   tareas.forEach((t) => { t.depto = DEPTO[t.tipo] || "comercial"; });
   tareas.sort((a, b) => a.urgencia - b.urgencia);
 

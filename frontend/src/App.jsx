@@ -12,6 +12,7 @@ import Reportes from "./erp/Reportes";
 import Config from "./erp/Config";
 import Licitaciones from "./erp/Licitaciones";
 import { Facturacion, Despachos } from "./erp/Flujo";
+import Cobranza from "./erp/Cobranza";
 import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
 import Usuarios from "./erp/Usuarios";
@@ -85,6 +86,10 @@ const styles = `
   .presu-fila { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; }
   .presu-fila.presu-pasa { border-color: var(--danger); background: rgba(220,80,80,0.06); }
   .presu-cab { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+  .aging-barra { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--surface2); margin: 6px 0 10px; }
+  .aging-leyenda { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
+  .aging-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .tramo-critico { color: var(--danger); border-color: var(--danger); }
   .recorrido { display: flex; gap: 4px; margin: 10px 0 14px; flex-wrap: wrap; }
   .recorrido .paso { flex: 1; min-width: 110px; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; color: var(--text3); }
   .recorrido .paso.hecho { color: var(--success); border-color: rgba(76,175,125,0.35); }
@@ -343,7 +348,7 @@ const DEPTOS = [
   { id: "operativo", nombre: "Operativo", roles: ["operativo"], secciones: [
     ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
   { id: "finanzas", nombre: "Finanzas y Control", roles: [], secciones: [
-    ["inicio", "Resumen"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
+    ["inicio", "Resumen"], ["cobranza", "Cobranza"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
 ];
 const ROL_TEXTO = { admin: "administrador", gerencia: "gerencia", comercial: "comercial", operativo: "operativo", usuario: "usuario" };
 
@@ -508,6 +513,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
           {view === "proveedores" && (
             <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
+          {view === "cobranza" && esGerencia && <Cobranza notify={showNotif} verVenta={(id) => { setVentaAbrir(id); setView("ventas"); }} irA={irA} />}
           {view === "gastos" && esGerencia && <Gastos notify={showNotif} />}
           {view === "reportes" && esGerencia && <Reportes notify={showNotif} />}
           {view === "config" && esGerencia && <Config notify={showNotif} />}

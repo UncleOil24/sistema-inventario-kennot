@@ -268,9 +268,18 @@ const registrarCobro = handler(async (req, res) => {
     const saldo = Number(v.total) - Number(v.monto_pagado);
     if (!(monto > 0)) throw new ErrorNegocio("Monto inválido");
     if (monto > saldo + 0.5) throw new ErrorNegocio(`El monto supera el saldo pendiente (${Math.round(saldo)})`);
+    const medio = req.body.medio || "transferencia";
+    const comision = medio === "factoring" ? Math.round(Number(req.body.factoring_comision) || 0) : 0;
+    // Factoring: la factura queda saldada por el monto cedido; la comisión es un gasto financiero de la venta
+    const gasto = comision > 0 ? await Gasto.create({
+      fecha: req.body.fecha || new Date(), tipo: "financiero", monto: comision, venta_id: v.id,
+      descripcion: `Comisión factoring ${req.body.factoring_entidad || ""} · ${v.numero}`.replace(/\s+·/, " ·").trim(), creado_por: req.usuario.nombre,
+    }, { transaction: t }) : null;
     const pago = await Pago.create({
       tipo: "cobro", venta_id: v.id, monto,
-      fecha: req.body.fecha || new Date(), medio: req.body.medio || "transferencia", nota: req.body.nota,
+      fecha: req.body.fecha || new Date(), medio, nota: req.body.nota,
+      factoring_entidad: medio === "factoring" ? String(req.body.factoring_entidad || "").trim() || null : null,
+      factoring_comision: comision || null, gasto_id: gasto?.id || null,
       creado_por: req.usuario.nombre,
     }, { transaction: t });
     const pagado = Number(v.monto_pagado) + monto;

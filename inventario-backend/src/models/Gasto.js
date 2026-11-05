@@ -1,7 +1,7 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/database");
 
-// tipo: flete | combustible | comision | general
+// tipo: flete | combustible | comision | general | financiero (comisión de factoring, intereses)
 const Gasto = sequelize.define("Gasto", {
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },

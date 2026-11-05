@@ -33,7 +33,12 @@ const datosFicha = (b, actual = {}) => {
   }
   if ("base_vencimiento" in b) d.base_vencimiento = b.base_vencimiento === "recepcion" ? "recepcion" : "factura";
   if ("limite_credito" in b) d.limite_credito = b.limite_credito === "" || b.limite_credito == null ? null : Number(b.limite_credito) || 0;
-  if ("estado_credito" in b) d.estado_credito = b.estado_credito === "suspendido" ? "suspendido" : "activo";
+  if ("estado_credito" in b) {
+    d.estado_credito = b.estado_credito === "suspendido" ? "suspendido" : "activo";
+    if (d.estado_credito === "activo") d.motivo_credito = null; // reactivado por gerencia
+    else if ("motivo_credito" in b) d.motivo_credito = String(b.motivo_credito || "").trim() || null;
+  }
+  if ("usa_factoring" in b) d.usa_factoring = !!b.usa_factoring;
   return { ...actual, ...d };
 };
 const responderError = (res, error) => res.status(error.status || 500).json({ ok: false, error: error.message });

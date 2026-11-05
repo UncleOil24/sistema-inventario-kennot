@@ -3,7 +3,7 @@ const Gasto = require("../models/Gasto");
 const Venta = require("../models/Venta");
 const { handler, ErrorNegocio } = require("../services/erp");
 
-const TIPOS = ["flete", "combustible", "comision", "general"];
+const TIPOS = ["flete", "combustible", "comision", "general", "financiero"];
 
 const datos = async (b) => {
   const d = {};

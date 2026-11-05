@@ -44,6 +44,8 @@ const Cliente = sequelize.define("Cliente", {
   contacto_finanzas: { type: DataTypes.STRING(150), allowNull: true },
   limite_credito: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
   estado_credito: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "activo" }, // activo | suspendido
+  motivo_credito: { type: DataTypes.STRING(255), allowNull: true }, // por qué se suspendió (ej. automático por morosidad crítica)
+  usa_factoring: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // sus facturas a veces se ceden a factoring
   notas: { type: DataTypes.TEXT, allowNull: true },
 }, {
   tableName: "clientes",
