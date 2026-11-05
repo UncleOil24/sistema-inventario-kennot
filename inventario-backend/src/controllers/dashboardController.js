@@ -7,7 +7,7 @@ const Cotizacion = require("../models/Cotizacion");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
 const { handler } = require("../services/erp");
-const { esAdmin } = require("../middlewares/auth");
+const { esAdmin, tieneRol } = require("../middlewares/auth");
 const { SQL_AVISO } = require("../services/precios");
 const { getParametros } = require("../services/parametros");
 const { wherePorSeguir } = require("./cotizacionesController");
@@ -161,37 +161,55 @@ const getDashboard = handler(async (req, res) => {
   // --- Qué hacer hoy: acciones concretas, lo más urgente primero ---
   // urgencia: 0 = hoy/vencido, 1 = pronto, 2 = cuando se pueda
   const admin = esAdmin(req);
+  const operativo = tieneRol(req, "operativo");
+  const comercial = tieneRol(req, "comercial") || req.usuario?.rol === "usuario";
   const dias = (d) => (d ? Math.round((new Date(`${String(d).slice(0, 10)}T12:00:00`) - new Date(`${hoyStr}T12:00:00`)) / 864e5) : null);
   const cuando = (dd) => (dd === 0 ? "hoy" : dd === 1 ? "mañana" : dd < 0 ? `hace ${-dd} día(s)` : `en ${dd} días`);
   const tareas = [];
   const [ocBorrador, cotPorVencer] = await Promise.all([
-    admin ? OrdenCompra.findAll({ where: { estado: "borrador" }, attributes: ["id", "numero", "proveedor_nombre", "fecha", "subtotal"], order: [["fecha", "ASC"]], limit: 20 }) : [],
+    operativo ? OrdenCompra.findAll({ where: { estado: "borrador" }, attributes: ["id", "numero", "proveedor_nombre", "fecha", "subtotal"], order: [["fecha", "ASC"]], limit: 20 }) : [],
     Cotizacion.findAll({ where: { estado: "cotizacion", fecha_validez: { [Op.between]: [hoyStr, ymd(new Date(Date.now() + 3 * 864e5))] } }, attributes: ["id", "numero", "cliente", "fecha_validez", "empresa"], order: [["fecha_validez", "ASC"]], limit: 10 }),
   ]);
   // Oportunidades que cierran pronto (sin cotizar)
-  for (const l of licNuevas) {
+  for (const l of comercial ? licNuevas : []) {
     const dd = l.fecha_cierre ? Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) : null;
     if (dd !== null && dd <= 1) tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, detalle: `${l.organismo || ""} · cierra ${dd <= 0 ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}${l.monto_estimado ? ` · ${"$" + n(l.monto_estimado).toLocaleString("es-CL")}` : ""}`, vista: "licitaciones", boton: "Ver oportunidad" });
   }
   const otrasNuevas = licNuevas.filter((l) => !(l.fecha_cierre && Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) <= 1)).length;
-  if (otrasNuevas) tareas.push({ tipo: "oportunidad", urgencia: 1, texto: `Revisar ${otrasNuevas} oportunidad(es) nueva(s) de Mercado Público`, detalle: "Compra Ágil y licitaciones que calzan con lo que vendemos", vista: "licitaciones", boton: "Revisar" });
+  if (comercial && otrasNuevas) tareas.push({ tipo: "oportunidad", urgencia: 1, texto: `Revisar ${otrasNuevas} oportunidad(es) nueva(s) de Mercado Público`, detalle: "Compra Ágil y licitaciones que calzan con lo que vendemos", vista: "licitaciones", boton: "Revisar" });
   // Cobrar
-  for (const v of porCobrar.filter(vencida).slice(0, 8)) {
+  for (const v of admin ? porCobrar.filter(vencida).slice(0, 8) : []) {
     tareas.push({ tipo: "cobrar", urgencia: 0, texto: `Cobrar ${v.numero} a ${v.cliente_nombre || "cliente"}`, detalle: `$${n(saldo(v)).toLocaleString("es-CL")} · venció ${cuando(dias(v.fecha_vencimiento))}`, vista: "ventas", id: v.id, boton: "Ver venta" });
   }
   // Comprar a proveedores
-  if (admin) {
+  if (operativo) {
     for (const v of porComprar.slice(0, 8)) tareas.push({ tipo: "comprar", urgencia: 0, texto: `Comprar los productos de ${v.numero}`, detalle: `${v.cliente_nombre || ""} · vendida el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}`, vista: "ventas", id: v.id, boton: "Ver qué comprar" });
     for (const o of ocBorrador.filter((o) => dias(o.fecha) <= -2).slice(0, 8)) tareas.push({ tipo: "recibir", urgencia: 1, texto: `¿Llegó el pedido ${o.numero} de ${o.proveedor_nombre}?`, detalle: `Pedido ${cuando(dias(o.fecha))}: márcalo recibido cuando llegue`, vista: "compras", id: o.id, boton: "Ver pedido" });
-    for (const o of porPagar.filter(vencida).slice(0, 8)) tareas.push({ tipo: "pagar", urgencia: 0, texto: `Pagar ${o.numero} a ${o.proveedor_nombre}`, detalle: `$${n(saldo(o)).toLocaleString("es-CL")} · venció ${cuando(dias(o.fecha_vencimiento))}`, vista: "compras", id: o.id, boton: "Ver orden" });
+    for (const o of admin ? porPagar.filter(vencida).slice(0, 8) : []) tareas.push({ tipo: "pagar", urgencia: 0, texto: `Pagar ${o.numero} a ${o.proveedor_nombre}`, detalle: `$${n(saldo(o)).toLocaleString("es-CL")} · venció ${cuando(dias(o.fecha_vencimiento))}`, vista: "compras", id: o.id, boton: "Ver orden" });
   }
   // Llamar a clientes
-  for (const c of porSeguir.slice(0, 8)) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });
-  for (const c of cotPorVencer.filter((c) => !porSeguir.some((p) => p.id === c.id))) tareas.push({ tipo: "llamar", urgencia: 1, texto: `La cotización N° ${c.numero} (${c.cliente || "sin cliente"}) vence ${cuando(dias(c.fecha_validez))}`, detalle: "Llama al cliente antes de que venza", vista: "cotizaciones", boton: "Ver" });
+  for (const c of comercial ? porSeguir.slice(0, 8) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });
+  for (const c of comercial ? cotPorVencer.filter((c) => !porSeguir.some((p) => p.id === c.id)) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `La cotización N° ${c.numero} (${c.cliente || "sin cliente"}) vence ${cuando(dias(c.fecha_validez))}`, detalle: "Llama al cliente antes de que venza", vista: "cotizaciones", boton: "Ver" });
+  // Departamento de cada tarea (cada pestaña muestra las suyas)
+  const DEPTO = { oportunidad: "comercial", llamar: "comercial", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
+  tareas.forEach((t) => { t.depto = DEPTO[t.tipo] || "comercial"; });
   tareas.sort((a, b) => a.urgencia - b.urgencia);
+
+  // --- Total adjudicado (ventas registradas, con IVA) de la semana y del mes, por empresa ---
+  const lunes = (() => { const d = new Date(`${hoyStr}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return ymd(d); })();
+  const ventasRecientes = await Venta.findAll({ where: { estado: { [Op.ne]: "anulada" }, fecha: { [Op.gte]: lunes < inicioMes ? lunes : inicioMes } }, attributes: ["fecha", "total", "empresa"], raw: true });
+  const ventasMes = ventasRecientes.filter((v) => v.fecha >= inicioMes);
+  const sumar = (lista) => {
+    const r = { kenott: { total: 0, cantidad: 0 }, tactics: { total: 0, cantidad: 0 } };
+    for (const v of lista) { const e = r[v.empresa] ? v.empresa : "kenott"; r[e].total += Number(v.total); r[e].cantidad += 1; }
+    r.kenott.total = n(r.kenott.total); r.tactics.total = n(r.tactics.total);
+    return { ...r, ambas: { total: r.kenott.total + r.tactics.total, cantidad: r.kenott.cantidad + r.tactics.cantidad } };
+  };
+  const adjudicado = { semana: sumar(ventasRecientes.filter((v) => v.fecha >= lunes)), mes: sumar(ventasMes), desde_semana: lunes };
 
   const data = {
     tareas,
+    adjudicado,
     generado: new Date().toISOString(),
     mes_actual: {
       mes: mesActual.mes,

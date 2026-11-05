@@ -7,7 +7,7 @@ const Cliente = require("../models/Cliente");
 const Producto = require("../models/Producto");
 const { handler, ErrorNegocio, calcularTotales, normalizarItems } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
-const { esAdmin } = require("../middlewares/auth");
+const { veCostos } = require("../middlewares/auth");
 const { generarPdfCotizacion } = require("../services/pdfCotizacion");
 
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
@@ -23,7 +23,7 @@ const sumarDias = (iso, dias) => {
 // El rol "usuario" no ve costos, proveedores ni márgenes
 const vista = (req) => (c) => {
   const j = typeof c.toJSON === "function" ? c.toJSON() : { ...c };
-  if (esAdmin(req)) {
+  if (veCostos(req)) {
     j.margen = Math.round(Number(j.subtotal) - Number(j.costo_total || 0));
     j.margen_pct = Number(j.subtotal) ? Math.round((j.margen / Number(j.subtotal)) * 100) : 0;
     return j;

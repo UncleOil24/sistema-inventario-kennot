@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import Dashboard from "./erp/Dashboard";
+import Dashboard, { InicioDepto } from "./erp/Dashboard";
 import Ventas from "./erp/Ventas";
 import Compras from "./erp/Compras";
 import Proveedores from "./erp/Proveedores";
@@ -131,6 +131,9 @@ const styles = `
   .user-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #000; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; }
   .rol-badge { font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border2); color: var(--text2); }
   .rol-admin { color: var(--accent); border-color: rgba(232,197,71,0.4); }
+  .rol-gerencia { color: var(--accent); border-color: rgba(232,197,71,0.4); }
+  .rol-comercial { color: var(--success); border-color: rgba(76,175,125,0.4); }
+  .rol-operativo { color: var(--info); border-color: rgba(91,155,213,0.4); }
   .menu-fondo { position: fixed; inset: 0; z-index: 150; }
   .menu-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 151; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); display: flex; flex-direction: column; overflow: hidden; }
   .menu-info { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
@@ -214,7 +217,19 @@ const styles = `
   .select-linea { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; font-family: var(--mono); font-size: 11px; color: var(--text); max-width: 340px; width: 100%; }
   .nav-btn { padding: 6px 10px; }
   .menu-mas { position: relative; flex-shrink: 0; }
+  .deptos-nav { gap: 6px; }
+  .depto-btn { background: none; border: 1px solid transparent; cursor: pointer; padding: 8px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--text2); text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+  .depto-btn:hover { color: var(--text); background: var(--surface2); }
+  .depto-btn.active { color: var(--accent); border-color: rgba(232,197,71,0.35); background: rgba(232,197,71,0.08); }
+  .depto-num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 10px; background: var(--surface2); color: var(--text2); }
+  .depto-btn.active .depto-num { background: var(--accent); color: #000; }
+  .secciones-nav { display: flex; gap: 2px; flex-wrap: wrap; padding: 6px 2rem; background: var(--bg); border-bottom: 1px solid var(--border); position: sticky; top: 56px; z-index: 90; }
   .que-hacer { border-color: var(--border2); }
+  .adjudicado .adj-fila { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .adjudicado .adj-fila strong { font-family: var(--mono); font-size: 18px; color: var(--text); }
+  .adjudicado .adj-total { border-bottom: none; }
+  .adjudicado .adj-total strong { color: var(--accent); font-size: 20px; }
+  .adjudicado .adj-total span:first-child { font-family: var(--mono); font-size: 12px; text-transform: uppercase; color: var(--text2); }
   .tareas { display: flex; flex-direction: column; gap: 6px; }
   .tarea { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
   .tarea.urgente { border-color: rgba(232,163,61,0.55); background: rgba(232,163,61,0.06); }
@@ -300,14 +315,46 @@ export default function Root() {
   );
 }
 
+function Proximamente({ titulo, texto }) {
+  return (
+    <div className="panel" style={{ maxWidth: 760 }}>
+      <div className="panel-titulo">{titulo}</div>
+      <div className="mini" style={{ fontSize: 13, lineHeight: 1.7 }}>{texto}</div>
+    </div>
+  );
+}
+
 const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] };
 
-function App({ usuario, onLogout }) {
-  const esAdmin = usuario.rol === "admin";
+// Departamentos (Estructura del sistema, 4-nov-2026). Cada uno con sus secciones; cada persona ve solo el suyo y gerencia todo.
+const DEPTOS = [
+  { id: "comercial", nombre: "Comercial", roles: ["comercial", "usuario"], secciones: [
+    ["inicio", "Inicio"], ["licitaciones", "Licitaciones"], ["cotizaciones", "Cotizaciones"], ["ventas", "Ventas"], ["facturacion", "Facturación"], ["clientes", "Clientes"], ["catalogo", "Catálogo"]] },
+  { id: "operativo", nombre: "Operativo", roles: ["operativo"], secciones: [
+    ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
+  { id: "finanzas", nombre: "Finanzas y Control", roles: [], secciones: [
+    ["inicio", "Resumen"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
+];
+const ROL_TEXTO = { admin: "administrador", gerencia: "gerencia", comercial: "comercial", operativo: "operativo", usuario: "usuario" };
+
+function App({ usuario: usuarioInicial, onLogout }) {
+  const [usuario, setUsuario] = useState(usuarioInicial);
+  const esGerencia = ["admin", "gerencia"].includes(usuario.rol);
+  const esAdmin = esGerencia; // "ve todo": márgenes, utilidades, configuración
+  const veCostos = esGerencia || ["comercial", "operativo"].includes(usuario.rol);
+  const puedeOperar = esGerencia || usuario.rol === "operativo";
+  const puedeVender = esGerencia || ["comercial", "usuario"].includes(usuario.rol);
+  const deptos = DEPTOS.filter((d) => esGerencia || d.roles.includes(usuario.rol));
+  const [depto, setDepto] = useState(() => {
+    try { const g = localStorage.getItem("depto"); if (deptos.some((d) => d.id === g)) return g; } catch { /* */ }
+    return deptos[0]?.id || "comercial";
+  });
+  const elegirDepto = (id) => { setDepto(id); setView("inicio"); try { localStorage.setItem("depto", id); } catch { /* */ } };
+  const dep = deptos.find((d) => d.id === depto) || deptos[0];
   const [menuUsuario, setMenuUsuario] = useState(false);
   const [menuMas, setMenuMas] = useState(false);
   const [cambiarPass, setCambiarPass] = useState(false);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("inicio");
   const [notif, setNotif] = useState(null);
   const [clientes, setClientes] = useState([]);
   const [loadingClientes, setLoadingClientes] = useState(false);
@@ -347,53 +394,43 @@ function App({ usuario, onLogout }) {
   };
 
   const [filtroCot, setFiltroCot] = useState("");
+  // Ir a una sección (desde tareas o enlaces): en el departamento actual si la tiene; si no, en el primero que la tenga
   const irA = (vista, id) => {
-    if (vista === "ventas" && id) setVentaAbrir(id);
-    if (vista === "compras" && id) setOrdenAbrir(id);
-    if (vista === "cotizaciones-seguir") { setFiltroCot("seguir"); setView("cotizaciones"); return; }
-    if (vista === "cotizaciones") setFiltroCot("");
-    setView(vista);
+    let v = vista;
+    if (vista === "cotizaciones-seguir") { setFiltroCot("seguir"); v = "cotizaciones"; }
+    else if (vista === "cotizaciones") setFiltroCot("");
+    if (vista === "dashboard") v = "inicio";
+    if (vista === "licitaciones" || vista === "cotizar") v = vista;
+    const base = v === "cotizar" ? "cotizaciones" : v;
+    if (!dep.secciones.some(([s]) => s === base)) {
+      const otro = deptos.find((d) => d.secciones.some(([s]) => s === base));
+      if (otro) { setDepto(otro.id); try { localStorage.setItem("depto", otro.id); } catch { /* */ } }
+    }
+    if (v === "ventas" && id) setVentaAbrir(id);
+    if (v === "compras" && id) setOrdenAbrir(id);
+    setView(v);
   };
-  const verVenta = (id) => { setVentaAbrir(id); setView("ventas"); };
-  const verOrden = (id) => { setOrdenAbrir(id); setView("compras"); };
+  const verVenta = (id) => irA("ventas", id);
+  const verOrden = (id) => irA("compras", id);
 
-  const nav = (id, texto, extra, activos = [id]) => (
-    <button className={`nav-btn ${activos.includes(view) ? "active" : ""}`} onClick={() => { setMenuMas(false); if (id === "cotizaciones") setFiltroCot(""); setView(id); }}>{texto}{extra}</button>
-  );
-  // Menú "Más": lo que se usa de vez en cuando
-  const MAS = [["clientes", "Clientes"], ["proveedores", "Proveedores"], ...(esAdmin ? [["gastos", "Gastos"], ["reportes", "Reportes"], ["config", "Configuración"], ["usuarios", "Usuarios"]] : [])];
-  const enMas = MAS.some(([v]) => v === view);
+  const seccionActiva = view === "cotizar" ? "cotizaciones" : view;
 
   return (
     <>
       <div className="app">
         <header className="header">
-          <nav className="header-nav">
-            {nav("dashboard", "Inicio")}
-            {nav("licitaciones", "Oportunidades")}
-            {nav("cotizaciones", "Cotizaciones", borrador.items.length > 0 && <span className="badge" title="Productos en la cotización que estás armando">{borrador.items.length}</span>, ["cotizaciones", "cotizar"])}
-            {nav("ventas", "Ventas")}
-            {nav("compras", "Compras")}
-            {nav("catalogo", "Catálogo")}
-            <div className="menu-mas">
-              <button className={`nav-btn ${enMas ? "active" : ""}`} onClick={() => setMenuMas((m) => !m)}>
-                {enMas ? MAS.find(([v]) => v === view)[1] : "Más"} ▾
+          <nav className="header-nav deptos-nav">
+            {deptos.map((d, k) => (
+              <button key={d.id} className={`depto-btn ${d.id === dep.id ? "active" : ""}`} onClick={() => elegirDepto(d.id)}>
+                <span className="depto-num">{DEPTOS.indexOf(d) + 1}</span>{d.nombre}
               </button>
-              {menuMas && (
-                <>
-                  <div className="menu-fondo" onClick={() => setMenuMas(false)} />
-                  <div className="menu-pop menu-pop-izq">
-                    {MAS.map(([v, t]) => <button key={v} className={view === v ? "activo" : ""} onClick={() => { setMenuMas(false); setView(v); }}>{t}</button>)}
-                  </div>
-                </>
-              )}
-            </div>
+            ))}
           </nav>
           <div className="user-menu">
             <button className="user-btn" onClick={() => setMenuUsuario((m) => !m)}>
               <span className="user-avatar">{usuario.nombre.trim().charAt(0).toUpperCase()}</span>
               <span className="user-nombre">{usuario.nombre.split(" ")[0]}</span>
-              <span className={`rol-badge rol-${usuario.rol}`}>{usuario.rol}</span>
+              <span className={`rol-badge rol-${usuario.rol}`}>{ROL_TEXTO[usuario.rol] || usuario.rol}</span>
             </button>
             {menuUsuario && (
               <>
@@ -403,6 +440,8 @@ function App({ usuario, onLogout }) {
                     <strong>{usuario.nombre}</strong>
                     <span className="mini">{usuario.email}</span>
                   </div>
+                  {esGerencia && <button onClick={() => { setMenuUsuario(false); setView("config"); }}>Configuración</button>}
+                  {esGerencia && <button onClick={() => { setMenuUsuario(false); setView("usuarios"); }}>Usuarios</button>}
                   <button onClick={() => { setMenuUsuario(false); setCambiarPass(true); }}>Cambiar contraseña</button>
                   <button className="peligro" onClick={onLogout}>Cerrar sesión</button>
                 </div>
@@ -410,50 +449,70 @@ function App({ usuario, onLogout }) {
             )}
           </div>
         </header>
+        <nav className="secciones-nav">
+          {dep.secciones.map(([sid, texto]) => (
+            <button key={sid} className={`nav-btn ${seccionActiva === sid ? "active" : ""}`} onClick={() => { if (sid === "cotizaciones") setFiltroCot(""); setView(sid); }}>
+              {texto}{sid === "cotizaciones" && borrador.items.length > 0 && <span className="badge" title="Productos en la cotización que estás armando">{borrador.items.length}</span>}
+            </button>
+          ))}
+          {(view === "config" || view === "usuarios") && <span className="nav-btn active">{view === "config" ? "Configuración" : "Usuarios"}</span>}
+        </nav>
 
         <main className="main">
-          {view === "dashboard" && <Dashboard notify={showNotif} irA={irA} esAdmin={esAdmin} />}
+          {view === "inicio" && dep.id === "comercial" && <InicioDepto depto="comercial" notify={showNotif} irA={irA} />}
+          {view === "inicio" && dep.id === "operativo" && <InicioDepto depto="operativo" notify={showNotif} irA={irA} />}
+          {view === "inicio" && dep.id === "finanzas" && <Dashboard notify={showNotif} irA={irA} esAdmin={esAdmin} depto="finanzas" />}
           {view === "catalogo" && (
-            <Catalogo esAdmin={esAdmin} notify={showNotif} enCotizacion={enCotizacion} onCotizar={cotizarProducto} proveedores={proveedores} />
+            <Catalogo esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} enCotizacion={enCotizacion} onCotizar={puedeVender ? cotizarProducto : null} proveedores={proveedores} />
           )}
           {(view === "cotizar" || view === "cotizaciones") && (
             <div className="chips subpestanas">
-              <button className={`chip ${view === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>＋ Nueva cotización{borrador.items.length > 0 ? ` (${borrador.items.length} productos)` : ""}</button>
+              {puedeVender && <button className={`chip ${view === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>＋ Nueva cotización{borrador.items.length > 0 ? ` (${borrador.items.length} productos)` : ""}</button>}
               <button className={`chip ${view === "cotizaciones" ? "activo" : ""}`} onClick={() => { setFiltroCot(""); setView("cotizaciones"); }}>Cotizaciones guardadas</button>
             </div>
           )}
           {view === "cotizar" && (
-            <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={esAdmin} notify={showNotif}
+            <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={veCostos} notify={showNotif}
               irAClientes={() => setView("clientes")} onGuardada={() => setView("cotizaciones")} />
           )}
           {view === "cotizaciones" && (
-            <Cotizaciones key={filtroCot} filtroInicial={filtroCot} esAdmin={esAdmin} notify={showNotif} verVenta={verVenta}
+            <Cotizaciones key={filtroCot} filtroInicial={filtroCot} esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} verVenta={verVenta}
               onEditar={(b) => { setBorrador(b); setView("cotizar"); }}
               onVenta={(v) => verVenta(v.id)} />
           )}
           {view === "licitaciones" && (
-            <Licitaciones esAdmin={esAdmin} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
+            <Licitaciones esAdmin={puedeVender} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
               onCotizar={(b) => { setBorrador(b); setView("cotizar"); }} />
           )}
           {view === "ventas" && (
-            <Ventas notify={showNotif} esAdmin={esAdmin} clientes={clientes} abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />
+            <Ventas key={dep.id} modo={dep.id} notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} puedeVender={puedeVender} clientes={clientes}
+              abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />
           )}
-          {view === "clientes" && <Clientes esAdmin={esAdmin} clientes={clientes} loading={loadingClientes} recargar={fetchClientes} notify={showNotif} />}
+          {view === "facturacion" && (
+            <Proximamente titulo="Facturación" texto="Aquí aparecerán las ventas que Operativo marque como listas para despacho o retiro, para emitir su factura. Una venta podrá tener varias facturas. Se activa en el paso 3 (Ventas, Operativo y Facturación)." />
+          )}
+          {view === "despachos" && (
+            <Proximamente titulo="Despachos" texto="Aquí Operativo verá el estado de cada pedido (compras por realizar, compra recibida, listo para despacho o retiro, despachada, entregada) y avisará a Comercial para facturar. Se activa en el paso 3." />
+          )}
+          {view === "clientes" && <Clientes esAdmin={esGerencia} clientes={clientes} loading={loadingClientes} recargar={fetchClientes} notify={showNotif} />}
           {view === "compras" && (
-            <Compras notify={showNotif} esAdmin={esAdmin} proveedores={proveedores} onPreciosCambio={invalidarProductos}
+            <Compras notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} proveedores={proveedores} onPreciosCambio={invalidarProductos}
               abrirOrdenId={ordenAbrir} onAbierta={() => setOrdenAbrir(null)} />
           )}
           {view === "proveedores" && (
-            <Proveedores esAdmin={esAdmin} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
+            <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
-          {view === "gastos" && esAdmin && <Gastos notify={showNotif} />}
-          {view === "reportes" && esAdmin && <Reportes notify={showNotif} />}
-          {view === "config" && esAdmin && <Config notify={showNotif} />}
-          {view === "usuarios" && esAdmin && <Usuarios notify={showNotif} yo={usuario} />}
+          {view === "gastos" && esGerencia && <Gastos notify={showNotif} />}
+          {view === "reportes" && esGerencia && <Reportes notify={showNotif} />}
+          {view === "config" && esGerencia && <Config notify={showNotif} />}
+          {view === "usuarios" && esGerencia && <Usuarios notify={showNotif} yo={usuario} />}
         </main>
       </div>
 
       {cambiarPass && <CambiarPassword notify={showNotif} onClose={() => setCambiarPass(false)} />}
+      {usuario.debe_cambiar_clave && (
+        <CambiarPassword obligatorio notify={showNotif} onClose={() => setUsuario((u) => ({ ...u, debe_cambiar_clave: false }))} onSalir={onLogout} />
+      )}
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
     </>
   );

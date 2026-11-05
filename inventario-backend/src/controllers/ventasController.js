@@ -14,7 +14,7 @@ const {
 } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { normProv } = require("../services/precios");
-const { esAdmin } = require("../middlewares/auth");
+const { esAdmin, tieneRol } = require("../middlewares/auth");
 const { validarEmpresa } = require("../services/empresas");
 
 const SIN_PROVEEDOR = "SIN PROVEEDOR";
@@ -26,7 +26,8 @@ const sinCostos = (v) => {
   j.items = (j.items || []).map(({ costo, proveedor, ...resto }) => resto);
   return j;
 };
-const verVenta = (req, v) => (esAdmin(req) ? (typeof v.toJSON === "function" ? v.toJSON() : v) : sinCostos(v));
+// Comercial ve la venta sin costos ni proveedores; Operativo los necesita para comprar; gerencia ve todo
+const verVenta = (req, v) => (tieneRol(req, "operativo") ? (typeof v.toJSON === "function" ? v.toJSON() : v) : sinCostos(v));
 
 const numeroVenta = (id) => `V-${String(id).padStart(4, "0")}`;
 
@@ -155,7 +156,9 @@ const getVenta = handler(async (req, res) => {
   const venta = await Venta.findByPk(req.params.id);
   if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
   const pagos = await Pago.findAll({ where: { venta_id: venta.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
-  const extra = esAdmin(req) ? await resumenVenta(venta) : {};
+  let extra = tieneRol(req, "operativo") ? await resumenVenta(venta) : {};
+  // Márgenes y utilidad son de Finanzas (gerencia)
+  if (extra.resumen && !esAdmin(req)) extra = { ...extra, resumen: undefined, gastos: [] };
   const proyecto = venta.proyecto_id ? await Proyecto.findByPk(venta.proyecto_id, { attributes: ["id", "numero", "nombre"] }) : null;
   res.json({ ok: true, data: { ...verVenta(req, venta), pagos, proyecto, ...extra } });
 });

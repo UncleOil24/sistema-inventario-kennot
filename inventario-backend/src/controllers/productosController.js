@@ -6,7 +6,7 @@ const RegistroCambio = require("../models/RegistroCambio");
 const { handler, ErrorNegocio } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { recalcular, precioNetoUnitario, origenDe, registrar, normProv, SQL_AVISO } = require("../services/precios");
-const { esAdmin } = require("../middlewares/auth");
+const { esAdmin, veCostos } = require("../middlewares/auth");
 
 // Campos de costo que el rol "usuario" no ve
 const CAMPOS_COSTO = [
@@ -29,7 +29,7 @@ const vista = (req, params) => (p) => {
   j.precio_convenio = precioVenta(j.precio_compra, "convenio", params);
   j.precio_particular = precioVenta(j.precio_compra, "particular", params);
   CAMPOS_OCULTOS.forEach((c) => delete j[c]);
-  if (!esAdmin(req)) CAMPOS_COSTO.forEach((c) => delete j[c]);
+  if (!veCostos(req)) CAMPOS_COSTO.forEach((c) => delete j[c]);
   return j;
 };
 
@@ -127,7 +127,7 @@ const crearProducto = handler(async (req, res) => {
   const producto = await sequelize.transaction(async (t) => {
     const p = await Producto.create(datos, { transaction: t });
     // Precio inicial opcional (solo admin): queda en el historial
-    if (esAdmin(req) && Number(req.body.precio_compra) > 0 && req.body.proveedor) {
+    if (veCostos(req) && Number(req.body.precio_compra) > 0 && req.body.proveedor) {
       await PrecioProveedor.create({
         producto_id: p.id, proveedor: normProv(req.body.proveedor), precio: Math.round(Number(req.body.precio_compra)),
         documento: req.body.documento || null, origen: await origenDe(req.body.proveedor, t), creado_por: req.usuario.nombre,

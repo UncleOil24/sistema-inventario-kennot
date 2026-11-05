@@ -14,7 +14,7 @@ const FILTROS = [
   ["antiguo", "Precio antiguo (volver a cotizar)"],
 ];
 
-export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, proveedores }) {
+export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, onCotizar, proveedores }) {
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
@@ -134,9 +134,9 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
                       <div className="actions">
                         {esAdmin && <button className="btn btn-ghost btn-sm" onClick={() => setPrecios(p)}>Precios</button>}
                         <button className="btn btn-ghost btn-sm" onClick={() => setEditar(p)}>Editar</button>
-                        <button className={`btn btn-sm ${enCotizacion(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => onCotizar(p)}>
+                        {onCotizar && <button className={`btn btn-sm ${enCotizacion(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => onCotizar(p)}>
                           {enCotizacion(p.id) ? "✓ En cot." : "+ Cotizar"}
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>
@@ -150,16 +150,16 @@ export default function Catalogo({ esAdmin, notify, enCotizacion, onCotizar, pro
         {productos.length > mostrar && <button className="btn btn-ghost btn-sm" onClick={() => setMostrar((m) => m + POR_PAGINA * 2)}>Ver más</button>}
       </div>
 
-      {editar && <EditarProducto producto={editar} esAdmin={esAdmin} categorias={categorias} proveedores={proveedores} notify={notify}
+      {editar && <EditarProducto producto={editar} esAdmin={esAdmin} esGerencia={esGerencia} categorias={categorias} proveedores={proveedores} notify={notify}
         onClose={() => setEditar(null)} onGuardado={() => { setEditar(null); refrescar(); }} />}
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} onClose={() => { setDocumento(false); refrescar(); }} />}
-      {precios && <PreciosProducto producto={precios} proveedores={proveedores} notify={notify}
+      {precios && <PreciosProducto producto={precios} puedeConfirmar={esGerencia} proveedores={proveedores} notify={notify}
         onClose={() => setPrecios(null)} onCambio={refrescar} />}
     </>
   );
 }
 
-function EditarProducto({ producto, esAdmin, categorias, proveedores, notify, onClose, onGuardado }) {
+function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores, notify, onClose, onGuardado }) {
   const nuevo = !producto.id;
   const [form, setForm] = useState({ ...producto, precio_compra: "", proveedor: "" });
   const [guardando, setGuardando] = useState(false);
@@ -191,7 +191,7 @@ function EditarProducto({ producto, esAdmin, categorias, proveedores, notify, on
   return (
     <Modal titulo={nuevo ? "// Nuevo producto" : `// Editar N° ${producto.codigo ?? ""}`} onClose={onClose}
       footer={<>
-        {!nuevo && esAdmin && <button className="btn btn-danger" onClick={desactivar}>Eliminar</button>}
+        {!nuevo && esGerencia && <button className="btn btn-danger" onClick={desactivar}>Eliminar</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar"}</button>
       </>}>
@@ -232,7 +232,7 @@ function EditarProducto({ producto, esAdmin, categorias, proveedores, notify, on
 
 const PRECIO_VACIO = { proveedor: "", precio: "", con_iva: false, total_linea: "", cantidad: "", fecha: "", documento: "", descripcion_proveedor: "", marca: "", calce: "exacto" };
 
-function PreciosProducto({ producto: inicial, proveedores, notify, onClose, onCambio }) {
+function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notify, onClose, onCambio }) {
   const [producto, setProducto] = useState(inicial);
   const [hist, setHist] = useState(null);
   const [form, setForm] = useState({ ...PRECIO_VACIO, fecha: hoyISO() });
@@ -292,8 +292,8 @@ function PreciosProducto({ producto: inicial, proveedores, notify, onClose, onCa
       </div>
       {producto.revisar && !producto.confirmado && <div className="aviso" style={{ marginBottom: 0 }}>REVISAR: {producto.revisar}</div>}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {!sinPrecio && !producto.confirmado && <button className="btn btn-success btn-sm" onClick={() => accion(() => api(`/productos/${producto.id}/confirmar`, { method: "POST", body: {} }), "✓ Precio confirmado")}>✓ Confirmar precio vigente</button>}
-        {producto.confirmado && <button className="btn btn-ghost btn-sm" onClick={() => accion(() => api(`/productos/${producto.id}/desconfirmar`, { method: "POST" }), "Confirmación quitada")}>Quitar confirmación</button>}
+        {puedeConfirmar && !sinPrecio && !producto.confirmado && <button className="btn btn-success btn-sm" onClick={() => accion(() => api(`/productos/${producto.id}/confirmar`, { method: "POST", body: {} }), "✓ Precio confirmado")}>✓ Confirmar precio vigente</button>}
+        {puedeConfirmar && producto.confirmado && <button className="btn btn-ghost btn-sm" onClick={() => accion(() => api(`/productos/${producto.id}/desconfirmar`, { method: "POST" }), "Confirmación quitada")}>Quitar confirmación</button>}
         <span className="mini" style={{ alignSelf: "center" }}>Un precio confirmado solo lo reemplaza una cotización nueva más barata.</span>
       </div>
 
@@ -365,7 +365,7 @@ function PreciosProducto({ producto: inicial, proveedores, notify, onClose, onCa
                     {pr.descartado
                       ? <button className="btn btn-ghost btn-sm" onClick={() => accion(() => api(`/precios/${pr.id}/restaurar`, { method: "POST" }), "Precio restaurado")}>Restaurar</button>
                       : <>
-                        <button className="btn btn-ghost btn-sm" title="Usar y confirmar este precio" onClick={() => accion(() => api(`/productos/${producto.id}/confirmar`, { method: "POST", body: { precio_id: pr.id } }), `✓ Confirmado ${pr.proveedor}`)}>Usar</button>
+                        {puedeConfirmar && <button className="btn btn-ghost btn-sm" title="Usar y confirmar este precio" onClick={() => accion(() => api(`/productos/${producto.id}/confirmar`, { method: "POST", body: { precio_id: pr.id } }), `✓ Confirmado ${pr.proveedor}`)}>Usar</button>}
                         <button className="btn btn-danger btn-sm" title="Descartar" onClick={() => descartar(pr)}>✕</button>
                       </>}
                   </div>

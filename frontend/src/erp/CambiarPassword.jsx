@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Modal } from "./ui";
 import { api, setToken } from "./lib";
 
-export default function CambiarPassword({ notify, onClose }) {
+export default function CambiarPassword({ notify, onClose, obligatorio, onSalir }) {
   const [f, setF] = useState({ actual: "", nueva: "", repetir: "" });
   const [guardando, setGuardando] = useState(false);
   const noCoinciden = f.repetir && f.nueva !== f.repetir;
@@ -19,16 +19,17 @@ export default function CambiarPassword({ notify, onClose }) {
   };
 
   return (
-    <Modal titulo="// Cambiar contraseña" onClose={onClose}
+    <Modal titulo={obligatorio ? "// Crea tu contraseña" : "// Cambiar contraseña"} onClose={obligatorio ? () => {} : onClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        {obligatorio ? <button className="btn btn-ghost" onClick={onSalir}>Salir</button> : <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>}
         <button className="btn btn-primary" onClick={guardar}
           disabled={guardando || !f.actual || f.nueva.length < 8 || f.nueva !== f.repetir}>
           {guardando ? "Guardando..." : "Cambiar"}
         </button>
       </>}>
+      {obligatorio && <div className="aviso" style={{ marginBottom: 0 }}>Bienvenido/a. Entraste con una clave temporal: crea tu propia contraseña para seguir.</div>}
       <div className="field">
-        <label>Contraseña actual</label>
+        <label>{obligatorio ? "Clave temporal (la que te entregaron)" : "Contraseña actual"}</label>
         <input type="password" autoComplete="current-password" value={f.actual} onChange={(e) => setF({ ...f, actual: e.target.value })} />
       </div>
       <div className="field">

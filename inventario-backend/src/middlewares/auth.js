@@ -37,11 +37,21 @@ const requiereAuth = async (req, res, next) => {
   }
 };
 
-const esAdmin = (req) => req.usuario?.rol === "admin";
+// Roles por departamento. "admin" y "gerencia" ven y hacen todo.
+//   comercial  -> Dpto. 1 (licitaciones, cotizaciones, ventas, facturación, clientes, catálogo)
+//   operativo  -> Dpto. 2 (ventas por ejecutar, compras, proveedores, despachos)
+//   usuario    -> rol antiguo: como comercial, pero sin ver costos
+const esGerencia = (req) => ["admin", "gerencia"].includes(req.usuario?.rol);
+const esAdmin = esGerencia; // nombre antiguo: "ve todo" (márgenes, utilidades, configuración)
+const tieneRol = (req, ...roles) => esGerencia(req) || roles.includes(req.usuario?.rol);
+// Costos de compra y proveedores (catálogo, cotizaciones): todos menos el rol antiguo "usuario"
+const veCostos = (req) => tieneRol(req, "comercial", "operativo");
 
-const soloAdmin = (req, res, next) => {
-  if (!esAdmin(req)) return res.status(403).json({ ok: false, error: "Solo un administrador puede hacer esto" });
+const permite = (...roles) => (req, res, next) => {
+  if (!tieneRol(req, ...roles)) return res.status(403).json({ ok: false, error: "Tu departamento no tiene acceso a esta acción" });
   next();
 };
+const soloAdmin = permite(); // solo gerencia
+const soloGerencia = soloAdmin;
 
-module.exports = { firmarToken, requiereAuth, soloAdmin, esAdmin };
+module.exports = { firmarToken, requiereAuth, soloAdmin, soloGerencia, esAdmin, esGerencia, tieneRol, veCostos, permite };

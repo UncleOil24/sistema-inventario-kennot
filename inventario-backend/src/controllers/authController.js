@@ -8,7 +8,7 @@ const validarPassword = (pw) => {
   if (!pw || String(pw).length < MIN_PASSWORD) throw new ErrorNegocio(`La contraseña debe tener al menos ${MIN_PASSWORD} caracteres`);
 };
 const hashear = (pw) => bcrypt.hash(String(pw), 10);
-const publico = (u) => ({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo, ultimo_acceso: u.ultimo_acceso });
+const publico = (u) => ({ id: u.id, nombre: u.nombre, email: u.email, rol: u.rol, activo: u.activo, ultimo_acceso: u.ultimo_acceso, debe_cambiar_clave: !!u.debe_cambiar_clave });
 
 // --- Freno simple contra fuerza bruta: 5 intentos fallidos por IP+email cada 15 min ---
 const VENTANA_MS = 15 * 60 * 1000;
@@ -59,7 +59,8 @@ const cambiarPassword = handler(async (req, res) => {
   if (!(await bcrypt.compare(String(actual || ""), usuario.password_hash))) {
     throw new ErrorNegocio("La contraseña actual no es correcta");
   }
-  await usuario.update({ password_hash: await hashear(nueva), token_version: usuario.token_version + 1 });
+  if (String(actual) === String(nueva)) throw new ErrorNegocio("La nueva contraseña debe ser distinta de la actual");
+  await usuario.update({ password_hash: await hashear(nueva), token_version: usuario.token_version + 1, debe_cambiar_clave: false });
   // Devuelve un token nuevo para que esta sesión siga abierta (las demás se cierran)
   res.json({ ok: true, data: { token: firmarToken(usuario) } });
 });

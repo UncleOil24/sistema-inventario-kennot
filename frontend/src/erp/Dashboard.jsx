@@ -47,11 +47,49 @@ const compacto = (n) => {
   return `$${Math.round(n)}`;
 };
 
-export default function Dashboard({ notify, irA, esAdmin }) {
+// Inicio de Comercial y de Operativo: solo sus tareas y, en Comercial, el total adjudicado (sin información financiera)
+export function InicioDepto({ depto, notify, irA }) {
+  const [data, setData] = useState(null);
+  const cargar = useCallback(async () => {
+    try { setData(await api("/dashboard?meses=3")); } catch (e) { notify(e.message, "danger"); }
+  }, [notify]);
+  useEffect(() => { cargar(); }, [cargar]);
+  if (!data) return <Cargando />;
+  const tareas = (data.tareas || []).filter((t) => t.depto === depto);
+  const adj = data.adjudicado;
+  const tarjeta = (titulo, r) => (
+    <div className="panel adjudicado">
+      <div className="panel-titulo">{titulo} <span className="mini">(con IVA)</span></div>
+      <div className="adj-fila"><span className="estado estado-ok">Kenott</span><strong>{fmt(r.kenott.total)}</strong><span className="mini">{r.kenott.cantidad} venta(s)</span></div>
+      <div className="adj-fila"><span className="estado estado-info">Tactics</span><strong>{fmt(r.tactics.total)}</strong><span className="mini">{r.tactics.cantidad} venta(s)</span></div>
+      <div className="adj-fila adj-total"><span>Total ambas</span><strong>{fmt(r.ambas.total)}</strong><span className="mini">{r.ambas.cantidad} venta(s)</span></div>
+    </div>
+  );
+  return (
+    <>
+      <QueHacer tareas={tareas} irA={irA} />
+      {depto === "comercial" && adj && (
+        <div className="dash-grid">
+          {tarjeta(`Adjudicado esta semana (desde el ${new Date(`${adj.desde_semana}T12:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" })})`, adj.semana)}
+          {tarjeta(`Adjudicado en ${mesLargo(data.mes_actual.mes)}`, adj.mes)}
+        </div>
+      )}
+      {depto === "operativo" && (
+        <div className="kpis">
+          <Kpi label="Ventas por comprar" valor={tareas.filter((t) => t.tipo === "comprar").length} sub="sin órdenes de compra" onClick={() => irA("ventas")} />
+          <Kpi label="Pedidos por recibir" valor={tareas.filter((t) => t.tipo === "recibir").length} sub="órdenes pedidas hace 2 días o más" onClick={() => irA("compras")} />
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function Dashboard({ notify, irA, esAdmin, depto }) {
   const [data, setData] = useState(null);
   const [meses, setMeses] = useState(6);
 
-  const [verMas, setVerMas] = useState(() => { try { return localStorage.getItem("inicio_ver_mas") === "1"; } catch { return false; } });
+  const [verMasGuardado, setVerMas] = useState(() => { try { return localStorage.getItem("inicio_ver_mas") === "1"; } catch { return false; } });
+  const verMas = depto === "finanzas" || verMasGuardado; // en Finanzas se ve todo
   const cambiarVerMas = () => setVerMas((v) => { try { localStorage.setItem("inicio_ver_mas", v ? "0" : "1"); } catch { /* */ } return !v; });
   const cargar = useCallback(async () => {
     try { setData(await api(`/dashboard?meses=${meses}`)); }
@@ -64,7 +102,7 @@ export default function Dashboard({ notify, irA, esAdmin }) {
 
   return (
     <>
-      <QueHacer tareas={data.tareas || []} irA={irA} />
+      <QueHacer tareas={(data.tareas || []).filter((t) => !depto || t.depto === depto)} irA={irA} />
 
       <div className="kpis">
         <Kpi label={`Ventas de ${mesLargo(m.mes)} (neto)`} valor={fmt(m.ventas)} sub={`${m.cantidad} venta(s)`} acento onClick={() => irA("ventas")} />
@@ -73,9 +111,9 @@ export default function Dashboard({ notify, irA, esAdmin }) {
         {esAdmin && <Kpi label="Debemos (por pagar)" valor={fmt(cxp.total)} sub={cxp.vencido > 0 ? `⚠ ${fmt(cxp.vencido)} ya vencido` : `${cxp.documentos} compra(s) por pagar`} alerta={cxp.vencido > 0} onClick={() => irA("compras")} />}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 16px" }}>
+      {depto !== "finanzas" && <div style={{ display: "flex", justifyContent: "center", margin: "4px 0 16px" }}>
         <button className="btn btn-ghost" onClick={cambiarVerMas}>{verMas ? "▲ Ocultar números y gráficos" : "▼ Ver todos los números y gráficos"}</button>
-      </div>
+      </div>}
 
       {verMas && <>
       <div className="toolbar" style={{ justifyContent: "space-between" }}>
