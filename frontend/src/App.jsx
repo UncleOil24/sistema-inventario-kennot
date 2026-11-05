@@ -75,6 +75,11 @@ const styles = `
   .table tr:last-child td { border-bottom: none; }
   .table tr:hover td { background: rgba(255,255,255,0.02); }
   .id-cell { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .fila-similar td { background: rgba(232,197,71,0.10); }
+  .fila-nuevo td { background: rgba(220,80,80,0.12); }
+  .desc-cliente { width: 100%; background: transparent; border: 1px dashed var(--border); border-radius: 4px; padding: 4px 6px; color: var(--text); font-size: 13px; }
+  .desc-cliente.nota { margin-top: 4px; font-size: 11px; font-family: var(--mono); color: var(--text2, var(--text3)); }
+  .caso-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 4px; font-size: 11px; padding: 1px 4px; }
   .presu-fila { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; }
   .presu-fila.presu-pasa { border-color: var(--danger); background: rgba(220,80,80,0.06); }
   .presu-cab { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }

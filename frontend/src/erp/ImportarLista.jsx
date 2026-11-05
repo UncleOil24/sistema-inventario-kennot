@@ -73,18 +73,28 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
     } catch (e) { notify(`${n} agregados; error en el siguiente: ${e.message}`, "danger"); }
     finally { invalidarProductos(); setCreandoTodas(false); }
   };
-  const elegidas = lineas.filter((l) => l.incluir && l.producto);
+  const elegidas = lineas.filter((l) => l.incluir);
   const revisar = lineas.filter((l) => l.calce === "parecido" || l.calce === "sin_producto" || (l.producto && !(precioSegun(l.producto, tipo) > 0))).length;
 
   const agregar = () => {
     // Si el cliente pidió el mismo producto en dos líneas, se suman las cantidades
+    // Cada línea queda en su caso (M20): mismo producto, similar (amarillo) o no está en catálogo (rojo)
     const porProducto = new Map();
+    const sinProd = [];
     for (const l of elegidas) {
+      if (!l.producto) {
+        sinProd.push({ producto_id: null, clave: `n${Date.now()}${l.i}`, nombre: l.descripcion, descripcion_cliente: l.descripcion, unidad: (l.unidad || "UNIDAD").toUpperCase(), cantidad: Number(l.cantidad) || 1, precio: "", costo: 0, caso: "nuevo", auto: false });
+        continue;
+      }
       const previa = porProducto.get(l.producto.id);
       if (previa) { previa.cantidad += Number(l.cantidad) || 0; previa.descripcion_cliente += ` / ${l.descripcion}`; continue; }
-      porProducto.set(l.producto.id, { ...lineaDesdeProducto(l.producto, tipo), cantidad: Number(l.cantidad) || 1, descripcion_cliente: l.descripcion });
+      const similar = l.calce === "parecido";
+      porProducto.set(l.producto.id, {
+        ...lineaDesdeProducto(l.producto, tipo), cantidad: Number(l.cantidad) || 1, descripcion_cliente: l.descripcion,
+        caso: similar ? "similar" : "mismo", nota_interna: similar ? `Cotizado con similar: ${l.producto.nombre}${l.nota ? ` (${l.nota})` : ""}` : null,
+      });
     }
-    onAgregar([...porProducto.values()], res);
+    onAgregar([...porProducto.values(), ...sinProd], res);
   };
 
   return (
@@ -123,7 +133,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
                   const alerta = l.calce === "parecido" || l.calce === "sin_producto" || (l.producto && !(precio > 0));
                   return (
                     <tr key={l.i} className={alerta ? "fila-alerta" : ""}>
-                      <td><input type="checkbox" checked={l.incluir} disabled={!l.producto} onChange={(e) => set(l.i, { incluir: e.target.checked })} /></td>
+                      <td><input type="checkbox" checked={l.incluir} title={l.producto ? "" : "Se agrega como línea que no está en catálogo (rojo), con precio a mano"} onChange={(e) => set(l.i, { incluir: e.target.checked })} /></td>
                       <td>{l.descripcion}{l.unidad && <div className="mini">{l.unidad}</div>}</td>
                       <td><input className="qty-input" type="number" min="0" step="any" value={l.cantidad} onChange={(e) => set(l.i, { cantidad: e.target.value })} /></td>
                       <td><Estado valor={l.calce} />{l.nota && !/^placeholder$/i.test(l.nota) && <div className="mini" style={{ maxWidth: 200 }}>{l.nota}</div>}</td>

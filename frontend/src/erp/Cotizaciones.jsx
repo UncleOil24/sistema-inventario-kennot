@@ -62,12 +62,13 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
           cantidad: i.cantidad, precio: i.precio, auto: false,
           convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
           costo: i.costo, proveedor: i.proveedor, descripcion_cliente: i.descripcion_cliente, grupo: i.grupo || "",
+          caso: i.caso || (i.producto_id ? "mismo" : "nuevo"), clave: i.clave, nota_interna: i.nota_interna || "",
         };
       });
       onEditar({
         id: c.id, numero: c.numero, empresa: c.empresa || "kenott", empresa_original: c.empresa || "kenott", cliente_id: c.cliente_id || "", tipo_precio: c.tipo_precio,
         nombre_cotizacion: c.nombre_cotizacion || "", validez_dias: c.validez_dias || 30, notas: c.notas || "", archivo_cliente: c.archivo_cliente || "", items,
-        id_solicitud: c.id_solicitud || "", presupuesto: c.presupuesto || null, plazo_entrega: c.plazo_entrega || "", cliente_nombre_doc: c.cliente || "", anterior: c.anterior,
+        id_solicitud: c.id_solicitud || "", presupuesto: c.presupuesto || null, lugar_entrega: c.lugar_entrega || "", plazo_entrega: c.plazo_entrega || "", cliente_nombre_doc: c.cliente || "", anterior: c.anterior,
       });
     } catch (e) { notify(e.message, "danger"); }
   };
@@ -114,7 +115,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                     <Estado valor={c.tipo_precio} />
                     <Estado valor={c.estado} />
                     {c.motivo_estado && c.estado !== "cotizacion" && <span>{c.motivo_estado}</span>}
-                    {esAdmin && c.margen !== undefined && <span>margen {fmt(c.margen)} ({c.margen_pct}%)</span>}
+                    {esAdmin && c.margen !== undefined && <span>margen {fmt(c.margen)} ({c.margen_pct}%){c.lineas_sin_costo ? ` · ${c.lineas_sin_costo} sin costo` : ""}</span>}
                   </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
@@ -123,6 +124,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                     <button className="btn btn-ghost btn-sm" onClick={() => setAbierta(c)}>Ver</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => pdf(c)}>↓ PDF</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => excel(c)}>↓ Excel</button>
+                    {esAdmin && <button className="btn btn-ghost btn-sm" title="Hoja de referencia interna con costos y productos usados: no se envía al cliente" onClick={() => descargar(`/cotizaciones/${c.id}/interna`, `INTERNA_${idCot(c)}.xlsx`).catch((e) => notify(e.message, "danger"))}>↓ Interna</button>}
                     {["borrador", "cotizacion"].includes(c.estado) && <button className="btn btn-ghost btn-sm" onClick={() => editar(c)}>Editar</button>}
                     {c.estado === "borrador" && <button className="btn btn-ghost btn-sm" onClick={() => emitir(c)}>Emitir</button>}
                     {c.estado === "cotizacion" && <>
@@ -170,9 +172,10 @@ function DetalleCotizacion({ cot, esAdmin, onClose, onVencer }) {
             {cot.items.map((i, k) => {
               const m = (Number(i.precio) - Number(i.costo || 0)) * Number(i.cantidad);
               return (
-                <tr key={k} className={!(Number(i.precio) > 0) ? "fila-alerta" : ""}>
+                <tr key={k} className={i.caso === "nuevo" || !i.producto_id ? "fila-nuevo" : i.caso === "similar" ? "fila-similar" : !(Number(i.precio) > 0) ? "fila-alerta" : ""}>
                   <td className="id-cell">{i.codigo ?? ""}</td>
-                  <td>{i.nombre}{i.descripcion_cliente && <div className="mini">Cliente: {i.descripcion_cliente}</div>}</td>
+                  <td>{i.descripcion_cliente || i.nombre}
+                    <div className="mini">{!i.producto_id ? "No está en catálogo" : `${i.caso === "similar" ? "Similar" : "Nuestro"}: ${i.nombre}`}{esAdmin && i.nota_interna ? ` · ${i.nota_interna}` : ""}</div></td>
                   <td className="mini">{i.cantidad} {i.unidad}</td>
                   <td className="price-cell">{fmt(i.precio)}</td>
                   <td className="price-cell">{fmt(i.precio * i.cantidad)}</td>

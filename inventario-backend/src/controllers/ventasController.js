@@ -207,6 +207,8 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
     if (!cot) throw new ErrorNegocio("Cotización no encontrada", 404);
     if (cot.estado === "aceptada" || cot.venta_id) throw new ErrorNegocio("Esta cotización ya fue convertida en venta");
     if (cot.estado === "borrador") throw new ErrorNegocio("La cotización está en borrador: emítela antes de convertirla en venta");
+    const sinProducto = (cot.items || []).filter((i) => !i.producto_id);
+    if (sinProducto.length) throw new ErrorNegocio(`Hay ${sinProducto.length} línea(s) que no están en el catálogo (en rojo): asócialas a un producto (o agrégalo al catálogo) en la cotización antes de convertirla en venta, para poder comprarlas. Ej: "${sinProducto[0].descripcion_cliente || sinProducto[0].nombre}"`);
 
     let cliente_id = cot.cliente_id || req.body?.cliente_id || null;
     if (!cliente_id && cot.cliente) {
