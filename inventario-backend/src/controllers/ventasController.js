@@ -54,9 +54,14 @@ const crearVentaEnTransaccion = async (datos, t) => {
   let cliente_nombre = datos.cliente_nombre || null;
   let tipo = datos.tipo_precio || "convenio";
   let codigo_cliente = null;
+  let fichaCli = null;
   if (datos.cliente_id) {
     const c = await Cliente.findByPk(datos.cliente_id, { transaction: t });
     if (!c) throw new ErrorNegocio("Cliente no encontrado", 404);
+    fichaCli = c;
+    if (c.estado_credito === "suspendido" && !datos.forzar && !datos.pagada_al_contado) {
+      throw new ErrorNegocio(`${c.nombre} tiene el crédito suspendido (deuda vencida). ¿Registrar la venta igual?`, 409);
+    }
     // Cliente general: se respeta el nombre escrito para esta venta
     cliente_nombre = c.codigo === "CG" && datos.cliente_nombre ? datos.cliente_nombre : c.nombre;
     codigo_cliente = c.codigo;
@@ -83,8 +88,13 @@ const crearVentaEnTransaccion = async (datos, t) => {
   const totales = calcularTotales(itemsFinal);
   const costo_total = itemsFinal.reduce((s, i) => s + i.costo * i.cantidad, 0);
 
-  const venc = datos.fecha_vencimiento
-    || (Number(datos.dias_credito) > 0 ? sumarDias(datos.dias_credito) : null);
+  // Plazo de pago: el indicado en la venta o el de la ficha del cliente (nunca 30 días para todos)
+  const plazo = datos.pagada_al_contado ? 0
+    : datos.dias_credito !== undefined && datos.dias_credito !== null && datos.dias_credito !== "" ? Math.max(0, Math.round(Number(datos.dias_credito) || 0))
+    : fichaCli ? Number(fichaCli.plazo_pago_dias) : 30;
+  const base = datos.base_vencimiento === "recepcion" || (!datos.base_vencimiento && fichaCli?.base_vencimiento === "recepcion") ? "recepcion" : "factura";
+  // Vencimiento provisorio desde hoy; se corrige al registrar la factura o la recepción conforme
+  const venc = datos.fecha_vencimiento || (plazo > 0 ? sumarDias(plazo) : null);
 
   const venta = await Venta.create({
     cliente_id: datos.cliente_id || null,
@@ -95,6 +105,8 @@ const crearVentaEnTransaccion = async (datos, t) => {
     // ID del cliente o de la solicitud (ventas sin OC se identifican con él)
     id_solicitud: String(datos.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null),
     fecha_vencimiento: venc,
+    plazo_pago_dias: plazo,
+    base_vencimiento: base,
     notas: datos.notas || null, // la factura no se pide al crear: se registra después en Facturación
     creado_por: datos.creado_por || null,
     items: itemsFinal,
@@ -274,6 +286,15 @@ const actualizarDatos = handler(async (req, res) => {
   if ("orden_compra_cliente" in req.body) await ocLibre(req.body.orden_compra_cliente, v.id);
   const cambios = {};
   for (const c of ["orden_compra_cliente", "id_solicitud", "fecha_vencimiento", "notas"]) if (c in req.body) cambios[c] = String(req.body[c] ?? "").trim() || null;
+  // Plazo de pago de esta venta (si la OC o las bases dicen otro): recalcula el vencimiento
+  if ("plazo_pago_dias" in req.body || "base_vencimiento" in req.body) {
+    const plazo = "plazo_pago_dias" in req.body ? Math.max(0, Math.round(Number(req.body.plazo_pago_dias) || 0)) : v.plazo_pago_dias;
+    const base = "base_vencimiento" in req.body ? (req.body.base_vencimiento === "recepcion" ? "recepcion" : "factura") : v.base_vencimiento;
+    Object.assign(cambios, { plazo_pago_dias: plazo, base_vencimiento: base });
+    const [primera] = await Factura.findAll({ where: { venta_id: v.id }, order: [["fecha", "ASC"]], limit: 1 });
+    const desde = base === "recepcion" ? v.entrega_fecha : primera?.fecha;
+    if (desde && !("fecha_vencimiento" in req.body)) cambios.fecha_vencimiento = sumarDesde(desde, plazo);
+  }
   await v.update(cambios);
   res.json({ ok: true, data: verVenta(req, v) });
 });
@@ -414,6 +435,10 @@ const generarOrdenes = handler(async (req, res) => {
 // --- Recorrido de la venta: aceptar, confirmar, facturar, despachar, entregar ---------------
 
 const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+const sumarDesde = (iso, dias) => {
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + Number(dias || 0))).toISOString().slice(0, 10);
+};
 const conVenta = (fn) => handler(async (req, res) => {
   const venta = await sequelize.transaction(async (t) => {
     const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
@@ -460,6 +485,8 @@ const entregarVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "despachada", "lista");
   await v.update({
     etapa: "entregada", entrega_fecha: req.body?.fecha || hoy(), recibido_por: String(req.body?.recibido_por || "").trim() || null,
+    // Plazo contado desde la recepción conforme
+    ...(v.base_vencimiento === "recepcion" && v.plazo_pago_dias != null ? { fecha_vencimiento: sumarDesde(req.body?.fecha || hoy(), v.plazo_pago_dias) } : {}),
     ...(v.despacho_fecha ? {} : { despacho_fecha: req.body?.fecha || hoy(), despacho_por: req.usuario.nombre }),
   }, { transaction: t });
 });
@@ -482,7 +509,10 @@ const recalcularFacturas = async (v, t) => {
   const facturas = await Factura.findAll({ where: { venta_id: v.id }, order: [["fecha", "ASC"], ["id", "ASC"]], transaction: t });
   const monto = facturas.reduce((s, f) => s + Number(f.monto), 0);
   const estado = !facturas.length ? "sin_factura" : monto >= Number(v.total) - 1 ? "facturada" : "parcial";
-  await v.update({ monto_facturado: monto, estado_factura: estado, documento: facturas.map((f) => f.numero).join(", ").slice(0, 255) || null }, { transaction: t });
+  const cambios = { monto_facturado: monto, estado_factura: estado, documento: facturas.map((f) => f.numero).join(", ").slice(0, 255) || null };
+  // Plazo contado desde la factura: vence a los N días de la primera factura
+  if (v.base_vencimiento !== "recepcion" && v.plazo_pago_dias != null && facturas.length) cambios.fecha_vencimiento = sumarDesde(facturas[0].fecha, v.plazo_pago_dias);
+  await v.update(cambios, { transaction: t });
 };
 
 // POST /api/ventas/:id/facturas   { numero, fecha, monto (con IVA; vacío = lo que falta por facturar), notas }

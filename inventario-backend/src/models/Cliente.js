@@ -34,6 +34,17 @@ const Cliente = sequelize.define("Cliente", {
   tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "convenio" },
   contacto: { type: DataTypes.STRING(150), allowNull: true },
   comuna: { type: DataTypes.STRING(100), allowNull: true },
+  // Institución a la que pertenece la unidad de compra (una municipalidad puede tener varios ID:
+  // 2295 = Municipalidad de Talca compras generales, 2292 = Municipalidad de Talca Salud)
+  organismo: { type: DataTypes.STRING(255), allowNull: true },
+  empresa: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "ambas" }, // kenott | tactics | ambas
+  // Cobranza: cada cliente paga con su plazo; se copia a sus ventas y se puede cambiar en cada una
+  plazo_pago_dias: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 },
+  base_vencimiento: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "factura" }, // factura | recepcion (recepción conforme)
+  contacto_finanzas: { type: DataTypes.STRING(150), allowNull: true },
+  limite_credito: { type: DataTypes.DECIMAL(14, 2), allowNull: true },
+  estado_credito: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "activo" }, // activo | suspendido
+  notas: { type: DataTypes.TEXT, allowNull: true },
 }, {
   tableName: "clientes",
   timestamps: true,
