@@ -121,8 +121,9 @@ const limpiarPresupuesto = (p) => {
   return total || grupos.length ? { total: total || null, grupos } : null;
 };
 
-// Postulación doble (M32, art. 60): Kenott y Tactics son empresas relacionadas; si las dos ofertan al mismo
-// proceso de Mercado Público, ambas ofertas pueden quedar inadmisibles. Se avisa antes de guardar.
+// Postulación doble (M32, art. 60). Decisión de gerencia (5-nov-2026): Kenott y Tactics tienen representantes
+// distintos y son empresas distintas, así que pueden postular las dos al mismo proceso (licitación o Compra Ágil).
+// Ya no se bloquea: solo queda registrado en la licitación que postulan "ambas".
 const esSolicitudMP = (id) => /^\d+-\d+-[A-Z][A-Z0-9]{1,5}$/i.test(String(id || "").trim());
 const revisarPostulacion = async ({ id_solicitud, empresa, id, forzar }, t) => {
   if (!esSolicitudMP(id_solicitud)) return;
@@ -130,7 +131,7 @@ const revisarPostulacion = async ({ id_solicitud, empresa, id, forzar }, t) => {
     where: { id_solicitud: { [Op.iLike]: String(id_solicitud).trim() }, empresa: { [Op.ne]: empresa }, estado: { [Op.notIn]: ["rechazada", "vencida"] }, ...(id ? { id: { [Op.ne]: id } } : {}) },
     transaction: t,
   });
-  if (otra && !forzar) {
+  if (otra && !forzar && process.env.AVISO_ART60 === "1") {
     throw new ErrorNegocio(`Ya hay una cotización de ${otra.empresa === "tactics" ? "Tactics" : "Kenott"} (N${otra.numero}) para el proceso ${id_solicitud}. Si las dos empresas postulan al mismo proceso, el art. 60 del reglamento de compras públicas puede dejar inadmisibles ambas ofertas (empresas relacionadas). ¿Guardar igual?`, 409);
   }
 };

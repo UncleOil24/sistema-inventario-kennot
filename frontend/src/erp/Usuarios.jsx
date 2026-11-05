@@ -65,7 +65,15 @@ export default function Usuarios({ notify, yo }) {
                   <td><span className={`rol-badge rol-${u.rol}`}>{u.rol}</span></td>
                   <td><Estado valor={u.activo ? "activo" : "inactivo"} /></td>
                   <td className="mini">{u.ultimo_acceso ? new Date(u.ultimo_acceso).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" }) : "Nunca"}</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...u, password: "" })}>Editar</button></td>
+                  <td><div className="actions">
+                    <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...u, password: "" })}>Editar</button>
+                    {u.id !== yo.id && <button className="btn btn-ghost btn-sm" title="Genera una clave temporal nueva (y quita el bloqueo por intentos fallidos)"
+                      onClick={async () => {
+                        if (!confirm(`¿Dar una clave temporal nueva a ${u.nombre}? La anterior deja de servir.`)) return;
+                        try { const r = await api(`/usuarios/${u.id}/clave-temporal`, { method: "POST" }); setClaves([{ ...r, estado: "nueva clave" }]); cargar(); }
+                        catch (e) { notify(e.message, "danger"); }
+                      }}>Nueva clave temporal</button>}
+                  </div></td>
                 </tr>
               ))}
           </tbody>

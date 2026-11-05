@@ -27,6 +27,18 @@ const registrarFallo = (k) => {
   else f.n += 1;
 };
 
+// Compara la clave. Si es temporal, se acepta aunque venga con espacios (copiada de un mensaje) o con
+// mayúsculas distintas (el celular pone mayúscula al inicio). Igual hay que cambiarla al entrar.
+const coincideClave = async (usuario, password) => {
+  if (await bcrypt.compare(String(password), usuario.password_hash)) return true;
+  if (!usuario.debe_cambiar_clave) return false;
+  const t = String(password).trim();
+  for (const v of new Set([t, t.toLowerCase(), t.charAt(0).toUpperCase() + t.slice(1).toLowerCase(), t.toUpperCase()])) {
+    if (await bcrypt.compare(v, usuario.password_hash)) return true;
+  }
+  return false;
+};
+
 // POST /api/auth/login   { email, password }
 const login = handler(async (req, res) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
@@ -36,7 +48,7 @@ const login = handler(async (req, res) => {
   if (bloqueado(k)) throw new ErrorNegocio("Demasiados intentos fallidos. Espera 15 minutos.", 429);
 
   const usuario = await Usuario.scope("conPassword").findOne({ where: { email } });
-  const ok = usuario && usuario.activo && (await bcrypt.compare(password, usuario.password_hash));
+  const ok = usuario && usuario.activo && (await coincideClave(usuario, password));
   if (!ok) {
     registrarFallo(k);
     throw new ErrorNegocio("Email o contraseña incorrectos", 401);
@@ -45,6 +57,9 @@ const login = handler(async (req, res) => {
   await usuario.update({ ultimo_acceso: new Date() });
   res.json({ ok: true, data: { token: firmarToken(usuario), usuario: publico(usuario) } });
 });
+
+// Gerencia, al dar una clave temporal nueva, quita el bloqueo por intentos fallidos de ese correo
+const limpiarBloqueo = (email) => { for (const k of fallos.keys()) if (k.endsWith(`|${String(email).toLowerCase()}`)) fallos.delete(k); };
 
 // GET /api/auth/me
 const yo = handler(async (req, res) => {
@@ -56,7 +71,7 @@ const cambiarPassword = handler(async (req, res) => {
   const { actual, nueva } = req.body || {};
   validarPassword(nueva);
   const usuario = await Usuario.scope("conPassword").findByPk(req.usuario.id);
-  if (!(await bcrypt.compare(String(actual || ""), usuario.password_hash))) {
+  if (!(await coincideClave(usuario, String(actual || "")))) {
     throw new ErrorNegocio("La contraseña actual no es correcta");
   }
   if (String(actual) === String(nueva)) throw new ErrorNegocio("La nueva contraseña debe ser distinta de la actual");
@@ -85,4 +100,4 @@ const crearAdminInicial = async () => {
   console.log(`✓ Administrador inicial creado: ${email.toLowerCase()}`);
 };
 
-module.exports = { login, yo, cambiarPassword, crearAdminInicial, hashear, validarPassword, publico };
+module.exports = { limpiarBloqueo, login, yo, cambiarPassword, crearAdminInicial, hashear, validarPassword, publico };
