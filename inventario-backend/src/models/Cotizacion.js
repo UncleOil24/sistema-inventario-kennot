@@ -13,6 +13,7 @@ const Cotizacion = sequelize.define("Cotizacion", {
   // de Mercado Público (p.ej. 1422-20-COT26). Queda también en la venta y sus compras.
   id_solicitud: { type: DataTypes.STRING(60), allowNull: true },
   plazo_entrega: { type: DataTypes.STRING(255), allowNull: true }, // texto de "Plazo de entrega" en las condiciones
+  lugar_entrega: { type: DataTypes.STRING(255), allowNull: true }, // se imprime en las condiciones si se indica (M22)
   // Cotizaciones de antes de partir la numeración en 100: se conservan pero no cuentan para el correlativo
   anterior: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   // Control de presupuesto (M27): { total, grupos: [{ nombre, monto }] } montos con IVA; cada línea puede tener "grupo"

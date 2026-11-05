@@ -4,11 +4,11 @@ const Cotizacion = require("../models/Cotizacion");
 const Cliente = require("../models/Cliente");
 const Producto = require("../models/Producto");
 const Licitacion = require("../models/Licitacion");
-const { handler, ErrorNegocio, calcularTotales, normalizarItems } = require("../services/erp");
+const { handler, ErrorNegocio, calcularTotales } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
-const { excelCotizacion, pdfCotizacion, idCotizacion } = require("../services/cotizacionFormato");
+const { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion } = require("../services/cotizacionFormato");
 const ESTADOS = ["borrador", "cotizacion", "aceptada", "rechazada", "vencida"];
 const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const sumarDias = (iso, dias) => {
@@ -21,8 +21,12 @@ const vista = (req) => (c) => {
   const j = typeof c.toJSON === "function" ? c.toJSON() : { ...c };
   j.id_cotizacion = j.anterior ? `${j.empresa === "tactics" ? "Tactics" : "Kenott"} N${j.numero} (anterior)` : idCotizacion(j);
   if (veCostos(req)) {
-    j.margen = Math.round(Number(j.subtotal) - Number(j.costo_total || 0));
-    j.margen_pct = Number(j.subtotal) ? Math.round((j.margen / Number(j.subtotal)) * 100) : 0;
+    // Margen solo de las líneas con costo conocido (las "no está en catálogo" no tienen compra todavía)
+    const conCosto = (j.items || []).filter((i) => Number(i.costo) > 0);
+    const venta = conCosto.length === (j.items || []).length ? Number(j.subtotal) : conCosto.reduce((s, i) => s + Number(i.precio) * Number(i.cantidad), 0);
+    j.margen = Math.round(venta - Number(j.costo_total || 0));
+    j.margen_pct = venta ? Math.round((j.margen / venta) * 100) : 0;
+    j.lineas_sin_costo = (j.items || []).length - conCosto.length;
     return j;
   }
   delete j.costo_total;
@@ -48,34 +52,61 @@ const marcarVencidas = () => Cotizacion.update(
   { where: { estado: "cotizacion", fecha_validez: { [Op.lt]: hoyISO() } } }
 );
 
-// Arma los items: copia descripción, unidad, costo y proveedor del catálogo.
+// Arma los items. Cada línea queda en uno de tres casos (M20):
+//   mismo   → producto del catálogo; precio convenio o particular
+//   similar → se cotiza con un producto parecido nuestro (nota interna con el producto usado)
+//   nuevo   → no está en catálogo: va la descripción del cliente y el precio se llena a mano
+// Lo que se imprime es la descripción del cliente cuando existe; el producto nuestro solo se ve en la vista interna.
 // El precio de venta se calcula por tipo de cliente salvo que venga corregido a mano.
 // Si una línea ya existía en la cotización, conserva su costo (no cambia el margen).
+const CASOS = ["mismo", "similar", "nuevo"];
 const armarItems = async (itemsBody, tipo, anteriores, t) => {
-  const items = normalizarItems((itemsBody || []).map((i) => ({ ...i, precio: i.precio === "" || i.precio == null ? 0 : i.precio })));
+  if (!Array.isArray(itemsBody) || itemsBody.length === 0) throw new ErrorNegocio("Debe incluir al menos una línea");
   const params = await getParametros(t);
-  const productos = await Producto.findAll({ where: { id: items.map((i) => i.producto_id) }, transaction: t });
+  const ids = itemsBody.map((i) => Number(i.producto_id ?? i.id)).filter(Boolean);
+  const productos = ids.length ? await Producto.findAll({ where: { id: ids }, transaction: t }) : [];
   const mapa = new Map(productos.map((p) => [p.id, p]));
-  const previos = new Map((anteriores || []).map((i) => [Number(i.producto_id ?? i.id), i]));
-  return items.map((i, idx) => {
-    const p = mapa.get(i.producto_id);
-    if (!p) throw new ErrorNegocio(`Producto ${i.producto_id} no existe`, 404);
-    const previo = previos.get(p.id);
+  const previos = new Map((anteriores || []).map((i) => [i.producto_id ? `p${i.producto_id}` : `c${i.clave}`, i]));
+  return itemsBody.map((b, idx) => {
+    const producto_id = Number(b.producto_id ?? b.id) || null;
+    const cantidad = Number(b.cantidad);
+    if (!(cantidad > 0)) throw new ErrorNegocio(`Cantidad inválida en la línea ${idx + 1}`);
+    const precioDado = b.precio === "" || b.precio == null ? null : Number(b.precio);
+    if (precioDado !== null && !(precioDado >= 0)) throw new ErrorNegocio(`Precio inválido en la línea ${idx + 1}`);
+    const desc = String(b.descripcion_cliente || "").trim() || null;
+    const comun = {
+      cantidad,
+      grupo: b.grupo !== undefined ? (String(b.grupo || "").trim() || null) : null, // grupo del presupuesto (M27)
+      nota_interna: String(b.nota_interna || "").trim() || null,
+    };
+    if (!producto_id) {
+      // No está en catálogo (rojo): descripción del cliente y precio a mano
+      if (!desc) throw new ErrorNegocio(`La línea ${idx + 1} no tiene producto ni descripción del cliente`);
+      return {
+        ...comun, producto_id: null, clave: String(b.clave || `n${Date.now()}${idx}`), codigo: null,
+        nombre: desc, descripcion_cliente: desc, unidad: String(b.unidad || "UNIDAD").toUpperCase(),
+        precio: precioDado ?? 0, costo: Number(b.costo) || 0, proveedor: null, fecha_precio: null, caso: "nuevo",
+      };
+    }
+    const p = mapa.get(producto_id);
+    if (!p) throw new ErrorNegocio(`Producto ${producto_id} no existe`, 404);
+    const previo = previos.get(`p${p.id}`);
     const costo = previo && previo.costo !== undefined ? Number(previo.costo) : Number(p.precio_compra) || 0;
-    const precioDado = itemsBody[idx].precio;
-    const precio = precioDado === "" || precioDado == null ? precioVenta(costo, tipo, params) : Number(precioDado);
+    const caso = CASOS.includes(b.caso) && b.caso !== "nuevo" ? b.caso : "mismo";
     return {
+      ...comun,
       producto_id: p.id,
       codigo: p.codigo,
       nombre: p.nombre,
-      descripcion_cliente: itemsBody[idx].descripcion_cliente || previo?.descripcion_cliente || null,
+      descripcion_cliente: desc,
       unidad: p.unidad,
-      cantidad: i.cantidad,
-      precio,
+      precio: precioDado ?? precioVenta(costo, tipo, params),
       costo,
       proveedor: previo?.proveedor ?? p.proveedor ?? null,
       fecha_precio: previo?.fecha_precio ?? p.fecha_precio ?? null,
-      grupo: itemsBody[idx].grupo !== undefined ? (String(itemsBody[idx].grupo || "").trim() || null) : previo?.grupo ?? null, // grupo del presupuesto (M27)
+      caso,
+      // Similar: nota interna con el producto usado
+      nota_interna: comun.nota_interna || (caso === "similar" ? `Cotizado con similar: ${p.nombre}` : null),
     };
   });
 };
@@ -92,7 +123,7 @@ const limpiarPresupuesto = (p) => {
 
 // Postulación doble (M32, art. 60): Kenott y Tactics son empresas relacionadas; si las dos ofertan al mismo
 // proceso de Mercado Público, ambas ofertas pueden quedar inadmisibles. Se avisa antes de guardar.
-const esSolicitudMP = (id) => /^\d+-\d+-[A-Z]{1,3}\d{0,2}$/i.test(String(id || "").trim());
+const esSolicitudMP = (id) => /^\d+-\d+-[A-Z][A-Z0-9]{1,5}$/i.test(String(id || "").trim());
 const revisarPostulacion = async ({ id_solicitud, empresa, id, forzar }, t) => {
   if (!esSolicitudMP(id_solicitud)) return;
   const otra = await Cotizacion.findOne({
@@ -180,6 +211,7 @@ const crearCotizacion = handler(async (req, res) => {
       // ID impreso: el de la solicitud (licitación / compra ágil) o, si no hay, el del cliente
       id_solicitud: idSol,
       presupuesto: limpiarPresupuesto(b.presupuesto),
+      lugar_entrega: String(b.lugar_entrega || "").trim() || null,
       plazo_entrega: String(b.plazo_entrega || "").trim() || params.plazo_entrega || null,
       nombre_cotizacion: b.nombre_cotizacion || null, // se imprime como "Descripción" (Kenott) o "Proyecto" (Tactics)
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
@@ -213,6 +245,7 @@ const actualizarCotizacion = handler(async (req, res) => {
     if (b.id_solicitud !== undefined) cambios.id_solicitud = String(b.id_solicitud || "").trim() || null;
     if (b.plazo_entrega !== undefined) cambios.plazo_entrega = String(b.plazo_entrega || "").trim() || null;
     if (b.presupuesto !== undefined) cambios.presupuesto = limpiarPresupuesto(b.presupuesto);
+    if (b.lugar_entrega !== undefined) cambios.lugar_entrega = String(b.lugar_entrega || "").trim() || null;
     if (b.items) {
       const items = await armarItems(b.items, cambios.tipo_precio || c.tipo_precio, b.actualizar_costos ? null : c.items, t);
       Object.assign(cambios, { items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0) });
@@ -304,6 +337,23 @@ const descargarExcel = async (req, res) => {
   }
 };
 
+// GET /api/cotizaciones/:id/interna   (hoja de referencia interna con costos: no se envía)
+const descargarInterna = async (req, res) => {
+  try {
+    if (!veCostos(req)) return res.status(403).json({ ok: false, error: "Sin acceso a costos" });
+    const cot = await Cotizacion.findByPk(req.params.id);
+    if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+    const wb = await excelInterno(cot.toJSON(), await getParametros(), precioVenta);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="INTERNA_${nombreArchivo(cot, "xlsx")}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error(error);
+    if (!res.headersSent) res.status(500).json({ ok: false, error: error.message });
+  }
+};
+
 // GET /api/cotizaciones/:id/pdf   (plantilla de la empresa, sin costos)
 const descargarPdf = async (req, res) => {
   try {
@@ -321,6 +371,6 @@ const descargarPdf = async (req, res) => {
 
 module.exports = {
   registrarSeguimiento, cantidadPorSeguir, wherePorSeguir,
-  descargarPdf,
+  descargarPdf, descargarInterna,
   getCotizaciones, getCotizacion, crearCotizacion, actualizarCotizacion, cambiarEstado, eliminarCotizacion, descargarExcel,
 };

@@ -3,8 +3,11 @@ import { Totales, Estado } from "./ui";
 import ImportarLista from "./ImportarLista";
 import ControlPresupuesto from "./Presupuesto";
 import { conConfirmacion } from "./Recorrido";
-import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
+import { fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
 
+// Identificador de la línea: el producto, o una clave para las que no están en catálogo
+const idL = (i) => (i.producto_id ? `p${i.producto_id}` : `c${i.clave}`);
+const CASOS = { mismo: ["Mismo producto", ""], similar: ["Similar", "fila-similar"], nuevo: ["No está en catálogo", "fila-nuevo"] };
 const PLAZO_DEFECTO = "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra";
 
 // Cotizador: arma la cotización con nuestros precios según el tipo de cliente.
@@ -14,6 +17,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const [q, setQ] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [importar, setImportar] = useState(false);
+  const [asociando, setAsociando] = useState(null); // línea "no está en catálogo" a la que se le busca producto
   const { items } = borrador;
   const cliente = clientes.find((c) => String(c.id) === String(borrador.cliente_id));
   const tipo = borrador.tipo_precio || cliente?.tipo || "convenio";
@@ -54,19 +58,39 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   const agregar = (p) => {
     if (items.some((i) => i.producto_id === p.id)) { notify("Ya está en la cotización"); return; }
-    setItems((l) => [...l, lineaDesdeProducto(p, tipo)]);
+    if (asociando) {
+      // La línea roja pasa a cotizarse con este producto (similar): se mantiene lo que pidió el cliente
+      setItems((l) => l.map((i) => (idL(i) === asociando ? {
+        ...lineaDesdeProducto(p, tipo), cantidad: i.cantidad, grupo: i.grupo, descripcion_cliente: i.descripcion_cliente, caso: "similar",
+        nota_interna: `Cotizado con similar: ${p.nombre}`,
+      } : i)));
+      setAsociando(null);
+      setQ("");
+      return;
+    }
+    setItems((l) => [...l, { ...lineaDesdeProducto(p, tipo), caso: "mismo" }]);
     setQ("");
   };
-  const setLinea = (id, campo, val) => setItems((l) => l.map((i) => (i.producto_id === id ? { ...i, [campo]: val, ...(campo === "precio" ? { auto: false } : {}) } : i)));
-  const restaurarPrecio = (id) => setItems((l) => l.map((i) => (i.producto_id === id ? { ...i, precio: tipo === "particular" ? i.particular : i.convenio, auto: true } : i)));
+  // Línea que no está en catálogo (rojo): la descripción del cliente y el precio a mano
+  const agregarNoEsta = () => {
+    const desc = q.trim();
+    if (!desc) { notify("Escribe arriba lo que pidió el cliente", "danger"); return; }
+    setItems((l) => [...l, { producto_id: null, clave: `n${Date.now()}`, nombre: desc, descripcion_cliente: desc, unidad: "UNIDAD", cantidad: 1, precio: "", costo: 0, caso: "nuevo", auto: false }]);
+    setQ("");
+  };
+  const setLinea = (id, campo, val) => setItems((l) => l.map((i) => (idL(i) === id ? { ...i, [campo]: val, ...(campo === "precio" ? { auto: false } : {}) } : i)));
+  const restaurarPrecio = (id) => setItems((l) => l.map((i) => (idL(i) === id ? { ...i, precio: tipo === "particular" ? i.particular : i.convenio, auto: true } : i)));
 
   const subtotal = items.reduce((s, i) => s + Number(i.precio || 0) * Number(i.cantidad || 0), 0);
   const costo = items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad || 0), 0);
-  const margen = subtotal - costo;
+  // Margen solo de las líneas con costo (las que no están en catálogo aún no tienen compra)
+  const ventaConCosto = items.filter((i) => Number(i.costo) > 0).reduce((s, i) => s + Number(i.precio || 0) * Number(i.cantidad || 0), 0);
+  const sinCosto = items.filter((i) => !(Number(i.costo) > 0)).length;
+  const margen = ventaConCosto - costo;
   const sinPrecio = items.filter((i) => !(Number(i.precio) > 0)).length;
   const antiguos = items.filter((i) => i.precio_antiguo).length;
 
-  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", presupuesto: null, items: [] }));
+  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", presupuesto: null, lugar_entrega: "", items: [] }));
   const empresa = borrador.empresa || "kenott";
 
   // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
@@ -74,7 +98,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
     setBorrador((b) => {
       const lista = [...b.items];
       for (const n of nuevas) {
-        const previa = lista.find((i) => i.producto_id === n.producto_id);
+        const previa = n.producto_id && lista.find((i) => i.producto_id === n.producto_id);
         if (previa) Object.assign(previa, { cantidad: Number(previa.cantidad) + Number(n.cantidad) });
         else lista.push(n);
       }
@@ -104,7 +128,12 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         archivo_cliente: borrador.archivo_cliente || null,
         estado,
         presupuesto: borrador.presupuesto || null,
-        items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio), descripcion_cliente: i.descripcion_cliente || null, grupo: i.grupo || null })),
+        lugar_entrega: borrador.lugar_entrega || null,
+        items: items.map((i) => ({
+          producto_id: i.producto_id || null, clave: i.clave || null, caso: i.caso || "mismo", cantidad: Number(i.cantidad),
+          precio: i.precio === "" ? null : Number(i.precio), descripcion_cliente: i.descripcion_cliente || null, grupo: i.grupo || null,
+          nota_interna: i.nota_interna || null, unidad: i.unidad,
+        })),
       };
       // Si la otra empresa ya cotizó este proceso, el servidor avisa (art. 60) y se pide confirmación
       const cot = borrador.id
@@ -174,6 +203,10 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
           </div>
         </div>
         <div className="field">
+          <label>Lugar de entrega (opcional, se imprime)</label>
+          <input value={borrador.lugar_entrega || ""} onChange={(e) => set({ lugar_entrega: e.target.value })} placeholder="Ej: Bodega municipal, Linares" />
+        </div>
+        <div className="field">
           <label>{empresa === "tactics" ? "Proyecto" : "Descripción"} (se imprime)</label>
           <input value={borrador.nombre_cotizacion} onChange={(e) => set({ nombre_cotizacion: e.target.value })} placeholder="Ej: Materiales mantención Liceo Laura Urrutia" />
         </div>
@@ -187,7 +220,11 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       </div>
       <div className="field" style={{ position: "relative", marginBottom: "1rem" }}>
         <label>Agregar producto</label>
-        <input className="search-input" style={{ paddingLeft: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder='Palabras en cualquier orden o N°. Ej: "cemento 25", "1416"' />
+        {asociando && <div className="aviso">Buscando el producto nuestro para "{items.find((i) => idL(i) === asociando)?.descripcion_cliente}": elige uno de la lista. <button className="link" onClick={() => setAsociando(null)}>Cancelar</button></div>}
+        <div style={{ display: "flex", gap: 6 }}>
+          <input className="search-input" style={{ paddingLeft: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder='Palabras en cualquier orden o N°. Ej: "cemento 25", "1416"' />
+          {!asociando && q.trim() && <button className="btn btn-ghost btn-sm" title="Agrega lo escrito como línea que no está en el catálogo (en rojo), con precio a mano" onClick={agregarNoEsta}>+ No está en catálogo</button>}
+        </div>
         {sugerencias.length > 0 && (
           <div className="sugerencias">
             {sugerencias.map((p) => {
@@ -217,26 +254,43 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
               </tr></thead>
               <tbody>
                 {items.map((i) => {
+                  const k = idL(i);
                   const m = (Number(i.precio) - Number(i.costo || 0)) * Number(i.cantidad);
                   const mp = Number(i.precio) ? Math.round(((Number(i.precio) - Number(i.costo || 0)) / Number(i.precio)) * 100) : 0;
+                  const caso = i.caso || "mismo";
                   return (
-                    <tr key={i.producto_id} className={!(Number(i.precio) > 0) ? "fila-alerta" : ""}>
+                    <tr key={k} className={CASOS[caso]?.[1] || (!(Number(i.precio) > 0) ? "fila-alerta" : "")}>
                       <td className="id-cell">{i.codigo ?? ""}</td>
-                      <td>{i.nombre}<div className="mini">{i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}{i.descripcion_cliente ? ` · cliente: "${i.descripcion_cliente}"` : ""}{i.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(i.fecha_precio)}</span>}</div></td>
+                      <td>
+                        <input className="desc-cliente" value={i.descripcion_cliente || ""} placeholder={i.nombre} title="Se imprime en la cotización (lo que pidió el cliente)"
+                          onChange={(e) => setLinea(k, "descripcion_cliente", e.target.value)} />
+                        <div className="mini">
+                          {caso === "nuevo"
+                            ? <><strong style={{ color: "var(--danger)" }}>No está en catálogo</strong> · precio a mano · <button className="link" onClick={() => { setAsociando(k); setQ(i.descripcion_cliente || ""); }}>buscar producto similar</button></>
+                            : <>
+                              <select className="caso-select" value={caso} onChange={(e) => setLinea(k, "caso", e.target.value)}>
+                                <option value="mismo">Mismo</option><option value="similar">Similar</option>
+                              </select>
+                              {" "}nuestro: {i.nombre} · {i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}
+                              {i.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(i.fecha_precio)}</span>}
+                            </>}
+                        </div>
+                        {caso !== "mismo" && <input className="desc-cliente nota" value={i.nota_interna || ""} placeholder="Nota interna (no se imprime)" onChange={(e) => setLinea(k, "nota_interna", e.target.value)} />}
+                      </td>
                       {grupos.length > 0 && <td>
-                        <select className="filter-select" style={{ minWidth: 110 }} value={i.grupo || ""} onChange={(e) => setLinea(i.producto_id, "grupo", e.target.value)}>
+                        <select className="filter-select" style={{ minWidth: 110 }} value={i.grupo || ""} onChange={(e) => setLinea(k, "grupo", e.target.value)}>
                           <option value="">—</option>{grupos.map((g) => <option key={g.nombre}>{g.nombre}</option>)}
                         </select>
                       </td>}
-                      <td><input className="qty-input" type="number" min="0" step="any" value={i.cantidad} onChange={(e) => setLinea(i.producto_id, "cantidad", e.target.value)} /></td>
+                      <td><input className="qty-input" type="number" min="0" step="any" value={i.cantidad} onChange={(e) => setLinea(k, "cantidad", e.target.value)} /></td>
                       <td>
-                        <input className="qty-input" style={{ width: 96 }} type="number" min="0" value={i.precio} onChange={(e) => setLinea(i.producto_id, "precio", e.target.value)} />
-                        {!i.auto && <button className="link" title="Volver al precio calculado" onClick={() => restaurarPrecio(i.producto_id)}>↺</button>}
+                        <input className="qty-input" style={{ width: 96 }} type="number" min="0" value={i.precio} placeholder="a mano" onChange={(e) => setLinea(k, "precio", e.target.value)} />
+                        {!i.auto && i.producto_id && <button className="link" title="Volver al precio calculado" onClick={() => restaurarPrecio(k)}>↺</button>}
                       </td>
-                      <td className="price-cell">{fmt(Number(i.precio) * Number(i.cantidad))}</td>
+                      <td className="price-cell">{fmt(Number(i.precio || 0) * Number(i.cantidad))}</td>
                       {esAdmin && <td className="price-cell compra">{i.costo ? fmt(i.costo) : "—"}</td>}
-                      {esAdmin && <td className="mini" style={{ color: m < 0 ? "var(--danger)" : undefined }}>{fmt(m)} · {mp}%</td>}
-                      <td><button className="btn btn-danger btn-sm" onClick={() => setItems((l) => l.filter((x) => x.producto_id !== i.producto_id))}>✕</button></td>
+                      {esAdmin && <td className="mini" style={{ color: m < 0 ? "var(--danger)" : undefined }}>{i.costo ? `${fmt(m)} · ${mp}%` : "—"}</td>}
+                      <td><button className="btn btn-danger btn-sm" onClick={() => setItems((l) => l.filter((x) => idL(x) !== k))}>✕</button></td>
                     </tr>
                   );
                 })}
@@ -251,7 +305,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                 <div className="total-row"><span className="total-label">Costo (compra)</span><span className="total-value">{fmt(costo)}</span></div>
                 <div className="total-row"><span className="total-label">Margen bruto</span><span className="total-value">{fmt(margen)}</span></div>
                 <hr className="divider" />
-                <div className="total-row grand"><span className="total-label">Margen %</span><span className="total-value">{subtotal ? Math.round((margen / subtotal) * 100) : 0}%</span></div>
+                <div className="total-row grand"><span className="total-label">Margen %</span><span className="total-value">{ventaConCosto ? Math.round((margen / ventaConCosto) * 100) : 0}%</span></div>
+                {sinCosto > 0 && <div className="mini">{sinCosto} línea(s) sin costo no cuentan en el margen.</div>}
                 <div className="mini">Interno: no se imprime en la cotización. <Estado valor={tipo} /></div>
               </div>
             )}

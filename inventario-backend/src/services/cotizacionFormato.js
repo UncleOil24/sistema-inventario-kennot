@@ -40,9 +40,12 @@ const lineasEmpresa = (clave, emp) => (clave === "tactics"
 const condiciones = (fmt, cot) => [
   "• Valores en pesos chilenos. Precio neto + IVA 19%.",
   `• Plazo de entrega: ${String(cot.plazo_entrega || PLAZO_DEFECTO).replace(/\.\s*$/, "")}.`,
+  ...(cot.lugar_entrega ? [`• Lugar de entrega: ${String(cot.lugar_entrega).replace(/\.\s*$/, "")}.`] : []),
   fmt.servicio,
   "• Precios válidos hasta la fecha indicada.",
 ];
+// Lo que se imprime en cada línea: la descripción del cliente (con sus especificaciones) si la hay (M20)
+const descImpresa = (it) => it.descripcion_cliente || it.nombre;
 
 const filasCliente = (fmt, cot) => [
   [`Cliente: ${cot.cliente || ""}`, "Fecha:", fechaCL(cot.fecha)],
@@ -153,7 +156,7 @@ async function excelCotizacion(cot, emp) {
     const r = ENC + 1 + idx;
     const it = items[idx];
     const valores = it
-      ? [idx + 1, it.nombre, it.unidad || "Unidad", Number(it.cantidad), Math.round(Number(it.precio)), { formula: `IF(E${r}="","",E${r}*D${r})`, result: Math.round(Number(it.precio) * Number(it.cantidad)) }]
+      ? [idx + 1, descImpresa(it), it.unidad || "Unidad", Number(it.cantidad), Math.round(Number(it.precio)), { formula: `IF(E${r}="","",E${r}*D${r})`, result: Math.round(Number(it.precio) * Number(it.cantidad)) }]
       : [idx + 1, null, null, null, null, { formula: `IF(E${r}="","",E${r}*D${r})`, result: "" }];
     valores.forEach((v, k) => {
       const c = ws.getCell(r, k + 1);
@@ -164,7 +167,7 @@ async function excelCotizacion(cot, emp) {
       if (k >= 4) c.numFmt = '"$" #,##0';
       if (idx % 2 === 1) c.fill = relleno(CLARO);
     });
-    ws.getRow(r).height = it ? Math.max(18, Math.ceil(String(it.nombre || "").length / 55) * 14) : 18;
+    ws.getRow(r).height = it ? Math.max(18, Math.ceil(String(descImpresa(it) || "").length / 55) * 14) : 18;
   }
   const ultima = ENC + lineas;
 
@@ -321,12 +324,12 @@ function pdfCotizacion(cot, emp, destino) {
 
   (cot.items || []).forEach((it, idx) => {
     doc.font("Helvetica").fontSize(8.5);
-    const alto = Math.max(17, doc.heightOfString(it.nombre || "", { width: col[1].w - 8 }) + 8);
+    const alto = Math.max(17, doc.heightOfString(descImpresa(it) || "", { width: col[1].w - 8 }) + 8);
     if (y + alto > doc.page.height - 60) {
       doc.addPage();
       y = encabezadoTabla(cabecera());
     }
-    const valores = [idx + 1, it.nombre, it.unidad || "Unidad", cantidadTxt(it.cantidad), `$ ${pesos(it.precio)}`, `$ ${pesos(Number(it.precio) * Number(it.cantidad))}`];
+    const valores = [idx + 1, descImpresa(it), it.unidad || "Unidad", cantidadTxt(it.cantidad), `$ ${pesos(it.precio)}`, `$ ${pesos(Number(it.precio) * Number(it.cantidad))}`];
     let x = X;
     valores.forEach((v, k) => {
       if (idx % 2 === 1) doc.rect(x, y, col[k].w, alto).fill(CLARO);
@@ -398,7 +401,46 @@ function pdfCotizacion(cot, emp, destino) {
   doc.end();
 }
 
+// ---------------------------------------------------------------- Hoja interna (M21, no se envía al cliente)
+// Por cada línea: lo que pidió el cliente, el caso, el producto nuestro, su compra, convenio, particular, proveedor y nota.
+async function excelInterno(cot, params, precioVenta) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Interna (no enviar)", { views: [{ state: "frozen", ySplit: 3 }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  ws.columns = [
+    { header: "N°", width: 5 }, { header: "Lo que pidió el cliente (se imprime)", width: 46 }, { header: "Caso", width: 11 },
+    { header: "Producto nuestro", width: 44 }, { header: "Unidad", width: 9 }, { header: "Cant.", width: 8 },
+    { header: "Compra", width: 11 }, { header: "Convenio", width: 11 }, { header: "Particular", width: 11 },
+    { header: "Proveedor", width: 18 }, { header: "Precio cotizado", width: 13 }, { header: "Total", width: 13 },
+    { header: "Margen %", width: 9 }, { header: "Grupo", width: 14 }, { header: "Nota interna", width: 40 },
+  ];
+  ws.spliceRows(1, 0, [`HOJA INTERNA — ${String(cot.empresa).toUpperCase()} N${cot.numero} · ${cot.cliente || ""} · ID ${cot.id_solicitud || "—"} · NO ENVIAR AL CLIENTE`], []);
+  ws.getCell("A1").font = { bold: true, size: 12, color: { argb: "FFC00000" } };
+  const enc = ws.getRow(3);
+  enc.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  enc.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF444444" } }; });
+  const COLOR = { similar: "FFFFF2CC", nuevo: "FFF8D7DA" };
+  (cot.items || []).forEach((it, k) => {
+    const costo = Number(it.costo) || 0;
+    const precio = Number(it.precio) || 0;
+    const row = ws.addRow([
+      k + 1, it.descripcion_cliente || it.nombre, { mismo: "Mismo", similar: "Similar", nuevo: "No está" }[it.caso || "mismo"],
+      it.producto_id ? `${it.codigo ?? ""} ${it.nombre}`.trim() : "— (no está en catálogo)", it.unidad, Number(it.cantidad),
+      costo || null, costo ? precioVenta(costo, "convenio", params) : null, costo ? precioVenta(costo, "particular", params) : null,
+      it.proveedor || "", precio, Math.round(precio * Number(it.cantidad)),
+      precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null, it.grupo || "", it.nota_interna || "",
+    ]);
+    [7, 8, 9, 11, 12].forEach((c) => { row.getCell(c).numFmt = '"$" #,##0'; });
+    row.alignment = { vertical: "top", wrapText: true };
+    if (COLOR[it.caso]) row.eachCell({ includeEmpty: true }, (c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[it.caso] } }; });
+  });
+  const tot = ws.addRow(["", "TOTAL NETO", "", "", "", "", Math.round(Number(cot.costo_total) || 0), "", "", "", "", Math.round(Number(cot.subtotal) || 0),
+    Number(cot.subtotal) ? Math.round(((Number(cot.subtotal) - Number(cot.costo_total || 0)) / Number(cot.subtotal)) * 1000) / 10 : null]);
+  tot.font = { bold: true };
+  [7, 12].forEach((c) => { tot.getCell(c).numFmt = '"$" #,##0'; });
+  return wb;
+}
+
 // Nombre visible y de archivo: Cotizacion_KENOTT_N100  (las de antes del cambio: "Kenott N276 (anterior)")
 const idCotizacion = (cot) => `Cotizacion_${String(cot.empresa || "kenott").toUpperCase()}_N${cot.numero}`;
 
-module.exports = { excelCotizacion, pdfCotizacion, idCotizacion, PLAZO_DEFECTO };
+module.exports = { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion, PLAZO_DEFECTO };

@@ -8,6 +8,7 @@ router.get("/por-seguir/cantidad", c.cantidadPorSeguir);
 router.get("/:id", c.getCotizacion);
 router.get("/:id/excel", c.descargarExcel);
 router.get("/:id/pdf", c.descargarPdf);
+router.get("/:id/interna", c.descargarInterna);
 router.post("/", comercial, c.crearCotizacion);
 router.put("/:id", comercial, c.actualizarCotizacion);
 router.post("/:id/estado", comercial, c.cambiarEstado);

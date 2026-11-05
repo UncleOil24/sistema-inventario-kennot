@@ -76,6 +76,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
       cliente_id: cliente?.id || "", tipo_precio: cliente?.tipo || "convenio",
       nombre_cotizacion: `${tipoDe(l)} ${l.codigo} – ${l.nombre}`.slice(0, 250),
       id_solicitud: l.codigo,
+      lugar_entrega: l.lugar_entrega || "",
       // Presupuesto y grupos de la ficha (M27): el cotizador compara en vivo
       presupuesto: (l.presupuesto || l.monto_estimado || l.grupos?.length) ? { total: Number(l.presupuesto || l.monto_estimado) || null, grupos: l.grupos || [] } : null,
       empresa: l.empresa_postula && l.empresa_postula !== "ambas" ? l.empresa_postula : undefined,
