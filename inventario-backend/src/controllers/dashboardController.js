@@ -60,8 +60,8 @@ const getDashboard = handler(async (req, res) => {
       where: { estado: "recibida", estado_pago: { [Op.ne]: "pagada" } },
       attributes: ["id", "numero", "proveedor_nombre", "fecha_vencimiento", "total", "monto_pagado"],
     }),
-    Venta.findAll({ where: { estado: "emitida" }, attributes: ["id", "numero", "cliente_nombre", "fecha", "subtotal", "proyecto_id"], order: [["id", "DESC"]], limit: 300 }),
-    OrdenCompra.findAll({ where: { [Op.or]: [{ venta_id: { [Op.ne]: null } }, { proyecto_id: { [Op.ne]: null } }], estado: { [Op.ne]: "anulada" } }, attributes: ["venta_id", "proyecto_id"], raw: true }),
+    Venta.findAll({ where: { estado: "emitida", etapa: { [Op.ne]: "entregada" } }, attributes: ["id", "numero", "cliente_nombre", "fecha", "subtotal", "total", "etapa", "estado_factura", "monto_facturado", "orden_compra_cliente", "despacho_fecha", "lista_fecha"], order: [["id", "ASC"]], limit: 500 }),
+    OrdenCompra.findAll({ where: { venta_id: { [Op.ne]: null }, estado: { [Op.ne]: "anulada" } }, attributes: ["venta_id", "estado"], raw: true }),
     sequelize.query(`SELECT COUNT(*)::int AS productos,
         COUNT(*) FILTER (WHERE precio_compra IS NULL OR precio_compra <= 0)::int AS sin_precio,
         COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
@@ -130,11 +130,15 @@ const getDashboard = handler(async (req, res) => {
     documentos: porPagar.length,
   };
 
-  // --- Ventas confirmadas que aún no tienen órdenes de compra ---
-  // (una compra consolidada del proyecto cuenta para todas sus ventas)
-  const conOC = new Set(ocsVenta.map((o) => o.venta_id).filter(Boolean));
-  const proyConOC = new Set(ocsVenta.map((o) => o.proyecto_id).filter(Boolean));
-  const porComprar = ventasActivas.filter((v) => !conOC.has(v.id) && !(v.proyecto_id && proyConOC.has(v.proyecto_id)));
+  // --- Ventas en curso: por aceptar, por comprar, por confirmar, por facturar, por despachar ---
+  const conOC = new Set(ocsVenta.map((o) => o.venta_id));
+  const sinRecibir = new Set(ocsVenta.filter((o) => o.estado !== "recibida").map((o) => o.venta_id));
+  const porAceptar = ventasActivas.filter((v) => v.etapa === "registrada");
+  const porComprar = ventasActivas.filter((v) => ["registrada", "aceptada"].includes(v.etapa) && !conOC.has(v.id));
+  const porConfirmar = ventasActivas.filter((v) => v.etapa === "aceptada" && conOC.has(v.id) && !sinRecibir.has(v.id));
+  const porFacturar = ventasActivas.filter((v) => ["lista", "despachada"].includes(v.etapa) && v.estado_factura !== "facturada");
+  const porDespachar = ventasActivas.filter((v) => v.etapa === "lista");
+  const porEntregar = ventasActivas.filter((v) => v.etapa === "despachada");
 
   // --- Caja del mes ---
   const sumaTipo = (tipo) => n(pagosMes.find((p) => p.tipo === tipo)?.total);
@@ -182,8 +186,16 @@ const getDashboard = handler(async (req, res) => {
     tareas.push({ tipo: "cobrar", urgencia: 0, texto: `Cobrar ${v.numero} a ${v.cliente_nombre || "cliente"}`, detalle: `$${n(saldo(v)).toLocaleString("es-CL")} · venció ${cuando(dias(v.fecha_vencimiento))}`, vista: "ventas", id: v.id, boton: "Ver venta" });
   }
   // Comprar a proveedores
+  const oc = (v) => (v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : "");
+  if (comercial) {
+    for (const v of porFacturar.slice(0, 8)) tareas.push({ tipo: "facturar", urgencia: 0, texto: `Facturar ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `${v.estado_factura === "parcial" ? `Falta facturar $${n(Number(v.total) - Number(v.monto_facturado)).toLocaleString("es-CL")}` : `Total $${n(v.total).toLocaleString("es-CL")}`}${oc(v)} · productos listos`, vista: "facturacion", id: v.id, boton: "Facturar" });
+  }
   if (operativo) {
-    for (const v of porComprar.slice(0, 8)) tareas.push({ tipo: "comprar", urgencia: 0, texto: `Comprar los productos de ${v.numero}`, detalle: `${v.cliente_nombre || ""} · vendida el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}`, vista: "ventas", id: v.id, boton: "Ver qué comprar" });
+    for (const v of porAceptar.slice(0, 8)) tareas.push({ tipo: "aceptar", urgencia: 0, texto: `Aceptar la venta ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `Registrada el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}${oc(v)}: revísala y compra`, vista: "ventas", id: v.id, boton: "Ver venta" });
+    for (const v of porConfirmar.slice(0, 8)) tareas.push({ tipo: "confirmar", urgencia: 0, texto: `Confirmar ${v.numero}: llegaron todos los productos`, detalle: `${v.cliente_nombre || ""}${oc(v)} · queda lista para facturar y despachar`, vista: "ventas", id: v.id, boton: "Confirmar" });
+    for (const v of porDespachar.slice(0, 8)) tareas.push({ tipo: "despachar", urgencia: v.estado_factura === "sin_factura" ? 1 : 0, texto: `Despachar ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: v.estado_factura === "sin_factura" ? "Aún sin factura (Comercial)" : "Facturada: lista para despacho", vista: "despachos", id: v.id, boton: "Despachar" });
+    for (const v of porEntregar.slice(0, 8)) tareas.push({ tipo: "entregar", urgencia: 2, texto: `¿Recibió el cliente ${v.numero}?`, detalle: `Despachada el ${new Date(`${v.despacho_fecha}T12:00:00`).toLocaleDateString("es-CL")} · márcala entregada`, vista: "despachos", id: v.id, boton: "Ver" });
+    for (const v of porComprar.filter((x) => x.etapa === "aceptada").slice(0, 8)) tareas.push({ tipo: "comprar", urgencia: 0, texto: `Comprar los productos de ${v.numero}`, detalle: `${v.cliente_nombre || ""} · vendida el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}`, vista: "ventas", id: v.id, boton: "Ver qué comprar" });
     for (const o of ocBorrador.filter((o) => dias(o.fecha) <= -2).slice(0, 8)) tareas.push({ tipo: "recibir", urgencia: 1, texto: `¿Llegó el pedido ${o.numero} de ${o.proveedor_nombre}?`, detalle: `Pedido ${cuando(dias(o.fecha))}: márcalo recibido cuando llegue`, vista: "compras", id: o.id, boton: "Ver pedido" });
     for (const o of admin ? porPagar.filter(vencida).slice(0, 8) : []) tareas.push({ tipo: "pagar", urgencia: 0, texto: `Pagar ${o.numero} a ${o.proveedor_nombre}`, detalle: `$${n(saldo(o)).toLocaleString("es-CL")} · venció ${cuando(dias(o.fecha_vencimiento))}`, vista: "compras", id: o.id, boton: "Ver orden" });
   }
@@ -191,7 +203,7 @@ const getDashboard = handler(async (req, res) => {
   for (const c of comercial ? porSeguir.slice(0, 8) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });
   for (const c of comercial ? cotPorVencer.filter((c) => !porSeguir.some((p) => p.id === c.id)) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `La cotización N° ${c.numero} (${c.cliente || "sin cliente"}) vence ${cuando(dias(c.fecha_validez))}`, detalle: "Llama al cliente antes de que venza", vista: "cotizaciones", boton: "Ver" });
   // Departamento de cada tarea (cada pestaña muestra las suyas)
-  const DEPTO = { oportunidad: "comercial", llamar: "comercial", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
+  const DEPTO = { oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
   tareas.forEach((t) => { t.depto = DEPTO[t.tipo] || "comercial"; });
   tareas.sort((a, b) => a.urgencia - b.urgencia);
 
@@ -231,6 +243,7 @@ const getDashboard = handler(async (req, res) => {
       detalle: licNuevas.slice(0, 8).map((l) => ({ codigo: l.codigo, nombre: l.nombre, organismo: l.organismo, comuna: l.comuna, cierre: l.fecha_cierre, monto: l.monto_estimado ? n(l.monto_estimado) : null, productos: (l.items || []).length, fuente: l.fuente, prioridad: l.prioridad, relevancia: l.relevancia, ficha: fichaUrl(l) })),
     },
     por_seguir: { cantidad: porSeguir.length, detalle: porSeguir.slice(0, 10).map((c) => ({ id: c.id, numero: c.numero, empresa: c.empresa, anterior: c.anterior, id_solicitud: c.id_solicitud, cliente: c.cliente, nombre: c.nombre_cotizacion, fecha: c.fecha, vence: c.fecha_validez, ultimo_contacto: c.ultimo_contacto, proximo_contacto: c.proximo_contacto, neto: n(c.subtotal) })) },
+    flujo: { por_aceptar: porAceptar.length, por_comprar: porComprar.length, por_confirmar: porConfirmar.length, por_facturar: porFacturar.length, por_despachar: porDespachar.length, por_entregar: porEntregar.length },
     por_comprar: { cantidad: porComprar.length, detalle: porComprar.slice(0, 10).map((v) => ({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, fecha: v.fecha, neto: n(v.subtotal) })) },
     cuentas_por_cobrar: cxc,
     cuentas_por_pagar: cxp,

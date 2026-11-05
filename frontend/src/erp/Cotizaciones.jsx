@@ -203,7 +203,7 @@ function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
           ...(form.pagada_al_contado ? { pagada_al_contado: true, medio_pago: form.medio_pago } : { dias_credito: Number(form.dias_credito) || 0 }),
         },
       });
-      notify(`✓ Venta ${venta.numero} creada — revisa el cuadro de compra`);
+      notify(`✓ Venta ${venta.numero} creada — Operativo la verá para aceptarla y comprar`);
       onHecho(venta);
     } catch (e) { notify(e.message, "danger"); }
     finally { setEnviando(false); }

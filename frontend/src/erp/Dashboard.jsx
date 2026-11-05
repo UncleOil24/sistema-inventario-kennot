@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Estado, Cargando } from "./ui";
 import { api, fmt, fecha, nombreCot } from "./lib";
 
-const ICONOS = { oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞" };
-const GRUPOS = [["oportunidad", "Oportunidades"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["cobrar", "Cobrar"], ["pagar", "Pagar"], ["llamar", "Llamar a clientes"]];
+const ICONOS = { oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞", aceptar: "✋", confirmar: "✅", facturar: "🧾", despachar: "🚚", entregar: "🏁" };
+const GRUPOS = [["oportunidad", "Oportunidades"], ["llamar", "Llamar a clientes"], ["facturar", "Facturar"], ["aceptar", "Aceptar ventas"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["confirmar", "Confirmar ventas"], ["despachar", "Despachar"], ["entregar", "Confirmar entregas"], ["cobrar", "Cobrar"], ["pagar", "Pagar"]];
 
 // Lista de lo que hay que hacer, lo urgente primero
 function QueHacer({ tareas, irA }) {
@@ -57,6 +57,7 @@ export function InicioDepto({ depto, notify, irA }) {
   if (!data) return <Cargando />;
   const tareas = (data.tareas || []).filter((t) => t.depto === depto);
   const adj = data.adjudicado;
+  const f = data.flujo || {};
   const tarjeta = (titulo, r) => (
     <div className="panel adjudicado">
       <div className="panel-titulo">{titulo} <span className="mini">(con IVA)</span></div>
@@ -68,6 +69,12 @@ export function InicioDepto({ depto, notify, irA }) {
   return (
     <>
       <QueHacer tareas={tareas} irA={irA} />
+      {depto === "comercial" && (
+        <div className="kpis">
+          <Kpi label="Por facturar" valor={f.por_facturar ?? 0} sub="productos listos, sin factura completa" onClick={() => irA("facturacion")} />
+          <Kpi label="En compra" valor={(f.por_aceptar ?? 0) + (f.por_comprar ?? 0)} sub="Operativo las está gestionando" onClick={() => irA("ventas")} />
+        </div>
+      )}
       {depto === "comercial" && adj && (
         <div className="dash-grid">
           {tarjeta(`Adjudicado esta semana (desde el ${new Date(`${adj.desde_semana}T12:00:00`).toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit" })})`, adj.semana)}
@@ -76,8 +83,10 @@ export function InicioDepto({ depto, notify, irA }) {
       )}
       {depto === "operativo" && (
         <div className="kpis">
-          <Kpi label="Ventas por comprar" valor={tareas.filter((t) => t.tipo === "comprar").length} sub="sin órdenes de compra" onClick={() => irA("ventas")} />
-          <Kpi label="Pedidos por recibir" valor={tareas.filter((t) => t.tipo === "recibir").length} sub="órdenes pedidas hace 2 días o más" onClick={() => irA("compras")} />
+          <Kpi label="Ventas por aceptar" valor={f.por_aceptar ?? 0} sub="nuevas, registradas por Comercial" onClick={() => irA("ventas")} />
+          <Kpi label="Ventas por comprar" valor={f.por_comprar ?? 0} sub="sin órdenes de compra" onClick={() => irA("ventas")} />
+          <Kpi label="Por confirmar" valor={f.por_confirmar ?? 0} sub="llegó todo: confirmar para facturar" onClick={() => irA("ventas")} />
+          <Kpi label="Por despachar" valor={f.por_despachar ?? 0} sub="productos listos" onClick={() => irA("despachos")} />
         </div>
       )}
     </>

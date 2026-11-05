@@ -35,6 +35,46 @@ async function migrar() {
   await q(`ALTER TABLE cotizaciones DROP CONSTRAINT IF EXISTS cotizaciones_empresa_numero_uq`);
   await reinicioCotizaciones(q);
   await codigosClientes(q);
+  await recorridoVentas();
+}
+
+// Una sola vez (paso 3, nov-2026): cada venta toma su etapa según cómo va, el N° de factura que tenía pasa
+// a ser una factura registrada, y se deshacen los "proyectos" que juntaban varias OC (una OC = una venta).
+async function recorridoVentas() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_recorrido_ventas'`);
+  if (hecho) return;
+  await sequelize.transaction(async (t) => {
+    const qt = (sql) => sequelize.query(sql, { transaction: t });
+    // Facturas: el N° que estaba en "documento" queda como una factura por el total
+    await qt(`INSERT INTO facturas (venta_id, numero, fecha, monto, notas, creado_por, "createdAt", "updatedAt")
+      SELECT id, TRIM(documento), fecha, total, 'Traspasada del sistema anterior', creado_por, NOW(), NOW()
+        FROM ventas v WHERE estado <> 'anulada' AND documento IS NOT NULL AND TRIM(documento) <> ''
+         AND NOT EXISTS (SELECT 1 FROM facturas f WHERE f.venta_id = v.id)`);
+    await qt(`UPDATE ventas v SET monto_facturado = s.monto,
+        estado_factura = CASE WHEN s.monto >= v.total - 1 THEN 'facturada' ELSE 'parcial' END
+      FROM (SELECT venta_id, SUM(monto) AS monto FROM facturas GROUP BY venta_id) s WHERE s.venta_id = v.id`);
+    // Compras consolidadas de un proyecto con una sola venta: pasan a esa venta
+    await qt(`UPDATE ordenes_compra o SET venta_id = p.venta_id
+      FROM (SELECT proyecto_id, MIN(id) AS venta_id FROM ventas WHERE proyecto_id IS NOT NULL AND estado <> 'anulada'
+             GROUP BY proyecto_id HAVING COUNT(*) = 1) p
+     WHERE o.proyecto_id = p.proyecto_id AND o.venta_id IS NULL`);
+    await qt(`UPDATE ventas SET proyecto_id = NULL WHERE proyecto_id IS NOT NULL`);
+    await qt(`UPDATE ordenes_compra SET proyecto_id = NULL WHERE proyecto_id IS NOT NULL`);
+    // Etapa según las compras: todas recibidas -> lista; con compras -> aceptada; sin compras -> registrada.
+    // Las ya pagadas por el cliente se dan por entregadas.
+    await qt(`UPDATE ventas v SET etapa = CASE
+        WHEN v.estado_pago = 'pagada' THEN 'entregada'
+        WHEN c.n > 0 AND c.n = c.recibidas THEN 'lista'
+        WHEN c.n > 0 THEN 'aceptada'
+        ELSE 'registrada' END,
+        aceptada_fecha = CASE WHEN c.n > 0 OR v.estado_pago = 'pagada' THEN v."createdAt" END,
+        lista_fecha = CASE WHEN (c.n > 0 AND c.n = c.recibidas) OR v.estado_pago = 'pagada' THEN v."updatedAt" END
+      FROM (SELECT v2.id, COUNT(o.id) AS n, COUNT(o.id) FILTER (WHERE o.estado = 'recibida') AS recibidas
+              FROM ventas v2 LEFT JOIN ordenes_compra o ON o.venta_id = v2.id AND o.estado <> 'anulada' GROUP BY v2.id) c
+     WHERE c.id = v.id`);
+    await qt(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_recorrido_ventas', NOW()::text, NOW(), NOW())`);
+    console.log("✓ Ventas con etapas y facturas (recorrido nuevo)");
+  });
 }
 
 // Una sola vez (decisión de gerencia, nov-2026): las cotizaciones parten de cero en N°100 en ambas empresas.

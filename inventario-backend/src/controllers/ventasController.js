@@ -8,7 +8,8 @@ const Proveedor = require("../models/Proveedor");
 const OrdenCompra = require("../models/OrdenCompra");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
-const Proyecto = require("../models/Proyecto");
+const Factura = require("../models/Factura");
+const { ETAPAS } = require("../models/Venta");
 const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago, sumarDias, redondear,
 } = require("../services/erp");
@@ -35,7 +36,16 @@ const numeroVenta = (id) => `V-${String(id).padStart(4, "0")}`;
 // después se compra al proveedor (cuadro de compra).
 // datos.items: [{ producto_id, cantidad, precio?, costo?, proveedor?, nombre? }]
 // Si vienen costo/proveedor (desde la cotización) se respetan; si no, se toman del catálogo.
+// Una OC = una venta: el N° de OC del cliente no puede estar en otra venta vigente
+const ocLibre = async (oc, ventaId, t) => {
+  const n = String(oc || "").trim();
+  if (!n) return;
+  const otra = await Venta.findOne({ where: { orden_compra_cliente: { [Op.iLike]: n }, estado: { [Op.ne]: "anulada" }, ...(ventaId ? { id: { [Op.ne]: ventaId } } : {}) }, transaction: t });
+  if (otra) throw new ErrorNegocio(`La OC ${n} ya está registrada en la venta ${otra.numero}. Una OC es una sola venta: si tiene varias facturas, regístralas en esa venta.`);
+};
+
 const crearVentaEnTransaccion = async (datos, t) => {
+  await ocLibre(datos.orden_compra_cliente, null, t);
   const items = normalizarItems((datos.items || []).map((i) => ({ ...i, precio: i.precio ?? 0 })));
   const productos = await Producto.findAll({ where: { id: items.map((i) => i.producto_id) }, transaction: t });
   const mapa = new Map(productos.map((p) => [p.id, p]));
@@ -81,12 +91,11 @@ const crearVentaEnTransaccion = async (datos, t) => {
     cliente_nombre,
     cotizacion_id: datos.cotizacion_id || null,
     empresa: validarEmpresa(datos.empresa),
-    orden_compra_cliente: datos.orden_compra_cliente || null,
+    orden_compra_cliente: String(datos.orden_compra_cliente || "").trim() || null,
     // ID del cliente o de la solicitud (ventas sin OC se identifican con él)
     id_solicitud: String(datos.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null),
     fecha_vencimiento: venc,
-    documento: datos.documento || null,
-    notas: datos.notas || null,
+    notas: datos.notas || null, // la factura no se pide al crear: se registra después en Facturación
     creado_por: datos.creado_por || null,
     items: itemsFinal,
     ...totales,
@@ -116,21 +125,23 @@ const getVentas = handler(async (req, res) => {
     where[Op.or] = ["numero", "cliente_nombre", "documento", "orden_compra_cliente", "id_solicitud"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
   if (req.query.empresa) where.empresa = req.query.empresa;
-  if (req.query.proyecto_id === "ninguno") where.proyecto_id = null;
-  else if (req.query.proyecto_id) where.proyecto_id = req.query.proyecto_id;
+  if (req.query.etapa) where.etapa = String(req.query.etapa).split(",");
+  if (req.query.estado_factura) where.estado_factura = String(req.query.estado_factura).split(",");
   const data = await Venta.findAll({ where, order: [["id", "DESC"]] });
-  // Cuántas órdenes de compra tiene cada venta (para saber cuáles faltan por comprar).
-  // Una compra consolidada del proyecto cuenta para todas sus ventas.
-  const proyIds = [...new Set(data.map((v) => v.proyecto_id).filter(Boolean))];
+  // Órdenes de compra de cada venta: cuántas hay y cuántas llegaron (para saber qué falta comprar o recibir)
   const ocs = data.length ? await OrdenCompra.findAll({
-    where: { estado: { [Op.ne]: "anulada" }, [Op.or]: [{ venta_id: data.map((v) => v.id) }, ...(proyIds.length ? [{ proyecto_id: proyIds }] : [])] },
-    attributes: ["venta_id", "proyecto_id"], raw: true,
+    where: { estado: { [Op.ne]: "anulada" }, venta_id: data.map((v) => v.id) }, attributes: ["venta_id", "estado"], raw: true,
   }) : [];
-  const conOC = new Set(ocs.map((o) => o.venta_id).filter(Boolean));
-  const proyConOC = new Set(ocs.map((o) => o.proyecto_id).filter(Boolean));
-  const proyectos = proyIds.length ? await Proyecto.findAll({ where: { id: proyIds }, attributes: ["id", "numero", "nombre"], raw: true }) : [];
-  const proy = new Map(proyectos.map((p) => [p.id, p]));
-  res.json({ ok: true, data: data.map((v) => ({ ...verVenta(req, v), tiene_compras: conOC.has(v.id) || (!!v.proyecto_id && proyConOC.has(v.proyecto_id)), proyecto: proy.get(v.proyecto_id) || null })) });
+  const compras = new Map();
+  for (const o of ocs) {
+    const c = compras.get(o.venta_id) || { ordenes: 0, recibidas: 0 };
+    c.ordenes += 1; if (o.estado === "recibida") c.recibidas += 1;
+    compras.set(o.venta_id, c);
+  }
+  res.json({ ok: true, data: data.map((v) => {
+    const c = compras.get(v.id) || { ordenes: 0, recibidas: 0 };
+    return { ...verVenta(req, v), tiene_compras: c.ordenes > 0, compras: c };
+  }) });
 });
 
 // Gastos y utilidad de una venta
@@ -164,8 +175,9 @@ const getVenta = handler(async (req, res) => {
   let extra = tieneRol(req, "operativo") ? await resumenVenta(venta) : {};
   // Márgenes y utilidad son de Finanzas (gerencia)
   if (extra.resumen && !esAdmin(req)) extra = { ...extra, resumen: undefined, gastos: [] };
-  const proyecto = venta.proyecto_id ? await Proyecto.findByPk(venta.proyecto_id, { attributes: ["id", "numero", "nombre"] }) : null;
-  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, proyecto, ...extra } });
+  const facturas = await Factura.findAll({ where: { venta_id: venta.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
+  const ocs = await OrdenCompra.findAll({ where: { venta_id: venta.id, estado: { [Op.ne]: "anulada" } }, attributes: ["id", "numero", "proveedor_nombre", "estado"], raw: true });
+  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, facturas, compras: { ordenes: ocs.length, recibidas: ocs.filter((o) => o.estado === "recibida").length, detalle: ocs }, ...extra } });
 });
 
 // POST /api/ventas   (venta directa, sin cotización)
@@ -219,6 +231,7 @@ const anularVenta = handler(async (req, res) => {
     if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
     if (v.estado === "anulada") throw new ErrorNegocio("La venta ya está anulada");
     if (Number(v.monto_pagado) > 0) throw new ErrorNegocio("La venta tiene cobros registrados. Elimínalos antes de anular.");
+    if (await Factura.count({ where: { venta_id: v.id }, transaction: t })) throw new ErrorNegocio("La venta tiene facturas registradas. Quítalas (o emite la nota de crédito) antes de anular.");
     const ocs = await OrdenCompra.count({ where: { venta_id: v.id, estado: "recibida" }, transaction: t });
     if (ocs > 0) throw new ErrorNegocio("La venta tiene compras recibidas. Anúlalas primero en Compras.");
     await OrdenCompra.update({ estado: "anulada" }, { where: { venta_id: v.id, estado: "borrador" }, transaction: t });
@@ -253,12 +266,14 @@ const registrarCobro = handler(async (req, res) => {
   res.status(201).json({ ok: true, data: resultado });
 });
 
-// PUT /api/ventas/:id/datos   { documento, orden_compra_cliente, fecha_vencimiento, notas }
+// PUT /api/ventas/:id/datos   { orden_compra_cliente, id_solicitud, fecha_vencimiento, notas }
+// (las facturas se registran aparte: POST /api/ventas/:id/facturas)
 const actualizarDatos = handler(async (req, res) => {
   const v = await Venta.findByPk(req.params.id);
   if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  if ("orden_compra_cliente" in req.body) await ocLibre(req.body.orden_compra_cliente, v.id);
   const cambios = {};
-  for (const c of ["documento", "orden_compra_cliente", "id_solicitud", "fecha_vencimiento", "notas"]) if (c in req.body) cambios[c] = req.body[c] || null;
+  for (const c of ["orden_compra_cliente", "id_solicitud", "fecha_vencimiento", "notas"]) if (c in req.body) cambios[c] = String(req.body[c] ?? "").trim() || null;
   await v.update(cambios);
   res.json({ ok: true, data: verVenta(req, v) });
 });
@@ -278,9 +293,7 @@ const getCuadroCompra = handler(async (req, res) => {
   ]);
   const prodMap = new Map(productos.map((p) => [p.id, p]));
   const provMap = new Map(proveedores.map((p) => [normProv(p.nombre), p]));
-  const delProyecto = venta.proyecto_id ? await OrdenCompra.findAll({ where: { proyecto_id: venta.proyecto_id, estado: { [Op.ne]: "anulada" } } }) : [];
-  const ocPorProv = new Map([...delProyecto.map((o) => ({ id: o.id, numero: `${o.numero} (proyecto)`, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: o.subtotal, estado_pago: o.estado_pago })), ...extra.ordenes]
-    .map((o) => [normProv(o.proveedor_nombre), o]));
+  const ocPorProv = new Map(extra.ordenes.map((o) => [normProv(o.proveedor_nombre), o]));
 
   const grupos = new Map();
   venta.items.forEach((i, indice) => {
@@ -320,7 +333,7 @@ const getCuadroCompra = handler(async (req, res) => {
   res.json({
     ok: true,
     data: {
-      venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, id_solicitud: venta.id_solicitud, subtotal: venta.subtotal, costo_total: venta.costo_total },
+      venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, id_solicitud: venta.id_solicitud, etapa: venta.etapa, subtotal: venta.subtotal, costo_total: venta.costo_total },
       grupos: lista,
       totales: {
         compra: redondear(Number(venta.costo_total)),
@@ -360,8 +373,7 @@ const generarOrdenes = handler(async (req, res) => {
     const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
     if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
-    // También cuentan las compras consolidadas del proyecto (para no comprar dos veces)
-    const existentes = await OrdenCompra.findAll({ where: { estado: { [Op.ne]: "anulada" }, [Op.or]: [{ venta_id: v.id }, ...(v.proyecto_id ? [{ proyecto_id: v.proyecto_id }] : [])] }, transaction: t });
+    const existentes = await OrdenCompra.findAll({ where: { estado: { [Op.ne]: "anulada" }, venta_id: v.id }, transaction: t });
     const yaTiene = new Set(existentes.map((o) => normProv(o.proveedor_nombre)));
     const filtro = Array.isArray(req.body?.proveedores) ? new Set(req.body.proveedores.map(normProv)) : null;
 
@@ -376,7 +388,7 @@ const generarOrdenes = handler(async (req, res) => {
     for (const [prov, items] of grupos) {
       if (filtro && !filtro.has(prov)) continue;
       if (prov === SIN_PROVEEDOR) { omitidos.push(`${items.length} producto(s) sin proveedor`); continue; }
-      if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden${v.proyecto_id ? " (en la venta o en el proyecto)" : ""}`); continue; }
+      if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden`); continue; }
       let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
       if (!ficha) ficha = await Proveedor.create({ nombre: prov }, { transaction: t });
       const lineas = items.map((i) => ({
@@ -392,12 +404,127 @@ const generarOrdenes = handler(async (req, res) => {
       await oc.update({ numero: `OC-${String(oc.id).padStart(4, "0")}` }, { transaction: t });
       creadas.push(oc);
     }
+    // Generar las compras significa que Operativo tomó la venta
+    if (creadas.length && v.etapa === "registrada") await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: req.usuario.nombre }, { transaction: t });
     return { creadas, omitidos };
   });
   res.status(201).json({ ok: true, data: resultado });
 });
 
+// --- Recorrido de la venta: aceptar, confirmar, facturar, despachar, entregar ---------------
+
+const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+const conVenta = (fn) => handler(async (req, res) => {
+  const venta = await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
+    await fn(v, req, t);
+    return v;
+  });
+  res.json({ ok: true, data: verVenta(req, venta) });
+});
+const exigirEtapa = (v, ...etapas) => {
+  if (!etapas.includes(v.etapa)) throw new ErrorNegocio(`La venta ${v.numero} está "${v.etapa}"; esta acción es para ventas ${etapas.join(" o ")}`);
+};
+
+// POST /api/ventas/:id/aceptar   (Operativo toma la venta para comprar)
+const aceptarVenta = conVenta(async (v, req, t) => {
+  exigirEtapa(v, "registrada");
+  await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: req.usuario.nombre }, { transaction: t });
+});
+
+// POST /api/ventas/:id/confirmar   (Operativo: llegaron los productos -> lista para facturar y despachar)
+// { forzar: true } para confirmar aunque haya órdenes de compra sin recibir (p.ej. se retiró en el local)
+const confirmarVenta = conVenta(async (v, req, t) => {
+  exigirEtapa(v, "registrada", "aceptada");
+  const ocs = await OrdenCompra.findAll({ where: { venta_id: v.id, estado: { [Op.ne]: "anulada" } }, transaction: t });
+  const pendientes = ocs.filter((o) => o.estado !== "recibida");
+  if (pendientes.length && !req.body?.forzar) {
+    throw new ErrorNegocio(`Faltan por recibir: ${pendientes.map((o) => `${o.numero} (${o.proveedor_nombre})`).join(", ")}. Márcalas recibidas en Compras o confirma igual.`, 409);
+  }
+  await v.update({
+    etapa: "lista", lista_fecha: new Date(), lista_por: req.usuario.nombre,
+    ...(v.aceptada_fecha ? {} : { aceptada_fecha: new Date(), aceptada_por: req.usuario.nombre }),
+  }, { transaction: t });
+});
+
+// POST /api/ventas/:id/despachar   { fecha, guia }
+const despacharVenta = conVenta(async (v, req, t) => {
+  exigirEtapa(v, "lista");
+  await v.update({ etapa: "despachada", despacho_fecha: req.body?.fecha || hoy(), guia_despacho: String(req.body?.guia || "").trim() || null, despacho_por: req.usuario.nombre }, { transaction: t });
+});
+
+// POST /api/ventas/:id/entregar   { fecha, recibido_por }
+const entregarVenta = conVenta(async (v, req, t) => {
+  exigirEtapa(v, "despachada", "lista");
+  await v.update({
+    etapa: "entregada", entrega_fecha: req.body?.fecha || hoy(), recibido_por: String(req.body?.recibido_por || "").trim() || null,
+    ...(v.despacho_fecha ? {} : { despacho_fecha: req.body?.fecha || hoy(), despacho_por: req.usuario.nombre }),
+  }, { transaction: t });
+});
+
+// POST /api/ventas/:id/retroceder   (gerencia: deshace el último paso si se marcó por error)
+const retrocederEtapa = conVenta(async (v, req, t) => {
+  const i = ETAPAS.indexOf(v.etapa);
+  if (i <= 0) throw new ErrorNegocio("La venta ya está en la primera etapa");
+  const limpiar = {
+    aceptada: { aceptada_fecha: null, aceptada_por: null },
+    lista: { lista_fecha: null, lista_por: null },
+    despachada: { despacho_fecha: null, guia_despacho: null, despacho_por: null },
+    entregada: { entrega_fecha: null, recibido_por: null },
+  }[v.etapa];
+  await v.update({ etapa: ETAPAS[i - 1], ...limpiar }, { transaction: t });
+});
+
+// Recalcula lo facturado de la venta y el resumen de N° de facturas
+const recalcularFacturas = async (v, t) => {
+  const facturas = await Factura.findAll({ where: { venta_id: v.id }, order: [["fecha", "ASC"], ["id", "ASC"]], transaction: t });
+  const monto = facturas.reduce((s, f) => s + Number(f.monto), 0);
+  const estado = !facturas.length ? "sin_factura" : monto >= Number(v.total) - 1 ? "facturada" : "parcial";
+  await v.update({ monto_facturado: monto, estado_factura: estado, documento: facturas.map((f) => f.numero).join(", ").slice(0, 255) || null }, { transaction: t });
+};
+
+// POST /api/ventas/:id/facturas   { numero, fecha, monto (con IVA; vacío = lo que falta por facturar), notas }
+const agregarFactura = conVenta(async (v, req, t) => {
+  if (!["lista", "despachada", "entregada"].includes(v.etapa) && !req.body?.forzar) {
+    throw new ErrorNegocio("Operativo aún no confirma esta venta (productos listos). ¿Facturar igual?", 409);
+  }
+  const numero = String(req.body?.numero || "").trim();
+  if (!numero) throw new ErrorNegocio("Indica el N° de factura");
+  const repetida = await Factura.findOne({ where: { numero }, transaction: t });
+  if (repetida) {
+    const otra = await Venta.findByPk(repetida.venta_id, { attributes: ["numero"], transaction: t });
+    throw new ErrorNegocio(`La factura ${numero} ya está registrada${otra ? ` en la venta ${otra.numero}` : ""}`);
+  }
+  const falta = Math.round(Number(v.total) - Number(v.monto_facturado));
+  const monto = req.body?.monto === undefined || req.body?.monto === "" || req.body?.monto === null ? falta : Math.round(Number(req.body.monto));
+  if (!(monto > 0)) throw new ErrorNegocio(falta <= 0 ? "La venta ya está facturada completa" : "Monto inválido");
+  if (monto > falta + 1) throw new ErrorNegocio(`El monto supera lo que falta por facturar ($${falta.toLocaleString("es-CL")})`);
+  await Factura.create({ venta_id: v.id, numero, fecha: req.body?.fecha || hoy(), monto, notas: req.body?.notas || null, creado_por: req.usuario.nombre }, { transaction: t });
+  await recalcularFacturas(v, t);
+});
+
+// DELETE /api/ventas/:id/facturas/:facturaId   (se ingresó por error)
+const quitarFactura = conVenta(async (v, req, t) => {
+  const f = await Factura.findOne({ where: { id: req.params.facturaId, venta_id: v.id }, transaction: t });
+  if (!f) throw new ErrorNegocio("Factura no encontrada", 404);
+  await f.destroy({ transaction: t });
+  await recalcularFacturas(v, t);
+});
+
+// GET /api/ventas/facturas/lista?desde=&hasta=   (registro de facturas emitidas)
+const listarFacturas = handler(async (req, res) => {
+  const where = {};
+  if (req.query.desde || req.query.hasta) where.fecha = { ...(req.query.desde && { [Op.gte]: req.query.desde }), ...(req.query.hasta && { [Op.lte]: req.query.hasta }) };
+  const facturas = await Factura.findAll({ where, order: [["fecha", "DESC"], ["id", "DESC"]], limit: 500 });
+  const ventas = facturas.length ? await Venta.findAll({ where: { id: [...new Set(facturas.map((f) => f.venta_id))] }, attributes: ["id", "numero", "cliente_nombre", "empresa", "orden_compra_cliente", "id_solicitud"], raw: true }) : [];
+  const mapa = new Map(ventas.map((v) => [v.id, v]));
+  res.json({ ok: true, data: facturas.map((f) => ({ ...f.toJSON(), venta: mapa.get(f.venta_id) || null })) });
+});
+
 module.exports = {
+  aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
   getCuadroCompra, cambiarProveedorLinea, generarOrdenes,

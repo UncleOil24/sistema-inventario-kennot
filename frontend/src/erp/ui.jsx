@@ -222,3 +222,35 @@ export function SelectorProducto({ valor, candidatos = [], productos, onChange, 
     </div>
   );
 }
+
+// Recorrido de una venta (una OC = una venta)
+export const ETAPAS_VENTA = [
+  ["registrada", "Registrada", "Comercial la ingresó; falta que Operativo la acepte"],
+  ["aceptada", "En compra", "Operativo la aceptó y está comprando"],
+  ["lista", "Productos listos", "Llegó todo: lista para facturar y despachar"],
+  ["despachada", "Despachada", "Salió hacia el cliente"],
+  ["entregada", "Entregada", "El cliente la recibió"],
+];
+const TONO_ETAPA = { registrada: "warn", aceptada: "info", lista: "ok", despachada: "info", entregada: "neutral" };
+const FACTURA = { sin_factura: ["Sin factura", "muted"], parcial: ["Factura parcial", "warn"], facturada: ["Facturada", "ok"] };
+export function Etapa({ valor }) {
+  const e = ETAPAS_VENTA.find(([k]) => k === valor);
+  return <span className={`estado estado-${TONO_ETAPA[valor] || "neutral"}`} title={e?.[2]}>{e?.[1] || valor}</span>;
+}
+export function EstadoFactura({ valor }) {
+  const [txt, tono] = FACTURA[valor] || [valor, "neutral"];
+  return <span className={`estado estado-${tono}`}>{txt}</span>;
+}
+// Línea de pasos: registrada → en compra → listos → despachada → entregada
+export function Recorrido({ etapa }) {
+  const i = ETAPAS_VENTA.findIndex(([k]) => k === etapa);
+  return (
+    <div className="recorrido">
+      {ETAPAS_VENTA.map(([k, t], n) => (
+        <div key={k} className={`paso ${n < i ? "hecho" : n === i ? "actual" : ""}`} title={ETAPAS_VENTA[n][2]}>
+          <span className="paso-num">{n < i ? "✓" : n + 1}</span>{t}
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -107,16 +107,16 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   );
 }
 
-// Agrupa las órdenes por la venta (o el proyecto) para la que se compró; las demás van en "Compras sueltas"
+// Agrupa las órdenes por la venta para la que se compró (una OC del cliente = una venta); las demás van en "Compras sueltas"
 function grupos(ordenes) {
   const mapa = new Map();
   for (const o of ordenes) {
-    const clave = o.venta ? `v${o.venta.id}` : o.proyecto ? `p${o.proyecto.id}` : "sueltas";
-    if (!mapa.has(clave)) mapa.set(clave, { clave, venta: o.venta, proyecto: o.proyecto, ordenes: [] });
+    const clave = o.venta ? `v${o.venta.id}` : "sueltas";
+    if (!mapa.has(clave)) mapa.set(clave, { clave, venta: o.venta, ordenes: [] });
     mapa.get(clave).ordenes.push(o);
   }
   const lista = [...mapa.values()];
-  // La venta/proyecto con la orden más nueva primero; las sueltas al final
+  // La venta con la orden más nueva primero; las sueltas al final
   lista.sort((a, b) => (a.clave === "sueltas") - (b.clave === "sueltas") || Math.max(...b.ordenes.map((o) => o.id)) - Math.max(...a.ordenes.map((o) => o.id)));
   return lista;
 }
@@ -128,7 +128,6 @@ function GrupoCompras({ g, verDetalle }) {
   const saldo = vivas.filter((o) => o.estado === "recibida").reduce((s, o) => s + Number(o.total) - Number(o.monto_pagado), 0);
   const titulo = g.venta
     ? <>Venta <strong>{g.venta.numero}</strong> · {g.venta.cliente_nombre || "Sin cliente"}{g.venta.orden_compra_cliente ? ` · OC cliente ${g.venta.orden_compra_cliente}` : ""}{g.venta.id_solicitud ? ` · ID ${g.venta.id_solicitud}` : ""}{g.venta.empresa === "tactics" ? " · Tactics" : ""}</>
-    : g.proyecto ? <>Proyecto <strong>{g.proyecto.numero}</strong> · {g.proyecto.nombre} (compra consolidada)</>
     : <>Compras sueltas (sin venta)</>;
   return (
     <>
@@ -148,7 +147,7 @@ function FilaOrden({ o, verDetalle, conPara, sangria }) {
       <td className="id-cell" style={sangria ? { paddingLeft: 28 } : undefined}>{sangria ? "└ " : ""}{o.numero}</td>
       <td className="mini">{fecha(o.fecha)}</td>
       <td>{o.proveedor_nombre}</td>
-      {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}${o.venta.id_solicitud ? ` · ID ${o.venta.id_solicitud}` : ""}` : o.proyecto ? `${o.proyecto.numero} (proyecto)` : "—"}</td>}
+      {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}${o.venta.id_solicitud ? ` · ID ${o.venta.id_solicitud}` : ""}` : "—"}</td>}
       <td className="mini">{o.documento || "—"}</td>
       <td className="price-cell">{fmt(o.total)}</td>
       <td><Estado valor={o.estado} /></td>
@@ -283,9 +282,8 @@ function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, 
       </div>
       <div className="field">
         <label>Para la venta</label>
-        <SelectorVenta valor={orden.venta_id} disabled={!!orden.proyecto_id}
+        <SelectorVenta valor={orden.venta_id}
           onChange={(venta_id) => accion(() => api(`/ordenes-compra/${orden.id}/venta`, { method: "PUT", body: { venta_id } }), venta_id ? "✓ Orden asignada a la venta" : "Orden quitada de la venta")} />
-        {orden.proyecto_id && <span className="mini">Es la compra consolidada de un proyecto.</span>}
       </div>
       {orden.notas && !orden.venta_id && <div className="mini">{orden.notas}</div>}
       <div className="table-wrap">

@@ -5,7 +5,6 @@ const Proveedor = require("../models/Proveedor");
 const Producto = require("../models/Producto");
 const Pago = require("../models/Pago");
 const Venta = require("../models/Venta");
-const Proyecto = require("../models/Proyecto");
 const PrecioProveedor = require("../models/PrecioProveedor");
 const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago,
@@ -38,7 +37,6 @@ const getOrdenes = handler(async (req, res) => {
   const { estado, estado_pago, proveedor_id, venta_id, busqueda } = req.query;
   const where = {};
   if (venta_id) where.venta_id = venta_id;
-  if (req.query.proyecto_id) where.proyecto_id = req.query.proyecto_id;
   if (estado) where.estado = estado;
   if (estado_pago) where.estado_pago = estado_pago;
   if (proveedor_id) where.proveedor_id = proveedor_id;
@@ -46,16 +44,11 @@ const getOrdenes = handler(async (req, res) => {
     where[Op.or] = ["numero", "proveedor_nombre", "documento", "notas"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
   const data = await OrdenCompra.findAll({ where, order: [["id", "DESC"]] });
-  // Venta o proyecto para el que se compró (para agrupar en la lista)
+  // Venta para la que se compró (para agrupar en la lista)
   const ventaIds = [...new Set(data.map((o) => o.venta_id).filter(Boolean))];
-  const proyIds = [...new Set(data.map((o) => o.proyecto_id).filter(Boolean))];
-  const [ventas, proyectos] = await Promise.all([
-    ventaIds.length ? Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "id_solicitud", "fecha", "subtotal", "empresa", "proyecto_id"], raw: true }) : [],
-    proyIds.length ? Proyecto.findAll({ where: { id: proyIds }, attributes: ["id", "numero", "nombre", "cliente_nombre"], raw: true }) : [],
-  ]);
+  const ventas = ventaIds.length ? await Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "id_solicitud", "fecha", "subtotal", "empresa", "etapa"], raw: true }) : [];
   const v = new Map(ventas.map((x) => [x.id, x]));
-  const pr = new Map(proyectos.map((x) => [x.id, x]));
-  res.json({ ok: true, data: data.map((o) => ({ ...o.toJSON(), venta: v.get(o.venta_id) || null, proyecto: pr.get(o.proyecto_id) || null })) });
+  res.json({ ok: true, data: data.map((o) => ({ ...o.toJSON(), venta: v.get(o.venta_id) || null })) });
 });
 
 // GET /api/ordenes-compra/:id  (incluye pagos)
