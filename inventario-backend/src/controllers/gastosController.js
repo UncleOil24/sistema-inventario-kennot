@@ -1,3 +1,4 @@
+const { firma } = require("../middlewares/auth");
 const { Op } = require("sequelize");
 const Gasto = require("../models/Gasto");
 const Venta = require("../models/Venta");
@@ -48,7 +49,7 @@ const getGastos = handler(async (req, res) => {
 const crearGasto = handler(async (req, res) => {
   const d = await datos({ tipo: "general", ...req.body });
   if (!d.monto) throw new ErrorNegocio("Indica el monto");
-  const g = await Gasto.create({ ...d, creado_por: req.usuario.nombre });
+  const g = await Gasto.create({ ...d, creado_por: firma(req) });
   res.status(201).json({ ok: true, data: g });
 });
 

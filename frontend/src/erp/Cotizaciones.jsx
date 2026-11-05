@@ -105,7 +105,10 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                 <div className="hist-info">
                   <div className="hist-nombre">{nombreCot(c)} · {c.nombre_cotizacion || "Sin nombre"}</div>
                   <div className="hist-meta">
-                    {c.id_solicitud && <span className="id-solicitud" title="ID del cliente o de la solicitud">ID {c.id_solicitud}</span>}
+                    {c.id_solicitud
+                      ? <span className="id-solicitud" title="ID del cliente o de la solicitud de Mercado Público">ID {c.id_solicitud}</span>
+                      : <span className="mini" style={{ color: "var(--warn)" }} title="Edítala para agregar el ID del cliente o de la solicitud">sin ID</span>}
+                    {c.creado_por && <span title="Quién la hizo">por {c.creado_por}</span>}
                     <Estado valor={c.empresa || "kenott"} />
                     <span>{c.cliente || "Sin cliente"}</span>
                     <span>{fecha(c.fecha || c.createdAt)}</span>

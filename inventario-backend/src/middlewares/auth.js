@@ -47,6 +47,9 @@ const tieneRol = (req, ...roles) => esGerencia(req) || roles.includes(req.usuari
 // Costos de compra y proveedores (catálogo, cotizaciones): todos menos el rol antiguo "usuario"
 const veCostos = (req) => tieneRol(req, "comercial", "operativo");
 
+// Quién hizo algo, con su área: "Nicol Orellana (Comercial)". Así se distingue cuando gerencia cubre a otro departamento.
+const AREA = { admin: "Gerencia", gerencia: "Gerencia", comercial: "Comercial", operativo: "Operativo", usuario: "Comercial" };
+const firma = (req) => (req.usuario ? `${req.usuario.nombre} (${AREA[req.usuario.rol] || req.usuario.rol})`.slice(0, 100) : "Sistema");
 const permite = (...roles) => (req, res, next) => {
   if (!tieneRol(req, ...roles)) return res.status(403).json({ ok: false, error: "Tu departamento no tiene acceso a esta acción" });
   next();
@@ -54,4 +57,4 @@ const permite = (...roles) => (req, res, next) => {
 const soloAdmin = permite(); // solo gerencia
 const soloGerencia = soloAdmin;
 
-module.exports = { firmarToken, requiereAuth, soloAdmin, soloGerencia, esAdmin, esGerencia, tieneRol, veCostos, permite };
+module.exports = { firma, AREA, firmarToken, requiereAuth, soloAdmin, soloGerencia, esAdmin, esGerencia, tieneRol, veCostos, permite };

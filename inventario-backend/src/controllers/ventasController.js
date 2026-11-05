@@ -1,3 +1,4 @@
+const { firma } = require("../middlewares/auth");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/database");
 const Venta = require("../models/Venta");
@@ -9,6 +10,7 @@ const OrdenCompra = require("../models/OrdenCompra");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
 const Factura = require("../models/Factura");
+const { asignarUnidadCliente } = require("../services/clientesMP");
 const { ETAPAS } = require("../models/Venta");
 const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago, sumarDias, redondear,
@@ -114,6 +116,7 @@ const crearVentaEnTransaccion = async (datos, t) => {
     costo_total,
   }, { transaction: t });
   await venta.update({ numero: numeroVenta(venta.id) }, { transaction: t });
+  await asignarUnidadCliente(venta.cliente_id, venta.id_solicitud, t);
 
   if (datos.pagada_al_contado) {
     await Pago.create({
@@ -195,7 +198,7 @@ const getVenta = handler(async (req, res) => {
 // POST /api/ventas   (venta directa, sin cotización)
 const crearVenta = handler(async (req, res) => {
   const venta = await sequelize.transaction((t) =>
-    crearVentaEnTransaccion({ ...req.body, creado_por: req.usuario.nombre }, t));
+    crearVentaEnTransaccion({ ...req.body, creado_por: firma(req) }, t));
   res.status(201).json({ ok: true, data: verVenta(req, venta) });
 });
 
@@ -223,7 +226,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
       cotizacion_id: cot.id,
       id_solicitud: cot.id_solicitud,
       empresa: cot.empresa,
-      creado_por: req.usuario.nombre,
+      creado_por: firma(req),
       notas: req.body?.notas || cot.nombre_cotizacion,
       items: cot.items.map((i) => ({
         producto_id: i.producto_id ?? i.id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
@@ -273,14 +276,14 @@ const registrarCobro = handler(async (req, res) => {
     // Factoring: la factura queda saldada por el monto cedido; la comisión es un gasto financiero de la venta
     const gasto = comision > 0 ? await Gasto.create({
       fecha: req.body.fecha || new Date(), tipo: "financiero", monto: comision, venta_id: v.id,
-      descripcion: `Comisión factoring ${req.body.factoring_entidad || ""} · ${v.numero}`.replace(/\s+·/, " ·").trim(), creado_por: req.usuario.nombre,
+      descripcion: `Comisión factoring ${req.body.factoring_entidad || ""} · ${v.numero}`.replace(/\s+·/, " ·").trim(), creado_por: firma(req),
     }, { transaction: t }) : null;
     const pago = await Pago.create({
       tipo: "cobro", venta_id: v.id, monto,
       fecha: req.body.fecha || new Date(), medio, nota: req.body.nota,
       factoring_entidad: medio === "factoring" ? String(req.body.factoring_entidad || "").trim() || null : null,
       factoring_comision: comision || null, gasto_id: gasto?.id || null,
-      creado_por: req.usuario.nombre,
+      creado_por: firma(req),
     }, { transaction: t });
     const pagado = Number(v.monto_pagado) + monto;
     await v.update({ monto_pagado: pagado, estado_pago: estadoPago(pagado, v.total) }, { transaction: t });
@@ -431,13 +434,13 @@ const generarOrdenes = handler(async (req, res) => {
         proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v.id,
         items: lineas, ...calcularTotales(lineas),
         notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`,
-        creado_por: req.usuario.nombre,
+        creado_por: firma(req),
       }, { transaction: t });
       await oc.update({ numero: `OC-${String(oc.id).padStart(4, "0")}` }, { transaction: t });
       creadas.push(oc);
     }
     // Generar las compras significa que Operativo tomó la venta
-    if (creadas.length && v.etapa === "registrada") await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: req.usuario.nombre }, { transaction: t });
+    if (creadas.length && v.etapa === "registrada") await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: firma(req) }, { transaction: t });
     return { creadas, omitidos };
   });
   res.status(201).json({ ok: true, data: resultado });
@@ -467,7 +470,7 @@ const exigirEtapa = (v, ...etapas) => {
 // POST /api/ventas/:id/aceptar   (Operativo toma la venta para comprar)
 const aceptarVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "registrada");
-  await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: req.usuario.nombre }, { transaction: t });
+  await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: firma(req) }, { transaction: t });
 });
 
 // POST /api/ventas/:id/confirmar   (Operativo: llegaron los productos -> lista para facturar y despachar)
@@ -480,15 +483,15 @@ const confirmarVenta = conVenta(async (v, req, t) => {
     throw new ErrorNegocio(`Faltan por recibir: ${pendientes.map((o) => `${o.numero} (${o.proveedor_nombre})`).join(", ")}. Márcalas recibidas en Compras o confirma igual.`, 409);
   }
   await v.update({
-    etapa: "lista", lista_fecha: new Date(), lista_por: req.usuario.nombre,
-    ...(v.aceptada_fecha ? {} : { aceptada_fecha: new Date(), aceptada_por: req.usuario.nombre }),
+    etapa: "lista", lista_fecha: new Date(), lista_por: firma(req),
+    ...(v.aceptada_fecha ? {} : { aceptada_fecha: new Date(), aceptada_por: firma(req) }),
   }, { transaction: t });
 });
 
 // POST /api/ventas/:id/despachar   { fecha, guia }
 const despacharVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "lista");
-  await v.update({ etapa: "despachada", despacho_fecha: req.body?.fecha || hoy(), guia_despacho: String(req.body?.guia || "").trim() || null, despacho_por: req.usuario.nombre }, { transaction: t });
+  await v.update({ etapa: "despachada", despacho_fecha: req.body?.fecha || hoy(), guia_despacho: String(req.body?.guia || "").trim() || null, despacho_por: firma(req) }, { transaction: t });
 });
 
 // POST /api/ventas/:id/entregar   { fecha, recibido_por }
@@ -498,7 +501,7 @@ const entregarVenta = conVenta(async (v, req, t) => {
     etapa: "entregada", entrega_fecha: req.body?.fecha || hoy(), recibido_por: String(req.body?.recibido_por || "").trim() || null,
     // Plazo contado desde la recepción conforme
     ...(v.base_vencimiento === "recepcion" && v.plazo_pago_dias != null ? { fecha_vencimiento: sumarDesde(req.body?.fecha || hoy(), v.plazo_pago_dias) } : {}),
-    ...(v.despacho_fecha ? {} : { despacho_fecha: req.body?.fecha || hoy(), despacho_por: req.usuario.nombre }),
+    ...(v.despacho_fecha ? {} : { despacho_fecha: req.body?.fecha || hoy(), despacho_por: firma(req) }),
   }, { transaction: t });
 });
 
@@ -542,7 +545,7 @@ const agregarFactura = conVenta(async (v, req, t) => {
   const monto = req.body?.monto === undefined || req.body?.monto === "" || req.body?.monto === null ? falta : Math.round(Number(req.body.monto));
   if (!(monto > 0)) throw new ErrorNegocio(falta <= 0 ? "La venta ya está facturada completa" : "Monto inválido");
   if (monto > falta + 1) throw new ErrorNegocio(`El monto supera lo que falta por facturar ($${falta.toLocaleString("es-CL")})`);
-  await Factura.create({ venta_id: v.id, numero, fecha: req.body?.fecha || hoy(), monto, notas: req.body?.notas || null, creado_por: req.usuario.nombre }, { transaction: t });
+  await Factura.create({ venta_id: v.id, numero, fecha: req.body?.fecha || hoy(), monto, notas: req.body?.notas || null, creado_por: firma(req) }, { transaction: t });
   await recalcularFacturas(v, t);
 });
 

@@ -1,9 +1,11 @@
+const { firma } = require("../middlewares/auth");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/database");
 const Cotizacion = require("../models/Cotizacion");
 const Cliente = require("../models/Cliente");
 const Producto = require("../models/Producto");
 const Licitacion = require("../models/Licitacion");
+const { asignarUnidadCliente } = require("../services/clientesMP");
 const { handler, ErrorNegocio, calcularTotales } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
@@ -24,7 +26,8 @@ const vista = (req) => (c) => {
     // Margen solo de las líneas con costo conocido (las "no está en catálogo" no tienen compra todavía)
     const conCosto = (j.items || []).filter((i) => Number(i.costo) > 0);
     const venta = conCosto.length === (j.items || []).length ? Number(j.subtotal) : conCosto.reduce((s, i) => s + Number(i.precio) * Number(i.cantidad), 0);
-    j.margen = Math.round(venta - Number(j.costo_total || 0));
+    const costo = conCosto.length === (j.items || []).length ? Number(j.costo_total || 0) : conCosto.reduce((s, i) => s + Number(i.costo) * Number(i.cantidad), 0);
+    j.margen = Math.round(venta - costo);
     j.margen_pct = venta ? Math.round((j.margen / venta) * 100) : 0;
     j.lineas_sin_costo = (j.items || []).length - conCosto.length;
     return j;
@@ -221,9 +224,12 @@ const crearCotizacion = handler(async (req, res) => {
       archivo_cliente: b.archivo_cliente || null,
       items, ...calcularTotales(items),
       costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0),
-      creado_por: req.usuario.nombre,
+      creado_por: firma(req),
     }, { transaction: t });
     await anotarPostulacion(idSol, t);
+    // El cliente toma como ID su unidad de compra de Mercado Público (si tenía un ID automático)
+    const unidad = await asignarUnidadCliente(nueva.cliente_id, idSol, t);
+    if (unidad) await nueva.reload({ transaction: t });
     return nueva;
   });
   res.status(201).json({ ok: true, data: vista(req)(cot) });
@@ -269,6 +275,7 @@ const actualizarCotizacion = handler(async (req, res) => {
     const solAnterior = c.id_solicitud;
     await c.update(cambios, { transaction: t });
     await anotarPostulacion(c.id_solicitud, t);
+    await asignarUnidadCliente(c.cliente_id, c.id_solicitud, t);
     if (solAnterior && solAnterior !== c.id_solicitud) await anotarPostulacion(solAnterior, t);
     return c;
   });
@@ -300,7 +307,7 @@ const registrarSeguimiento = handler(async (req, res) => {
   const hoy = hoyISO();
   const proximo = req.body?.proximo_contacto
     || (req.body?.dias === 0 || req.body?.dias === "0" ? null : sumarDias(hoy, Number(req.body?.dias) || Number(params.dias_seguimiento) || 5));
-  const historial = [...(cot.seguimientos || []), { fecha: new Date().toISOString(), nota: req.body?.nota || "", usuario: req.usuario.nombre, proximo }];
+  const historial = [...(cot.seguimientos || []), { fecha: new Date().toISOString(), nota: req.body?.nota || "", usuario: firma(req), proximo }];
   await cot.update({ seguimientos: historial, ultimo_contacto: hoy, proximo_contacto: proximo });
   res.json({ ok: true, data: vista(req)(cot) });
 });

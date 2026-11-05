@@ -1,3 +1,4 @@
+const { firma } = require("../middlewares/auth");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/database");
 const OrdenCompra = require("../models/OrdenCompra");
@@ -84,7 +85,7 @@ const crearOrden = handler(async (req, res) => {
     const nueva = await OrdenCompra.create({
       ...prov, items: itemsOk, ...calcularTotales(itemsOk),
       fecha_vencimiento: fecha_vencimiento || null, documento, notas, venta_id,
-      creado_por: req.usuario.nombre,
+      creado_por: firma(req),
     }, { transaction: t });
     await nueva.update({ numero: numeroOC(nueva.id) }, { transaction: t });
     return nueva;
@@ -134,9 +135,9 @@ const recibirOrden = handler(async (req, res) => {
         await PrecioProveedor.create({
           producto_id: p.id, proveedor: normProv(orden.proveedor_nombre), precio: Math.round(Number(item.precio)),
           fecha: new Date(), documento: doc, cantidad: item.cantidad, unidad: item.unidad,
-          origen, creado_por: req.usuario.nombre,
+          origen, creado_por: firma(req),
         }, { transaction: t });
-        await recalcular(p, { t, usuario: req.usuario.nombre, motivo: `Compra ${orden.numero}` });
+        await recalcular(p, { t, usuario: firma(req), motivo: `Compra ${orden.numero}` });
       }
     }
     return orden;
@@ -179,7 +180,7 @@ const registrarPago = handler(async (req, res) => {
     const pago = await Pago.create({
       tipo: "pago", orden_compra_id: orden.id, monto,
       fecha: req.body.fecha || new Date(), medio: req.body.medio || "transferencia", nota: req.body.nota,
-      creado_por: req.usuario.nombre,
+      creado_por: firma(req),
     }, { transaction: t });
     const pagado = Number(orden.monto_pagado) + monto;
     await orden.update({ monto_pagado: pagado, estado_pago: estadoPago(pagado, orden.total) }, { transaction: t });

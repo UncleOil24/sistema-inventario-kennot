@@ -13,6 +13,7 @@ import Config from "./erp/Config";
 import Licitaciones from "./erp/Licitaciones";
 import { Facturacion, Despachos } from "./erp/Flujo";
 import Cobranza from "./erp/Cobranza";
+import Produccion from "./erp/Produccion";
 import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
 import Usuarios from "./erp/Usuarios";
@@ -344,11 +345,11 @@ const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizac
 // Departamentos (Estructura del sistema, 4-nov-2026). Cada uno con sus secciones; cada persona ve solo el suyo y gerencia todo.
 const DEPTOS = [
   { id: "comercial", nombre: "Comercial", roles: ["comercial", "usuario"], secciones: [
-    ["inicio", "Inicio"], ["licitaciones", "Licitaciones"], ["cotizaciones", "Cotizaciones"], ["ventas", "Ventas"], ["facturacion", "Facturación"], ["clientes", "Clientes"], ["catalogo", "Catálogo"]] },
+    ["inicio", "Inicio"], ["licitaciones", "Merc. Público"], ["cotizaciones", "Cotizaciones"], ["ventas", "Ventas"], ["facturacion", "Facturación"], ["clientes", "Clientes"], ["catalogo", "Catálogo"]] },
   { id: "operativo", nombre: "Operativo", roles: ["operativo"], secciones: [
     ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
   { id: "finanzas", nombre: "Finanzas y Control", roles: [], secciones: [
-    ["inicio", "Resumen"], ["cobranza", "Cobranza"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
+    ["inicio", "Resumen"], ["produccion", "Producción"], ["cobranza", "Cobranza"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
 ];
 const ROL_TEXTO = { admin: "administrador", gerencia: "gerencia", comercial: "comercial", operativo: "operativo", usuario: "usuario" };
 
@@ -377,6 +378,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
   const [loadingProveedores, setLoadingProveedores] = useState(false);
   const [borrador, setBorrador] = useState(BORRADOR_VACIO); // cotización en armado
   const [ventaAbrir, setVentaAbrir] = useState(null);
+  const [licAbrir, setLicAbrir] = useState(null); // proceso de Mercado Público a abrir directo (desde Inicio)
   const [ordenAbrir, setOrdenAbrir] = useState(null);
 
   const showNotif = useCallback((msg, type = "success") => {
@@ -422,6 +424,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
       if (otro) { setDepto(otro.id); try { localStorage.setItem("depto", otro.id); } catch { /* */ } }
     }
     if (["ventas", "facturacion", "despachos"].includes(v) && id) setVentaAbrir(id);
+    if (v === "licitaciones" && id) setLicAbrir(id);
     if (v === "compras" && id) setOrdenAbrir(id);
     setView(v);
   };
@@ -496,7 +499,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
               onVenta={(v) => verVenta(v.id)} />
           )}
           {view === "licitaciones" && (
-            <Licitaciones esAdmin={puedeVender} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
+            <Licitaciones abrirCodigo={licAbrir} onAbierta={() => setLicAbrir(null)} esAdmin={puedeVender} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
               onCotizar={(b) => { setBorrador(b); setView("cotizar"); }} />
           )}
           {view === "ventas" && (
@@ -513,6 +516,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
           {view === "proveedores" && (
             <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}
+          {view === "produccion" && esGerencia && <Produccion notify={showNotif} irA={irA} />}
           {view === "cobranza" && esGerencia && <Cobranza notify={showNotif} verVenta={(id) => { setVentaAbrir(id); setView("ventas"); }} irA={irA} />}
           {view === "gastos" && esGerencia && <Gastos notify={showNotif} />}
           {view === "reportes" && esGerencia && <Reportes notify={showNotif} />}

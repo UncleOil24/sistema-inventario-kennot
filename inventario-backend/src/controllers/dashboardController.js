@@ -175,12 +175,19 @@ const getDashboard = handler(async (req, res) => {
     operativo ? OrdenCompra.findAll({ where: { estado: "borrador" }, attributes: ["id", "numero", "proveedor_nombre", "fecha", "subtotal"], order: [["fecha", "ASC"]], limit: 20 }) : [],
     Cotizacion.findAll({ where: { estado: "cotizacion", fecha_validez: { [Op.between]: [hoyStr, ymd(new Date(Date.now() + 3 * 864e5))] } }, attributes: ["id", "numero", "cliente", "fecha_validez", "empresa"], order: [["fecha_validez", "ASC"]], limit: 10 }),
   ]);
-  // Oportunidades que cierran pronto (sin cotizar)
-  for (const l of comercial ? licNuevas : []) {
-    const dd = l.fecha_cierre ? Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) : null;
-    if (dd !== null && dd <= 1) tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, detalle: `${l.organismo || ""} · cierra ${dd <= 0 ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}${l.monto_estimado ? ` · ${"$" + n(l.monto_estimado).toLocaleString("es-CL")}` : ""}`, vista: "licitaciones", boton: "Ver oportunidad" });
+  // Oportunidades abiertas que cierran hoy o mañana y aún no se cotizan (nuevas o ya revisadas)
+  const diaChile = (d) => new Date(d).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+  const manana = ymd(new Date(Date.now() + 864e5));
+  const porCerrar = comercial ? (await Licitacion.findAll({
+    where: { estado_interno: ["nueva", "revisada"], fecha_cierre: { [Op.gte]: new Date(), [Op.lte]: new Date(Date.now() + 2 * 864e5) } },
+    order: [["fecha_cierre", "ASC"]], attributes: ["codigo", "nombre", "organismo", "fecha_cierre", "monto_estimado", "fuente", "region", "comuna", "relevancia", "prioridad", "estado_interno", "descarte_auto"],
+  })).filter((l) => visible(l, params) && [hoyStr, manana].includes(diaChile(l.fecha_cierre))) : [];
+  for (const l of porCerrar) {
+    const esHoy = diaChile(l.fecha_cierre) === hoyStr;
+    tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, cierre: l.fecha_cierre, detalle: `${l.organismo || ""} · ${l.codigo} · cierra ${esHoy ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}${l.monto_estimado ? ` · ${"$" + n(l.monto_estimado).toLocaleString("es-CL")}` : ""}`, vista: "licitaciones", id: l.codigo, boton: "Ver oportunidad" });
   }
-  const otrasNuevas = licNuevas.filter((l) => !(l.fecha_cierre && Math.floor((new Date(l.fecha_cierre) - new Date()) / 864e5) <= 1)).length;
+  const yaEnTarea = new Set(porCerrar.map((l) => l.codigo));
+  const otrasNuevas = licNuevas.filter((l) => !yaEnTarea.has(l.codigo)).length;
   if (comercial && otrasNuevas) tareas.push({ tipo: "oportunidad", urgencia: 1, texto: `Revisar ${otrasNuevas} oportunidad(es) nueva(s) de Mercado Público`, detalle: "Compra Ágil y licitaciones que calzan con lo que vendemos", vista: "licitaciones", boton: "Revisar" });
   // Cobranza por área (traspaso financiero 3.4): Comercial avisa antes del vencimiento y recuerda la morosidad
   // temprana; Finanzas (gerencia) ve la morosidad crítica (crédito suspendido), el IVA y los márgenes bajos.
@@ -245,8 +252,17 @@ const getDashboard = handler(async (req, res) => {
   };
   const adjudicado = { semana: sumar(ventasRecientes.filter((v) => v.fecha >= lunes)), mes: sumar(ventasMes), desde_semana: lunes };
 
+  // Procesos de Mercado Público que cerraron en los últimos 7 días sin que se cotizaran (informativo, ya no se ejecutan)
+  const [cerradasSinPostular] = await sequelize.query(`SELECT l.codigo, l.nombre, l.organismo, l.fecha_cierre, l.monto_estimado, l.fuente, l.estado_interno
+    FROM licitaciones l
+    WHERE l.fecha_cierre < NOW() AND l.fecha_cierre >= NOW() - INTERVAL '7 days' AND l.estado_interno <> 'descartada'
+      AND COALESCE(l.relevancia, 100) >= :rel
+      AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo))
+    ORDER BY l.fecha_cierre DESC LIMIT 30`, { replacements: { rel: Number(params.mp_relevancia_minima) || 0 } });
+
   const data = {
     tareas,
+    mp_cerradas: cerradasSinPostular.map((l) => ({ ...l, monto_estimado: l.monto_estimado ? n(l.monto_estimado) : null })),
     adjudicado,
     generado: new Date().toISOString(),
     mes_actual: {

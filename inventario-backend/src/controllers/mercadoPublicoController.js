@@ -30,7 +30,7 @@ const listar = handler(async (req, res) => {
   const visibles = filas.filter(filtrar);
   // Cotizaciones hechas para cada proceso (por su ID de solicitud): qué empresa postuló
   const codigos = visibles.map((l) => l.codigo.toUpperCase());
-  const [cots] = codigos.length ? await sequelize.query(`SELECT id, numero, empresa, estado, total, UPPER(id_solicitud) AS sol FROM cotizaciones
+  const [cots] = codigos.length ? await sequelize.query(`SELECT id, numero, empresa, estado, total, creado_por, "createdAt" AS fecha, UPPER(id_solicitud) AS sol FROM cotizaciones
     WHERE UPPER(id_solicitud) IN (:codigos) AND estado NOT IN ('rechazada','vencida') ORDER BY id`, { replacements: { codigos } }) : [[]];
   const data = visibles.map((l) => ({ ...l.get(), ficha: mp.fichaUrl(l), cotizaciones: cots.filter((c) => c.sol === l.codigo.toUpperCase()) }));
   res.json({
@@ -54,7 +54,9 @@ const detalle = handler(async (req, res) => {
   if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
   // Si aún no tiene detalle, se pide en el momento
   await mp.cargarDetalle(l);
-  res.json({ ok: true, data: { ...l.get(), ficha: mp.fichaUrl(l) } });
+  const [cotizaciones] = await sequelize.query(`SELECT id, numero, empresa, estado, total, creado_por, "createdAt" AS fecha FROM cotizaciones
+    WHERE UPPER(id_solicitud) = UPPER(:c) AND estado NOT IN ('rechazada','vencida') ORDER BY id`, { replacements: { c: l.codigo } });
+  res.json({ ok: true, data: { ...l.get(), ficha: mp.fichaUrl(l), cotizaciones } });
 });
 
 // PUT /api/mercado-publico/licitaciones/:codigo   { estado_interno, nota, cotizacion_id }

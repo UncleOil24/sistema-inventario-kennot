@@ -1,3 +1,4 @@
+const { firma } = require("../middlewares/auth");
 const { Op } = require("sequelize");
 const Proveedor = require("../models/Proveedor");
 const { handler, ErrorNegocio } = require("../services/erp");
@@ -56,7 +57,7 @@ const actualizarProveedor = handler(async (req, res) => {
   if (!esGerencia(req)) { delete datos.excluido; delete datos.motivo_exclusion; } // excluir proveedores lo decide gerencia
   await prov.update(datos);
   // Excluir o volver a incluir un proveedor (M7) cambia el precio vigente de sus productos
-  if (antes !== prov.excluido) await recalcularDeProveedor(prov.nombre, req.usuario.nombre, prov.excluido ? `Proveedor ${prov.nombre} excluido` : `Proveedor ${prov.nombre} vuelve a competir`);
+  if (antes !== prov.excluido) await recalcularDeProveedor(prov.nombre, firma(req), prov.excluido ? `Proveedor ${prov.nombre} excluido` : `Proveedor ${prov.nombre} vuelve a competir`);
   res.json({ ok: true, data: prov });
 });
 

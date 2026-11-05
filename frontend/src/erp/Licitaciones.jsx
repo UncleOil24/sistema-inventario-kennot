@@ -21,7 +21,7 @@ const clienteDe = (l, clientes) => {
   return clientes.find((c) => (l.rut_unidad && c.rut && rutLimpio(c.rut) === rutLimpio(l.rut_unidad)) || (org && sinTildes(c.nombre) === org));
 };
 
-export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, recargarClientes }) {
+export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, recargarClientes, abrirCodigo, onAbierta }) {
   const [nuevoCliente, setNuevoCliente] = useState(null);
   const [data, setData] = useState(null);
   const [vista, setVista] = useState("abiertas");
@@ -32,6 +32,13 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
   const [abierta, setAbierta] = useState(null);
   const [cotizar, setCotizar] = useState(null);
   const [fichaL, setFichaL] = useState(null);
+  // Desde Inicio: se abre directo el proceso pedido (aunque ya esté cerrado) y la lista se filtra a él
+  useEffect(() => {
+    if (!abrirCodigo) return;
+    setVista("todas"); setFuente(""); setBusqueda(abrirCodigo);
+    setAbierta({ codigo: abrirCodigo, ficha: null, fuente: /-COT/i.test(abrirCodigo) ? "compra_agil" : "licitacion" });
+    onAbierta?.();
+  }, [abrirCodigo, onAbierta]);
 
   const cargar = useCallback(async () => {
     try {
@@ -82,7 +89,8 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
       empresa: l.empresa_postula && l.empresa_postula !== "ambas" ? l.empresa_postula : undefined,
       validez_dias: l.fuente === "compra_agil" ? 10 : 30, notas: `Mercado Público ${l.codigo}`, archivo_cliente: `${tipoDe(l)} ${l.codigo}`, items: nuevas,
     });
-    marcar(l, "cotizada");
+    // Queda "cotizada" recién cuando se guarda la cotización con el ID del proceso
+    if (l.estado_interno === "nueva") marcar(l, "revisada");
     if (!cliente && l.organismo) notify(`"${l.organismo}" no está en Clientes: usa "+ Agregar cliente" en la licitación y elígelo en la cotización`);
   };
 
@@ -139,8 +147,9 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                       : <button className="link" onClick={() => setNuevoCliente(l)}>+ Agregar cliente</button>)}
                     {l.empresa_postula && <span className="estado estado-info" title="Empresa que postula">{l.empresa_postula === "ambas" ? "postulan Kenott y Tactics" : `postula ${l.empresa_postula === "tactics" ? "Tactics" : "Kenott"}`}</span>}
                     {l.checklist?.length > 0 && <span className={l.checklist.every((x) => x.listo) ? "estado estado-ok" : ""}>docs {l.checklist.filter((x) => x.listo).length}/{l.checklist.length}</span>}
-                    {l.cotizaciones?.length > 0 && <span>{l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero}`).join(" · ")}</span>}
-                    {l.estado_interno !== "nueva" && <span className={`estado estado-${l.estado_interno === "cotizada" ? "ok" : l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
+                    {l.cotizaciones?.length > 0 && <span className="id-solicitud">Cotizada: {l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero}${c.creado_por ? ` por ${c.creado_por}` : ""}`).join(" · ")}</span>}
+                    {l.estado_interno !== "nueva" && !(l.estado_interno === "cotizada" && l.cotizaciones?.length) && <span className={`estado estado-${l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno === "cotizada" ? "en cotización" : l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
+                    {l.fecha_cierre && new Date(l.fecha_cierre) < new Date() && <span className="estado estado-muted" style={{ textDecoration: "none" }}>cerrada</span>}
                   </div>
                   {l.relevancia != null
                     ? <div className="mini"><span className={`estado ${colorCalce(l.relevancia)}`}>calce {l.relevancia}%</span> {l.motivo_relevancia}</div>
@@ -155,7 +164,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => { setAbierta(l); if (l.estado_interno === "nueva") marcar(l, "revisada"); }}>Ver productos</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => setFichaL(l)}>Ficha para postular</button>
-                    {l.items?.length > 0 && <button className="btn btn-success btn-sm" onClick={() => setCotizar(l)}>Cotizar</button>}
+                    <button className="btn btn-success btn-sm" title={l.items?.length ? "" : "Sin productos en Mercado Público: podrás subir las bases o el anexo"} onClick={() => setCotizar(l)}>Cotizar</button>
                     {l.estado_interno !== "descartada"
                       ? <button className="btn btn-ghost btn-sm" onClick={() => marcar(l, "descartada")}>Descartar</button>
                       : <button className="btn btn-ghost btn-sm" onClick={() => marcar(l, "revisada")}>Recuperar</button>}
@@ -280,11 +289,13 @@ function DetalleLicitacion({ codigo, ficha, tipo, notify, onClose, onCotizar }) 
     <Modal titulo={`// ${tipo} ${codigo}`} onClose={onClose} ancho={900}
       footer={<>
         <a className="btn btn-ghost" href={l?.ficha || ficha} target="_blank" rel="noreferrer">Abrir en Mercado Público ↗</a>
-        {l?.items?.length > 0 && <button className="btn btn-success" onClick={() => onCotizar(l)}>Cotizar</button>}
+        {l && <button className="btn btn-success" onClick={() => onCotizar(l)}>Cotizar</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       {!l ? <div className="cot-empty"><span className="spinner"></span>Cargando...</div> : <>
         <div className="hist-nombre">{l.nombre}</div>
+        {l.fecha_cierre && new Date(l.fecha_cierre) < new Date() && <div className="aviso">Este proceso ya cerró el {new Date(l.fecha_cierre).toLocaleString("es-CL")}: no se puede postular.</div>}
+        {l.cotizaciones?.length > 0 && <div className="mini id-solicitud">Cotizada: {l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero} (${fmt(c.total)})${c.creado_por ? ` por ${c.creado_por}` : ""}`).join(" · ")}</div>}
         <div className="hist-meta">
           <span>{l.organismo}</span>{l.unidad && <span>{l.unidad}</span>}{l.region && <span>{l.region}</span>}
           {l.comuna && <span>{l.fuente === "compra_agil" ? `Entrega: ${l.comuna}` : l.comuna}</span>}
