@@ -15,7 +15,10 @@ function rangoPeriodo(p) {
   return [null, null];
 }
 
-export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbierta, irACompra }) {
+// modo: comercial (registra ventas, sin costos) | operativo (ventas por ejecutar: qué comprar) | finanzas (cobros y márgenes)
+export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo = "comercial", clientes, abrirVentaId, onAbierta, irACompra }) {
+  const verCompras = puedeOperar && modo !== "comercial";
+  const verCobros = esAdmin && modo === "finanzas";
   const [ventas, setVentas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtroPago, setFiltroPago] = useState("");
@@ -23,7 +26,7 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
   const [periodo, setPeriodo] = useState("todo"); // todo | mes | mes_pasado | anio
   const [nueva, setNueva] = useState(false);
   const [detalle, setDetalle] = useState(null);
-  const [modo, setModo] = useState("ventas"); // ventas | proyectos
+  const [vistaV, setVistaV] = useState("ventas"); // ventas | proyectos
   const [sel, setSel] = useState(new Set());
   const [unir, setUnir] = useState(false);
   const [proyecto, setProyecto] = useState(null); // id del proyecto abierto
@@ -64,8 +67,8 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
 
   const chipsModo = (
     <div className="chips" style={{ marginBottom: 12 }}>
-      <button className={`chip ${modo === "ventas" ? "activo" : ""}`} onClick={() => setModo("ventas")}>Ventas</button>
-      <button className={`chip ${modo === "proyectos" ? "activo" : ""}`} onClick={() => setModo("proyectos")}>Proyectos / licitaciones</button>
+      <button className={`chip ${vistaV === "ventas" ? "activo" : ""}`} onClick={() => setVistaV("ventas")}>Ventas</button>
+      <button className={`chip ${vistaV === "proyectos" ? "activo" : ""}`} onClick={() => setVistaV("proyectos")}>Proyectos / licitaciones</button>
     </div>
   );
   const modales = (
@@ -74,25 +77,27 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
       {proyecto && <DetalleProyecto id={proyecto} notify={notify} esAdmin={esAdmin} onClose={() => setProyecto(null)} verVenta={verDetalle} irACompra={irACompra} onCambio={refrescar} />}
     </>
   );
-  if (modo === "proyectos") return (
+  if (vistaV === "proyectos") return (
     <>
       {chipsModo}
       <ListaProyectos notify={notify} esAdmin={esAdmin} onAbrir={setProyecto} recargar={recargarProy} />
       {modales}
-      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} notify={notify} irACompra={irACompra} verProyecto={setProyecto} onClose={() => setDetalle(null)} onCambio={() => { refrescar(); verDetalle(detalle.id); }} />}
+      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} verCompras={verCompras} verCobros={verCobros} puedeVender={puedeVender && modo === "comercial"} notify={notify} irACompra={irACompra} verProyecto={setProyecto} onClose={() => setDetalle(null)} onCambio={() => { refrescar(); verDetalle(detalle.id); }} />}
     </>
   );
 
   return (
     <>
-      {chipsModo}
+      {esAdmin && chipsModo}
       <div className="stats">
         <div className="stat-card"><div className="stat-label">Ventas · {PERIODOS.find(([v]) => v === periodo)[1].toLowerCase()}</div><div className="stat-value">{activas.length}</div></div>
         <div className="stat-card"><div className="stat-label">Total (con IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.total), 0))}</div></div>
-        {esAdmin
+        {esAdmin && modo === "finanzas"
           ? <div className="stat-card"><div className="stat-label">Margen neto</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.subtotal) - Number(v.costo_total), 0))}</div></div>
           : <div className="stat-card"><div className="stat-label">Neto (sin IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, v) => s + Number(v.subtotal), 0))}</div></div>}
-        <div className="stat-card"><div className="stat-label">Por cobrar</div><div className="stat-value" style={{ color: porCobrar > 0 ? "var(--danger)" : "var(--success)", fontSize: 16 }}>{fmt(porCobrar)}</div></div>
+        {modo === "finanzas"
+          ? <div className="stat-card"><div className="stat-label">Por cobrar</div><div className="stat-value" style={{ color: porCobrar > 0 ? "var(--danger)" : "var(--success)", fontSize: 16 }}>{fmt(porCobrar)}</div></div>
+          : <div className="stat-card"><div className="stat-label">{modo === "operativo" ? "Por comprar" : "Con órdenes de compra"}</div><div className="stat-value">{activas.filter((v) => (modo === "operativo") !== !!v.tiene_compras).length}</div></div>}
       </div>
 
       <div className="toolbar">
@@ -105,39 +110,39 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
         </select>
         <select className="filter-select" value={filtroPago} onChange={(e) => setFiltroPago(e.target.value)}>
           <option value="">Todas</option>
-          {esAdmin && <option value="porcomprar">Por comprar (sin órdenes)</option>}
-          <option value="pendiente">Pendientes de pago</option>
-          <option value="parcial">Pago parcial</option>
-          <option value="pagada">Pagadas</option>
+          {verCompras && <option value="porcomprar">Por comprar (sin órdenes)</option>}
+          {modo === "finanzas" && <option value="pendiente">Pendientes de pago</option>}
+          {modo === "finanzas" && <option value="parcial">Pago parcial</option>}
+          {modo === "finanzas" && <option value="pagada">Pagadas</option>}
         </select>
-        {sel.size > 0 && <button className="btn btn-success" onClick={() => setUnir(true)}>Unir en proyecto ({sel.size})</button>}
-        <button className="btn btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>
+        {esAdmin && sel.size > 0 && <button className="btn btn-success" onClick={() => setUnir(true)}>Unir en proyecto ({sel.size})</button>}
+        {puedeVender && modo === "comercial" && <button className="btn btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>}
       </div>
-      {sel.size === 0 && <div className="mini" style={{ marginTop: -8, marginBottom: 10 }}>¿Varias órdenes de compra de una misma licitación? Márcalas con la casilla y pulsa "Unir en proyecto".</div>}
+      {modo === "operativo" && <div className="mini" style={{ marginTop: -8, marginBottom: 10 }}>Abre una venta y pulsa "Cuadro de compra" para ver qué comprar a cada proveedor y generar las órdenes.</div>}
 
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th></th><th>N°</th><th>Fecha</th><th>Cliente</th><th>OC cliente</th><th>Proyecto</th><th>Factura</th><th>Total</th><th>Saldo</th><th>Vence</th><th>Estado</th>{esAdmin && <th>Compra</th>}<th></th></tr></thead>
+          <thead><tr>{esAdmin && <th></th>}<th>N°</th><th>Fecha</th><th>Cliente</th><th>OC cliente</th>{esAdmin && <th>Proyecto</th>}<th>Factura</th><th>Total</th>{modo === "finanzas" && <th>Saldo</th>}{modo === "finanzas" && <th>Vence</th>}{modo === "finanzas" && <th>Estado</th>}{modo !== "finanzas" && <th>Compra</th>}<th></th></tr></thead>
           <tbody>
-            {loading ? <tr className="empty-row"><td colSpan={13}><span className="spinner"></span>Cargando...</td></tr>
-              : ventas.length === 0 ? <tr className="empty-row"><td colSpan={13}>// sin ventas — conviértelas desde Cotizaciones o crea una nueva</td></tr>
+            {loading ? <tr className="empty-row"><td colSpan={12}><span className="spinner"></span>Cargando...</td></tr>
+              : ventas.length === 0 ? <tr className="empty-row"><td colSpan={12}>// sin ventas — conviértelas desde Cotizaciones o crea una nueva</td></tr>
               : ventas.map((v) => {
                 const saldo = Number(v.total) - Number(v.monto_pagado);
                 const vencida = v.estado !== "anulada" && saldo > 0 && v.fecha_vencimiento && v.fecha_vencimiento < new Date().toLocaleDateString("sv-SE");
                 return (
                   <tr key={v.id} className={v.estado === "anulada" ? "fila-anulada" : sel.has(v.id) ? "fila-alerta" : ""}>
-                    <td>{v.estado !== "anulada" && !v.proyecto && <input type="checkbox" checked={sel.has(v.id)} onChange={() => marcar(v.id)} title="Marcar para unir en un proyecto" />}</td>
+                    {esAdmin && <td>{v.estado !== "anulada" && !v.proyecto && <input type="checkbox" checked={sel.has(v.id)} onChange={() => marcar(v.id)} title="Marcar para unir en un proyecto" />}</td>}
                     <td className="id-cell">{v.numero}{v.empresa === "tactics" && <div><Estado valor="tactics" /></div>}</td>
                     <td className="mini">{fecha(v.fecha)}</td>
                     <td>{v.cliente_nombre || <span className="mini">Sin cliente</span>}</td>
                     <td className="mini">{v.orden_compra_cliente || "—"}</td>
-                    <td>{v.proyecto ? <button className="link" title={v.proyecto.nombre} onClick={() => setProyecto(v.proyecto.id)}>{v.proyecto.numero}</button> : <span className="mini">—</span>}</td>
+                    {esAdmin && <td>{v.proyecto ? <button className="link" title={v.proyecto.nombre} onClick={() => setProyecto(v.proyecto.id)}>{v.proyecto.numero}</button> : <span className="mini">—</span>}</td>}
                     <td className="mini">{v.documento || "—"}</td>
                     <td className="price-cell">{fmt(v.total)}</td>
-                    <td className="price-cell" style={{ color: saldo > 0.5 ? "var(--text)" : "var(--text3)" }}>{fmt(saldo)}</td>
-                    <td className={`mini ${vencida ? "stock-low" : ""}`}>{fecha(v.fecha_vencimiento)}{vencida ? " ⚠" : ""}</td>
-                    <td><Estado valor={v.estado === "anulada" ? "anulada" : v.estado_pago} /></td>
-                    {esAdmin && <td className="mini">{v.estado === "anulada" ? "—" : v.tiene_compras ? "✓ con órdenes" : <span style={{ color: "var(--warn)" }}>por comprar</span>}</td>}
+                    {modo === "finanzas" && <td className="price-cell" style={{ color: saldo > 0.5 ? "var(--text)" : "var(--text3)" }}>{fmt(saldo)}</td>}
+                    {modo === "finanzas" && <td className={`mini ${vencida ? "stock-low" : ""}`}>{fecha(v.fecha_vencimiento)}{vencida ? " ⚠" : ""}</td>}
+                    {modo === "finanzas" && <td><Estado valor={v.estado === "anulada" ? "anulada" : v.estado_pago} /></td>}
+                    {modo !== "finanzas" && <td className="mini">{v.estado === "anulada" ? <Estado valor="anulada" /> : v.tiene_compras ? "✓ con órdenes" : <span style={{ color: "var(--warn)" }}>por comprar</span>}</td>}
                     <td><button className="btn btn-ghost btn-sm" onClick={() => verDetalle(v.id)}>Ver</button></td>
                   </tr>
                 );
@@ -148,7 +153,7 @@ export default function Ventas({ notify, esAdmin, clientes, abrirVentaId, onAbie
 
       {nueva && <NuevaVenta clientes={clientes} notify={notify} onClose={() => setNueva(false)} onCreada={(v) => { setNueva(false); cargar(); verDetalle(v.id); }} />}
       {modales}
-      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} notify={notify} irACompra={irACompra} verProyecto={setProyecto} onClose={() => setDetalle(null)} onCambio={() => { refrescar(); verDetalle(detalle.id); }} />}
+      {detalle && <DetalleVenta venta={detalle} esAdmin={esAdmin} verCompras={verCompras} verCobros={verCobros} puedeVender={puedeVender && modo === "comercial"} notify={notify} irACompra={irACompra} verProyecto={setProyecto} onClose={() => setDetalle(null)} onCambio={() => { refrescar(); verDetalle(detalle.id); }} />}
     </>
   );
 }
@@ -231,7 +236,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   );
 }
 
-function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, verProyecto }) {
+function DetalleVenta({ venta, esAdmin, verCompras, verCobros, puedeVender, notify, onClose, onCambio, irACompra, verProyecto }) {
   const [cuadro, setCuadro] = useState(false);
   const [datos, setDatos] = useState({ documento: venta.documento || "", orden_compra_cliente: venta.orden_compra_cliente || "" });
   const r = venta.resumen;
@@ -250,7 +255,7 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, ve
     <Modal titulo={`// Venta ${venta.numero}`} onClose={onClose} ancho={780}
       footer={<>
         {esAdmin && venta.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular venta</button>}
-        {esAdmin && venta.estado !== "anulada" && <button className="btn btn-primary" onClick={() => setCuadro(true)}>Cuadro de compra</button>}
+        {verCompras && venta.estado !== "anulada" && <button className="btn btn-primary" onClick={() => setCuadro(true)}>Cuadro de compra</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
@@ -262,7 +267,7 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, ve
         {venta.proyecto && <button className="link" onClick={() => { onClose(); verProyecto?.(venta.proyecto.id); }}>Proyecto {venta.proyecto.numero} · {venta.proyecto.nombre} →</button>}
       </div>
       {venta.notas && <div className="mini">{venta.notas}</div>}
-      {venta.estado !== "anulada" && (
+      {venta.estado !== "anulada" && puedeVender && (
         <div className="fields-row">
           <div className="field">
             <label>N° orden de compra del cliente</label>
@@ -279,15 +284,15 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, ve
       )}
       <div className="table-wrap">
         <table className="table table-compacta">
-          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th>{esAdmin && <th>Costo</th>}{esAdmin && <th>Proveedor</th>}<th>Total</th></tr></thead>
+          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th>{verCompras && <th>Costo</th>}{verCompras && <th>Proveedor</th>}<th>Total</th></tr></thead>
           <tbody>
             {venta.items.map((i, k) => (
               <tr key={k}>
                 <td>{i.nombre}</td>
                 <td className="mini">{i.cantidad} {i.unidad}</td>
                 <td className="price-cell">{fmt(i.precio)}</td>
-                {esAdmin && <td className="price-cell compra">{fmt(i.costo)}</td>}
-                {esAdmin && <td className="mini">{i.proveedor || "—"}</td>}
+                {verCompras && <td className="price-cell compra">{fmt(i.costo)}</td>}
+                {verCompras && <td className="mini">{i.proveedor || "—"}</td>}
                 <td className="price-cell">{fmt(i.precio * i.cantidad)}</td>
               </tr>
             ))}
@@ -295,7 +300,7 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, ve
         </table>
       </div>
       <Totales subtotal={venta.subtotal} iva={venta.iva} total={venta.total} />
-      {esAdmin && r && (
+      {esAdmin && verCobros && r && (
         <div className="panel">
           <div className="panel-titulo">Utilidad de la venta</div>
           <div className="resumen-utilidad">
@@ -319,13 +324,18 @@ function DetalleVenta({ venta, esAdmin, notify, onClose, onCambio, irACompra, ve
           )}
         </div>
       )}
-      <PagosPanel
+      {verCompras && !verCobros && venta.ordenes?.length > 0 && (
+        <div className="mini">Órdenes de compra: {venta.ordenes.map((o) => (
+          <button key={o.id} className="link" onClick={() => irACompra?.(o.id)}>{o.numero} {o.proveedor_nombre} ({o.estado})</button>
+        ))}</div>
+      )}
+      {verCobros && <PagosPanel
         key={venta.monto_pagado}
         doc={venta}
         tipo="cobro"
         onRegistrar={(body) => accion(() => api(`/ventas/${venta.id}/cobros`, { method: "POST", body }), "✓ Cobro registrado")}
         onEliminar={esAdmin ? (p) => confirm("¿Eliminar este cobro?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado") : null}
-      />
+      />}
       {cuadro && <CuadroCompra ventaId={venta.id} notify={notify} irACompra={irACompra} onClose={() => { setCuadro(false); onCambio(); }} />}
     </Modal>
   );

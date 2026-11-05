@@ -9,7 +9,7 @@ const FILTROS = [
 
 const diasEntre = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${String(a).slice(0, 10)}T12:00:00`)) / 864e5);
 
-export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVenta, filtroInicial = "" }) {
+export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, onVenta, verVenta, filtroInicial = "" }) {
   const [lista, setLista] = useState([]);
   const [loading, setLoading] = useState(true);
   const [estado, setEstado] = useState(filtroInicial);
@@ -129,7 +129,7 @@ export default function Cotizaciones({ esAdmin, notify, onEditar, onVenta, verVe
                     </>}
                     {["rechazada", "vencida"].includes(c.estado) && <button className="btn btn-ghost btn-sm" onClick={() => reabrir(c)}>Reabrir</button>}
                     {c.estado === "aceptada" && c.venta_id && <button className="btn btn-ghost btn-sm" onClick={() => verVenta(c.venta_id)}>Ver venta</button>}
-                    {esAdmin && c.estado !== "aceptada" && <button className="btn btn-danger btn-sm" onClick={() => eliminar(c)}>✕</button>}
+                    {esGerencia && c.estado !== "aceptada" && <button className="btn btn-danger btn-sm" onClick={() => eliminar(c)}>✕</button>}
                   </div>
                 </div>
               </div>

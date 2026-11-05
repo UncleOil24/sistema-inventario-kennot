@@ -3,7 +3,8 @@ import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
 import { api, fmt, fecha, useProductos } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 
-export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
+// Compras: las gestiona Operativo; Comercial solo consulta el avance. Los pagos a proveedores son de Finanzas (gerencia).
+export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
   const [ordenes, setOrdenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState("");
@@ -50,7 +51,7 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
         <div className="stat-card"><div className="stat-label">Borradores</div><div className="stat-value">{ordenes.filter((o) => o.estado === "borrador").length}</div></div>
         <div className="stat-card"><div className="stat-label">Recibidas</div><div className="stat-value">{activas.length}</div></div>
         <div className="stat-card"><div className="stat-label">Comprado (con IVA)</div><div className="stat-value accent">{fmt(activas.reduce((s, o) => s + Number(o.total), 0))}</div></div>
-        <div className="stat-card"><div className="stat-label">Por pagar</div><div className="stat-value" style={{ color: porPagar > 0 ? "var(--danger)" : "var(--success)", fontSize: 16 }}>{fmt(porPagar)}</div></div>
+        {esAdmin && <div className="stat-card"><div className="stat-label">Por pagar</div><div className="stat-value" style={{ color: porPagar > 0 ? "var(--danger)" : "var(--success)", fontSize: 16 }}>{fmt(porPagar)}</div></div>}
       </div>
 
       <div className="toolbar">
@@ -62,14 +63,15 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
           <option value="">Todas</option>
           <option value="borrador">Borradores (por recibir)</option>
           <option value="recibida">Recibidas</option>
-          <option value="porpagar">Recibidas sin pagar</option>
+          {esAdmin && <option value="porpagar">Recibidas sin pagar</option>}
           <option value="anulada">Anuladas</option>
         </select>
-        {esAdmin && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura del proveedor: actualiza el historial de precios">⇪ Documento proveedor</button>}
-        <button className="btn btn-primary" onClick={() => setEditando("nueva")} disabled={proveedores.length === 0}
-          title={proveedores.length === 0 ? "Primero crea un proveedor" : ""}>+ Nueva orden</button>
+        {puedeOperar && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura del proveedor: actualiza el historial de precios">⇪ Documento proveedor</button>}
+        {puedeOperar && <button className="btn btn-primary" onClick={() => setEditando("nueva")} disabled={proveedores.length === 0}
+          title={proveedores.length === 0 ? "Primero crea un proveedor" : ""}>+ Nueva orden</button>}
       </div>
-      {proveedores.length === 0 && <div className="aviso">Para crear órdenes de compra primero registra al menos un proveedor en la pestaña Proveedores.</div>}
+      {!puedeOperar && <div className="mini" style={{ marginBottom: 10 }}>Vista de consulta: las compras las gestiona el departamento Operativo.</div>}
+      {puedeOperar && proveedores.length === 0 && <div className="aviso">Para crear órdenes de compra primero registra al menos un proveedor en la pestaña Proveedores.</div>}
 
       <div className="chips" style={{ marginBottom: 10 }}>
         <button className={`chip ${agrupar ? "activo" : ""}`} onClick={() => cambiarAgrupar(true)}>Agrupadas por venta</button>
@@ -77,10 +79,10 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
       </div>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th>{!agrupar && <th>Para</th>}<th>Factura</th><th>Total</th><th>Saldo</th><th>Estado</th><th>Pago</th><th></th></tr></thead>
+          <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th>{!agrupar && <th>Para</th>}<th>Factura</th><th>Total</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            {loading ? <tr className="empty-row"><td colSpan={10}><span className="spinner"></span>Cargando...</td></tr>
-              : ordenes.length === 0 ? <tr className="empty-row"><td colSpan={10}>// sin órdenes de compra</td></tr>
+            {loading ? <tr className="empty-row"><td colSpan={8}><span className="spinner"></span>Cargando...</td></tr>
+              : ordenes.length === 0 ? <tr className="empty-row"><td colSpan={8}>// sin órdenes de compra</td></tr>
               : agrupar ? grupos(ordenes).map((g) => (
                 <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} />
               ))
@@ -96,7 +98,7 @@ export default function Compras({ notify, esAdmin, proveedores, onPreciosCambio,
           onGuardada={(o) => { setEditando(null); refrescar(o.id); }} />
       )}
       {detalle && (
-        <DetalleOrden orden={detalle} esAdmin={esAdmin} notify={notify} onClose={() => setDetalle(null)}
+        <DetalleOrden orden={detalle} esAdmin={esAdmin} puedeOperar={puedeOperar} notify={notify} onClose={() => setDetalle(null)}
           onEditar={() => { setEditando(detalle); setDetalle(null); }}
           onCambio={(precios) => { refrescar(detalle.id); if (precios) onPreciosCambio?.(); }}
           onEliminada={() => { setDetalle(null); cargar(); }} />
@@ -133,7 +135,6 @@ function GrupoCompras({ g, verDetalle }) {
       <tr className="fila-grupo">
         <td colSpan={4}>{titulo}</td>
         <td className="price-cell">{fmt(total)}</td>
-        <td className="price-cell">{recibidas ? fmt(saldo) : "—"}</td>
         <td colSpan={3} className="mini">{vivas.length} orden(es) · {recibidas} recibida(s)</td>
       </tr>
       {g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
@@ -150,9 +151,7 @@ function FilaOrden({ o, verDetalle, conPara, sangria }) {
       {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}` : o.proyecto ? `${o.proyecto.numero} (proyecto)` : "—"}</td>}
       <td className="mini">{o.documento || "—"}</td>
       <td className="price-cell">{fmt(o.total)}</td>
-      <td className="price-cell">{o.estado === "recibida" ? fmt(Number(o.total) - Number(o.monto_pagado)) : "—"}</td>
       <td><Estado valor={o.estado} /></td>
-      <td>{o.estado === "recibida" ? <Estado valor={o.estado_pago} /> : <span className="mini">—</span>}</td>
       <td><div className="actions"><button className="btn btn-ghost btn-sm" onClick={() => verDetalle(o.id)}>Ver</button></div></td>
     </tr>
   );
@@ -241,7 +240,7 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
   );
 }
 
-function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onEliminada }) {
+function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada }) {
   const [registrarPrecios, setRegistrarPrecios] = useState(true);
   const [factura, setFactura] = useState(orden.documento || "");
 
@@ -264,13 +263,12 @@ function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onE
   return (
     <Modal titulo={`// Orden ${orden.numero}`} onClose={onClose} ancho={720}
       footer={<>
-        {orden.estado === "borrador" && <>
+        {orden.estado === "borrador" && puedeOperar && <>
           {esAdmin && <button className="btn btn-danger" onClick={eliminar}>Eliminar</button>}
           <button className="btn btn-ghost" onClick={onEditar}>Editar</button>
           <button className="btn btn-success" onClick={recibir}>✓ Marcar recibida</button>
         </>}
-        {esAdmin && orden.estado === "recibida" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
-        {esAdmin && orden.estado === "borrador" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
+        {puedeOperar && orden.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
@@ -318,7 +316,7 @@ function DetalleOrden({ orden, esAdmin, notify, onClose, onEditar, onCambio, onE
           </label>
         </>
       )}
-      {orden.estado === "recibida" && (
+      {esAdmin && orden.estado === "recibida" && (
         <PagosPanel
           key={orden.monto_pagado}
           doc={orden}
