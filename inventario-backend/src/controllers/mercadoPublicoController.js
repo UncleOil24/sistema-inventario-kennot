@@ -1,3 +1,4 @@
+const sequelize = require("../../config/database");
 const { Op } = require("sequelize");
 const Licitacion = require("../models/Licitacion");
 const { handler, ErrorNegocio } = require("../services/erp");
@@ -26,7 +27,12 @@ const listar = handler(async (req, res) => {
   // Región, monto mínimo y organismos excluidos de Config. (en "Descartadas" y "Todas" se ve todo)
   const filtrar = vista === "descartadas" || vista === "todas" ? (l) => req.query.todas_regiones === "1" || mp.enRegiones(l.region, params)
     : req.query.todas_regiones === "1" ? (l) => mp.visible({ ...l.get(), region: null }, params) : (l) => mp.visible(l, params);
-  const data = filas.filter(filtrar).map((l) => ({ ...l.get(), ficha: mp.fichaUrl(l) }));
+  const visibles = filas.filter(filtrar);
+  // Cotizaciones hechas para cada proceso (por su ID de solicitud): qué empresa postuló
+  const codigos = visibles.map((l) => l.codigo.toUpperCase());
+  const [cots] = codigos.length ? await sequelize.query(`SELECT id, numero, empresa, estado, total, UPPER(id_solicitud) AS sol FROM cotizaciones
+    WHERE UPPER(id_solicitud) IN (:codigos) AND estado NOT IN ('rechazada','vencida') ORDER BY id`, { replacements: { codigos } }) : [[]];
+  const data = visibles.map((l) => ({ ...l.get(), ficha: mp.fichaUrl(l), cotizaciones: cots.filter((c) => c.sol === l.codigo.toUpperCase()) }));
   res.json({
     ok: true,
     data: {
@@ -63,6 +69,14 @@ const actualizar = handler(async (req, res) => {
   }
   if ("nota" in req.body) cambios.nota = req.body.nota || null;
   if ("cotizacion_id" in req.body) cambios.cotizacion_id = req.body.cotizacion_id || null;
+  // Ficha para postular (M29, M32)
+  if ("empresa_postula" in req.body) cambios.empresa_postula = ["kenott", "tactics", "ambas"].includes(req.body.empresa_postula) ? req.body.empresa_postula : null;
+  if ("presupuesto" in req.body) cambios.presupuesto = Number(req.body.presupuesto) > 0 ? Math.round(Number(req.body.presupuesto)) : null;
+  if ("grupos" in req.body) cambios.grupos = (Array.isArray(req.body.grupos) ? req.body.grupos : [])
+    .map((g) => ({ nombre: String(g.nombre || "").trim(), monto: Math.round(Number(g.monto) || 0) })).filter((g) => g.nombre);
+  for (const c of ["lugar_entrega", "criterios"]) if (c in req.body) cambios[c] = String(req.body[c] || "").trim() || null;
+  if ("checklist" in req.body) cambios.checklist = (Array.isArray(req.body.checklist) ? req.body.checklist : [])
+    .map((x) => ({ doc: String(x.doc || "").trim(), listo: !!x.listo })).filter((x) => x.doc);
   await l.update(cambios);
   res.json({ ok: true, data: l });
 });

@@ -29,6 +29,13 @@ const Licitacion = sequelize.define("Licitacion", {
   relevancia: { type: DataTypes.INTEGER, allowNull: true }, // 0-100: qué tanto calza con lo que vendemos (Claude)
   motivo_relevancia: { type: DataTypes.STRING(255), allowNull: true },
   descarte_auto: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // la descartó el sistema, no una persona
+  // --- Ficha para postular (M29, M32) ---
+  empresa_postula: { type: DataTypes.STRING(20), allowNull: true }, // kenott | tactics | ambas
+  presupuesto: { type: DataTypes.DECIMAL(16, 2), allowNull: true }, // disponible, con IVA (si las bases lo informan)
+  grupos: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] }, // [{ nombre, monto }] montos por grupo de ítems, con IVA
+  lugar_entrega: { type: DataTypes.STRING(255), allowNull: true },
+  criterios: { type: DataTypes.TEXT, allowNull: true }, // ej. "precio 50%, plazo 30%, localidad 20%"
+  checklist: { type: DataTypes.JSONB, allowNull: true }, // [{ doc, listo }] documentos exigidos
 }, {
   tableName: "licitaciones",
   timestamps: true,

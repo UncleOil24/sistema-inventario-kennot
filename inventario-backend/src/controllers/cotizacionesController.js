@@ -3,6 +3,7 @@ const sequelize = require("../../config/database");
 const Cotizacion = require("../models/Cotizacion");
 const Cliente = require("../models/Cliente");
 const Producto = require("../models/Producto");
+const Licitacion = require("../models/Licitacion");
 const { handler, ErrorNegocio, calcularTotales, normalizarItems } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
@@ -74,8 +75,43 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
       costo,
       proveedor: previo?.proveedor ?? p.proveedor ?? null,
       fecha_precio: previo?.fecha_precio ?? p.fecha_precio ?? null,
+      grupo: itemsBody[idx].grupo !== undefined ? (String(itemsBody[idx].grupo || "").trim() || null) : previo?.grupo ?? null, // grupo del presupuesto (M27)
     };
   });
+};
+
+// Presupuesto de la licitación: { total, grupos: [{ nombre, monto }] } (montos con IVA)
+const limpiarPresupuesto = (p) => {
+  if (!p) return null;
+  const grupos = (Array.isArray(p.grupos) ? p.grupos : [])
+    .map((g) => ({ nombre: String(g.nombre || "").trim(), monto: Math.round(Number(g.monto) || 0) }))
+    .filter((g) => g.nombre);
+  const total = Math.round(Number(p.total) || 0);
+  return total || grupos.length ? { total: total || null, grupos } : null;
+};
+
+// Postulación doble (M32, art. 60): Kenott y Tactics son empresas relacionadas; si las dos ofertan al mismo
+// proceso de Mercado Público, ambas ofertas pueden quedar inadmisibles. Se avisa antes de guardar.
+const esSolicitudMP = (id) => /^\d+-\d+-[A-Z]{1,3}\d{0,2}$/i.test(String(id || "").trim());
+const revisarPostulacion = async ({ id_solicitud, empresa, id, forzar }, t) => {
+  if (!esSolicitudMP(id_solicitud)) return;
+  const otra = await Cotizacion.findOne({
+    where: { id_solicitud: { [Op.iLike]: String(id_solicitud).trim() }, empresa: { [Op.ne]: empresa }, estado: { [Op.notIn]: ["rechazada", "vencida"] }, ...(id ? { id: { [Op.ne]: id } } : {}) },
+    transaction: t,
+  });
+  if (otra && !forzar) {
+    throw new ErrorNegocio(`Ya hay una cotización de ${otra.empresa === "tactics" ? "Tactics" : "Kenott"} (N${otra.numero}) para el proceso ${id_solicitud}. Si las dos empresas postulan al mismo proceso, el art. 60 del reglamento de compras públicas puede dejar inadmisibles ambas ofertas (empresas relacionadas). ¿Guardar igual?`, 409);
+  }
+};
+// Anota en la licitación qué empresa postula (o "ambas")
+const anotarPostulacion = async (id_solicitud, t) => {
+  if (!esSolicitudMP(id_solicitud)) return;
+  const l = await Licitacion.findByPk(String(id_solicitud).trim().toUpperCase(), { transaction: t }) || await Licitacion.findOne({ where: { codigo: { [Op.iLike]: String(id_solicitud).trim() } }, transaction: t });
+  if (!l) return;
+  const [rows] = await sequelize.query(`SELECT DISTINCT empresa FROM cotizaciones WHERE id_solicitud ILIKE :id AND estado NOT IN ('rechazada','vencida')`, { replacements: { id: String(id_solicitud).trim() }, transaction: t });
+  const empresas = rows.map((r) => r.empresa);
+  const empresa_postula = empresas.length > 1 ? "ambas" : empresas[0] || l.empresa_postula;
+  await l.update({ empresa_postula, ...(l.estado_interno === "nueva" || l.estado_interno === "revisada" ? { estado_interno: "cotizada" } : {}) }, { transaction: t });
 };
 
 const datosCliente = async (body, t) => {
@@ -136,11 +172,14 @@ const crearCotizacion = handler(async (req, res) => {
     const fecha = hoyISO();
     const validez = Number(b.validez_dias) || Number(params.validez_cotizacion_dias) || 30;
     const empresa = validarEmpresa(b.empresa);
+    const idSol = String(b.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null);
+    await revisarPostulacion({ id_solicitud: idSol, empresa, forzar: b.forzar }, t);
     const numero = await siguienteNumero(t, empresa);
-    return Cotizacion.create({
+    const nueva = await Cotizacion.create({
       numero, empresa, ...cliente,
       // ID impreso: el de la solicitud (licitación / compra ágil) o, si no hay, el del cliente
-      id_solicitud: String(b.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null),
+      id_solicitud: idSol,
+      presupuesto: limpiarPresupuesto(b.presupuesto),
       plazo_entrega: String(b.plazo_entrega || "").trim() || params.plazo_entrega || null,
       nombre_cotizacion: b.nombre_cotizacion || null, // se imprime como "Descripción" (Kenott) o "Proyecto" (Tactics)
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
@@ -151,6 +190,8 @@ const crearCotizacion = handler(async (req, res) => {
       costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0),
       creado_por: req.usuario.nombre,
     }, { transaction: t });
+    await anotarPostulacion(idSol, t);
+    return nueva;
   });
   res.status(201).json({ ok: true, data: vista(req)(cot) });
 });
@@ -171,6 +212,7 @@ const actualizarCotizacion = handler(async (req, res) => {
     }
     if (b.id_solicitud !== undefined) cambios.id_solicitud = String(b.id_solicitud || "").trim() || null;
     if (b.plazo_entrega !== undefined) cambios.plazo_entrega = String(b.plazo_entrega || "").trim() || null;
+    if (b.presupuesto !== undefined) cambios.presupuesto = limpiarPresupuesto(b.presupuesto);
     if (b.items) {
       const items = await armarItems(b.items, cambios.tipo_precio || c.tipo_precio, b.actualizar_costos ? null : c.items, t);
       Object.assign(cambios, { items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0) });
@@ -189,7 +231,11 @@ const actualizarCotizacion = handler(async (req, res) => {
       cambios.numero = await siguienteNumero(t, cambios.empresa);
       if ((c.nombre_cotizacion || "") === `Cotización ${c.numero}`) cambios.nombre_cotizacion = `Cotización ${cambios.numero}`;
     }
+    await revisarPostulacion({ id_solicitud: cambios.id_solicitud !== undefined ? cambios.id_solicitud : c.id_solicitud, empresa: cambios.empresa || c.empresa, id: c.id, forzar: b.forzar }, t);
+    const solAnterior = c.id_solicitud;
     await c.update(cambios, { transaction: t });
+    await anotarPostulacion(c.id_solicitud, t);
+    if (solAnterior && solAnterior !== c.id_solicitud) await anotarPostulacion(solAnterior, t);
     return c;
   });
   res.json({ ok: true, data: vista(req)(cot) });

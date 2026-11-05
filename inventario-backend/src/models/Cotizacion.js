@@ -15,6 +15,8 @@ const Cotizacion = sequelize.define("Cotizacion", {
   plazo_entrega: { type: DataTypes.STRING(255), allowNull: true }, // texto de "Plazo de entrega" en las condiciones
   // Cotizaciones de antes de partir la numeración en 100: se conservan pero no cuentan para el correlativo
   anterior: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Control de presupuesto (M27): { total, grupos: [{ nombre, monto }] } montos con IVA; cada línea puede tener "grupo"
+  presupuesto: { type: DataTypes.JSONB, allowNull: true },
   tipo_precio: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "convenio" }, // convenio | particular
   nombre_cotizacion: { type: DataTypes.STRING(255), allowNull: true },
   fecha: { type: DataTypes.DATEONLY, allowNull: true, defaultValue: DataTypes.NOW },
