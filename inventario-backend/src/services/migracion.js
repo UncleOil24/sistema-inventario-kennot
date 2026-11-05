@@ -36,8 +36,24 @@ async function migrar() {
   await reinicioCotizaciones(q);
   await codigosClientes(q);
   await recorridoVentas();
+  await catalogoPaso7();
   // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
+}
+
+// Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)
+async function catalogoPaso7() {
+  const { unidadDeProducto } = require("./unidades");
+  const [productos] = await sequelize.query(`SELECT id, nombre, unidad FROM productos`);
+  const cambios = productos.map((p) => ({ id: p.id, nueva: unidadDeProducto(p.nombre, p.unidad) })).filter((x, k) => x.nueva !== productos[k].unidad);
+  for (const c of cambios) await sequelize.query(`UPDATE productos SET unidad = :u WHERE id = :id`, { replacements: { u: c.nueva, id: c.id } });
+  if (cambios.length) console.log(`✓ Unidades normalizadas en ${cambios.length} producto(s)`);
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_catalogo_paso7'`);
+  if (hecho) return;
+  const [brizz] = await sequelize.query(`UPDATE proveedores SET excluido = true, motivo_exclusion = 'Es de Santiago: el flete sale más caro' WHERE nombre ILIKE 'BRIZZ%' RETURNING nombre`);
+  const { recalcularDeProveedor } = require("../controllers/proveedoresController");
+  for (const b of brizz) await recalcularDeProveedor(b.nombre, "Sistema", "Proveedor excluido (flete desde Santiago)");
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_catalogo_paso7', NOW()::text, NOW(), NOW())`);
 }
 
 // Una sola vez (paso 3, nov-2026): cada venta toma su etapa según cómo va, el N° de factura que tenía pasa

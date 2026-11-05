@@ -43,9 +43,16 @@ const registrar = (datos, t) => RegistroCambio.create(datos, { transaction: t })
 
 // Recalcula precio vigente, opciones 2/3 y avisos de un producto.
 // Devuelve los cambios aplicados.
+const REFERENCIA = ["oc_cliente", "factura_sin_proveedor"];
+const ETIQUETA_REF = { oc_cliente: "OC CLIENTE", factura_sin_proveedor: "FACTURA SIN PROVEEDOR" };
 const recalcular = async (producto, { t, usuario, motivo } = {}) => {
   const precios = await PrecioProveedor.findAll({ where: { producto_id: producto.id }, transaction: t });
-  const vigentes = vigentesPorProveedor(precios);
+  // M7: los proveedores excluidos quedan como historial, pero no compiten
+  const excluidos = new Set((await Proveedor.findAll({ where: { excluido: true }, attributes: ["nombre"], transaction: t })).map((p) => normProv(p.nombre)));
+  const todos = vigentesPorProveedor(precios.filter((p) => !excluidos.has(normProv(p.proveedor))));
+  // M8: precios de referencia (OC de cliente, factura sin proveedor) solo valen si no hay ninguna cotización real
+  const reales = todos.filter((p) => !REFERENCIA.includes(p.origen));
+  const vigentes = reales.length ? reales : todos;
   if (vigentes.length === 0) return {}; // sin historial: no se toca lo que tenga
 
   const avisos = [];
@@ -99,6 +106,7 @@ const recalcular = async (producto, { t, usuario, motivo } = {}) => {
     opcion3_fecha: op3?.fecha || null,
     confirmado,
   };
+  if (REFERENCIA.includes(principal.origen)) avisos.push(`REF. ${ETIQUETA_REF[principal.origen]} - pendiente cotizar con proveedor`);
   // Los avisos nuevos reemplazan a los anteriores; un confirmado sin avisos queda limpio
   if (avisos.length) cambios.revisar = avisos.join(" | ");
   else if (confirmado) cambios.revisar = null;
@@ -124,4 +132,4 @@ const origenDe = async (nombreProveedor, t) => {
 // Qué cuenta como aviso real en REVISAR (el resto del texto es solo el origen del precio, ej. "WEB SODIMAC")
 const SQL_AVISO = `(NOT confirmado AND precio_compra > 0 AND revisar ~* '(revis|verific|m[aá]s barat|m[aá]s car|antes \\$|pendiente)')`;
 
-module.exports = { SQL_AVISO, recalcular, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
+module.exports = { REFERENCIA, SQL_AVISO, recalcular, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };

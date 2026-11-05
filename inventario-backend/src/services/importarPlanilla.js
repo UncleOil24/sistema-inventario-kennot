@@ -1,3 +1,4 @@
+const { unidadDeProducto } = require("./unidades");
 // Importa la planilla LISTADO_CONSOLIDADO_FERRETERIA (v61 o posterior) a la base:
 //   LISTADO CONSOLIDADO  -> productos (precio vigente, opciones 2 y 3, REVISAR, confirmados)
 //   COTIZACIONES         -> precios_proveedor (historia con fecha y documento)
@@ -109,7 +110,7 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
     if (!n || !desc) continue;
     const revisar = g("revisar");
     filas.push({
-      codigo: n, categoria: texto(g("cat")) || "General", nombre: desc.toUpperCase(), unidad: texto(g("unidad")) || "UNIDAD",
+      codigo: n, categoria: texto(g("cat")) || "General", nombre: desc.toUpperCase(), unidad: unidadDeProducto(desc, texto(g("unidad"))),
       compra: numero(g("compra")), proveedor: texto(g("prov")), contacto: texto(g("contacto")), fecha: fechaISO(g("fecha")),
       revisar: texto(revisar), confirmado: revisar === 0 || /^0$/.test(String(revisar ?? "")) || /^OK CONFIRM/i.test(String(revisar ?? "")),
       op2: { proveedor: texto(g("p2")), precio: numero(g("pr2")), fecha: fechaISO(g("f2")) },

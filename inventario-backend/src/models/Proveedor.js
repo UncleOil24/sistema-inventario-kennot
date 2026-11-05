@@ -13,6 +13,10 @@ const Proveedor = sequelize.define("Proveedor", {
   razon_social: { type: DataTypes.STRING(255), allowNull: true },
   contacto: { type: DataTypes.STRING(255), allowNull: true }, // vendedor / datos de contacto
   tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "proveedor" }, // proveedor | web
+  comuna: { type: DataTypes.STRING(100), allowNull: true },
+  // Excluido (M7): sus cotizaciones quedan como historial pero no compiten por el precio vigente (ej. flete caro)
+  excluido: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  motivo_exclusion: { type: DataTypes.STRING(255), allowNull: true },
 }, {
   tableName: "proveedores",
   timestamps: true,
