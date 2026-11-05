@@ -10,7 +10,8 @@ const crypto = require("crypto");
 const claveInicial = () => {
   const L = "abcdefghjkmnpqrstuvwxyz", N = "23456789";
   const r = (s) => s[crypto.randomInt(s.length)];
-  return `${r(L).toUpperCase()}${r(L)}${r(L)}${r(L)}-${r(N)}${r(N)}${r(N)}${r(N)}`;
+  // Solo minúsculas y números: más fácil de escribir en el celular
+  return `${r(L)}${r(L)}${r(L)}${r(L)}-${r(N)}${r(N)}${r(N)}${r(N)}`;
 };
 
 // Evita que el sistema quede sin ningún administrador activo
@@ -96,4 +97,14 @@ const actualizarUsuario = handler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-module.exports = { getUsuarios, crearUsuario, actualizarUsuario, crearEquipo };
+// POST /api/usuarios/:id/clave-temporal   -> nueva clave temporal (se muestra una vez); quita el bloqueo por intentos
+const claveTemporal = handler(async (req, res) => {
+  const u = await Usuario.findByPk(req.params.id);
+  if (!u) throw new ErrorNegocio("Usuario no encontrado", 404);
+  const clave = claveInicial();
+  await u.update({ password_hash: await hashear(clave), debe_cambiar_clave: true, activo: true, token_version: u.token_version + 1 });
+  require("./authController").limpiarBloqueo(u.email);
+  res.json({ ok: true, data: { nombre: u.nombre, email: u.email, rol: u.rol, clave } });
+});
+
+module.exports = { getUsuarios, crearUsuario, actualizarUsuario, crearEquipo, claveTemporal };

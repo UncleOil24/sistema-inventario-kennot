@@ -137,7 +137,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                     {l.organismo && (clienteDe(l, clientes)
                       ? <span className="estado estado-ok" title="Ya está en Clientes">✓ cliente</span>
                       : <button className="link" onClick={() => setNuevoCliente(l)}>+ Agregar cliente</button>)}
-                    {l.empresa_postula && <span className={`estado ${l.empresa_postula === "ambas" ? "estado-warn" : "estado-info"}`} title={l.empresa_postula === "ambas" ? "Postulan las dos empresas: revisar art. 60" : "Empresa que postula"}>{l.empresa_postula === "ambas" ? "⚠ Kenott y Tactics" : `postula ${l.empresa_postula === "tactics" ? "Tactics" : "Kenott"}`}</span>}
+                    {l.empresa_postula && <span className="estado estado-info" title="Empresa que postula">{l.empresa_postula === "ambas" ? "postulan Kenott y Tactics" : `postula ${l.empresa_postula === "tactics" ? "Tactics" : "Kenott"}`}</span>}
                     {l.checklist?.length > 0 && <span className={l.checklist.every((x) => x.listo) ? "estado estado-ok" : ""}>docs {l.checklist.filter((x) => x.listo).length}/{l.checklist.length}</span>}
                     {l.cotizaciones?.length > 0 && <span>{l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero}`).join(" · ")}</span>}
                     {l.estado_interno !== "nueva" && <span className={`estado estado-${l.estado_interno === "cotizada" ? "ok" : l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
@@ -201,7 +201,6 @@ function FichaPostular({ l, notify, onClose, onGuardada }) {
   const faltan = f.checklist.filter((x) => !x.listo);
   const sumaGrupos = f.grupos.reduce((s, g) => s + (Number(g.monto) || 0), 0);
   const elegirEmpresa = (v) => {
-    if (v === "ambas" && !confirm("Kenott y Tactics son empresas relacionadas. Según el art. 60 del reglamento de compras públicas, si las dos ofertan al mismo proceso ambas ofertas pueden quedar inadmisibles (falta confirmar si aplica igual en Compra Ágil).\n\n¿Marcar que postulan las dos?")) return;
     setF({ ...f, empresa_postula: v });
   };
   const guardar = async () => {
@@ -232,7 +231,7 @@ function FichaPostular({ l, notify, onClose, onGuardada }) {
         <div className="chips">
           {EMPRESAS_POSTULA.map(([v, t]) => <button key={t} className={`chip ${f.empresa_postula === v ? "activo" : ""}`} onClick={() => elegirEmpresa(v)}>{t}</button>)}
         </div>
-        {f.empresa_postula === "ambas" && <div className="aviso">⚠ Postulan las dos empresas: revisen el art. 60 antes de enviar.</div>}
+        {f.empresa_postula === "ambas" && <div className="mini">Postulan las dos empresas (son empresas distintas, con representantes distintos).</div>}
         <span className="mini">Se marca sola al cotizar con el ID {l.codigo}.</span>
       </div>
       <div className="fields-row">
