@@ -75,6 +75,9 @@ const styles = `
   .table tr:last-child td { border-bottom: none; }
   .table tr:hover td { background: rgba(255,255,255,0.02); }
   .id-cell { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .presu-fila { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; }
+  .presu-fila.presu-pasa { border-color: var(--danger); background: rgba(220,80,80,0.06); }
+  .presu-cab { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; }
   .recorrido { display: flex; gap: 4px; margin: 10px 0 14px; flex-wrap: wrap; }
   .recorrido .paso { flex: 1; min-width: 110px; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; color: var(--text3); }
   .recorrido .paso.hecho { color: var(--success); border-color: rgba(76,175,125,0.35); }

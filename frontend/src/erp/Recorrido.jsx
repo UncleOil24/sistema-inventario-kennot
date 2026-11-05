@@ -5,11 +5,12 @@ import { api, fmt, fecha, hoyISO } from "./lib";
 import { Recorrido, EstadoFactura } from "./ui";
 
 // Llama a la API; si el servidor pide confirmación (409), pregunta y reintenta con { forzar: true }
-export async function conConfirmacion(url, body = {}) {
+export async function conConfirmacion(url, body = {}, method = "POST") {
   try {
-    return await api(url, { method: "POST", body });
+    return await api(url, { method, body });
   } catch (e) {
-    if (e.status === 409 && confirm(`${e.message}\n\n¿Seguir de todas formas?`)) return api(url, { method: "POST", body: { ...body, forzar: true } });
+    if (e.status === 409 && confirm(`${e.message}\n\n¿Seguir de todas formas?`)) return api(url, { method, body: { ...body, forzar: true } });
+    if (e.status === 409) e.cancelado = true;
     throw e;
   }
 }

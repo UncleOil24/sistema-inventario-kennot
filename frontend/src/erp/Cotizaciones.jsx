@@ -61,13 +61,13 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
           producto_id: i.producto_id, codigo: i.codigo ?? p.codigo, nombre: i.nombre, unidad: i.unidad,
           cantidad: i.cantidad, precio: i.precio, auto: false,
           convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
-          costo: i.costo, proveedor: i.proveedor, descripcion_cliente: i.descripcion_cliente,
+          costo: i.costo, proveedor: i.proveedor, descripcion_cliente: i.descripcion_cliente, grupo: i.grupo || "",
         };
       });
       onEditar({
         id: c.id, numero: c.numero, empresa: c.empresa || "kenott", empresa_original: c.empresa || "kenott", cliente_id: c.cliente_id || "", tipo_precio: c.tipo_precio,
         nombre_cotizacion: c.nombre_cotizacion || "", validez_dias: c.validez_dias || 30, notas: c.notas || "", archivo_cliente: c.archivo_cliente || "", items,
-        id_solicitud: c.id_solicitud || "", plazo_entrega: c.plazo_entrega || "", cliente_nombre_doc: c.cliente || "", anterior: c.anterior,
+        id_solicitud: c.id_solicitud || "", presupuesto: c.presupuesto || null, plazo_entrega: c.plazo_entrega || "", cliente_nombre_doc: c.cliente || "", anterior: c.anterior,
       });
     } catch (e) { notify(e.message, "danger"); }
   };

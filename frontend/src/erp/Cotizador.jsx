@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { Totales, Estado } from "./ui";
 import ImportarLista from "./ImportarLista";
+import ControlPresupuesto from "./Presupuesto";
+import { conConfirmacion } from "./Recorrido";
 import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
 
 const PLAZO_DEFECTO = "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra";
@@ -64,7 +66,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const sinPrecio = items.filter((i) => !(Number(i.precio) > 0)).length;
   const antiguos = items.filter((i) => i.precio_antiguo).length;
 
-  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", items: [] }));
+  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", presupuesto: null, items: [] }));
   const empresa = borrador.empresa || "kenott";
 
   // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
@@ -101,18 +103,21 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         notas: borrador.notas || null,
         archivo_cliente: borrador.archivo_cliente || null,
         estado,
-        items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio), descripcion_cliente: i.descripcion_cliente || null })),
+        presupuesto: borrador.presupuesto || null,
+        items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio), descripcion_cliente: i.descripcion_cliente || null, grupo: i.grupo || null })),
       };
+      // Si la otra empresa ya cotizó este proceso, el servidor avisa (art. 60) y se pide confirmación
       const cot = borrador.id
-        ? await api(`/cotizaciones/${borrador.id}`, { method: "PUT", body })
-        : await api("/cotizaciones", { method: "POST", body });
+        ? await conConfirmacion(`/cotizaciones/${borrador.id}`, body, "PUT")
+        : await conConfirmacion("/cotizaciones", body);
       if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${idCot(cot)}${cot.anterior ? "_anterior" : ""}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
       notify(`✓ ${nombreCot(cot)} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
       limpiar();
       onGuardada?.(cot);
-    } catch (e) { notify(e.message, "danger"); }
+    } catch (e) { if (!e.cancelado) notify(e.message, "danger"); }
     finally { setGuardando(false); }
   };
+  const grupos = (borrador.presupuesto?.grupos || []).filter((g) => g.nombre);
 
   return (
     <>
@@ -207,7 +212,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
           <div className="table-wrap" style={{ marginBottom: "1rem" }}>
             <table className="table table-compacta">
               <thead><tr>
-                <th>N°</th><th>Producto</th><th>Cant.</th><th>Precio venta</th><th>Total</th>
+                <th>N°</th><th>Producto</th>{grupos.length > 0 && <th>Grupo</th>}<th>Cant.</th><th>Precio venta</th><th>Total</th>
                 {esAdmin && <th>Costo</th>}{esAdmin && <th>Margen</th>}<th></th>
               </tr></thead>
               <tbody>
@@ -218,6 +223,11 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                     <tr key={i.producto_id} className={!(Number(i.precio) > 0) ? "fila-alerta" : ""}>
                       <td className="id-cell">{i.codigo ?? ""}</td>
                       <td>{i.nombre}<div className="mini">{i.unidad}{esAdmin && i.proveedor ? ` · ${i.proveedor}` : ""}{i.descripcion_cliente ? ` · cliente: "${i.descripcion_cliente}"` : ""}{i.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(i.fecha_precio)}</span>}</div></td>
+                      {grupos.length > 0 && <td>
+                        <select className="filter-select" style={{ minWidth: 110 }} value={i.grupo || ""} onChange={(e) => setLinea(i.producto_id, "grupo", e.target.value)}>
+                          <option value="">—</option>{grupos.map((g) => <option key={g.nombre}>{g.nombre}</option>)}
+                        </select>
+                      </td>}
                       <td><input className="qty-input" type="number" min="0" step="any" value={i.cantidad} onChange={(e) => setLinea(i.producto_id, "cantidad", e.target.value)} /></td>
                       <td>
                         <input className="qty-input" style={{ width: 96 }} type="number" min="0" value={i.precio} onChange={(e) => setLinea(i.producto_id, "precio", e.target.value)} />
@@ -233,7 +243,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
               </tbody>
             </table>
           </div>
-          <div className="dash-grid">
+          <ControlPresupuesto presupuesto={borrador.presupuesto} setPresupuesto={(p) => set({ presupuesto: p })} items={items} setItems={setItems} verCostos={esAdmin} />
+          <div className="dash-grid" style={{ marginTop: 12 }}>
             <Totales subtotal={subtotal} />
             {esAdmin && (
               <div className="cot-totals" style={{ marginBottom: 0 }}>

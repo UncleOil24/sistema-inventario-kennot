@@ -31,6 +31,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
   const [avance, setAvance] = useState(null);
   const [abierta, setAbierta] = useState(null);
   const [cotizar, setCotizar] = useState(null);
+  const [fichaL, setFichaL] = useState(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -75,6 +76,9 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
       cliente_id: cliente?.id || "", tipo_precio: cliente?.tipo || "convenio",
       nombre_cotizacion: `${tipoDe(l)} ${l.codigo} – ${l.nombre}`.slice(0, 250),
       id_solicitud: l.codigo,
+      // Presupuesto y grupos de la ficha (M27): el cotizador compara en vivo
+      presupuesto: (l.presupuesto || l.monto_estimado || l.grupos?.length) ? { total: Number(l.presupuesto || l.monto_estimado) || null, grupos: l.grupos || [] } : null,
+      empresa: l.empresa_postula && l.empresa_postula !== "ambas" ? l.empresa_postula : undefined,
       validez_dias: l.fuente === "compra_agil" ? 10 : 30, notas: `Mercado Público ${l.codigo}`, archivo_cliente: `${tipoDe(l)} ${l.codigo}`, items: nuevas,
     });
     marcar(l, "cotizada");
@@ -132,6 +136,9 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                     {l.organismo && (clienteDe(l, clientes)
                       ? <span className="estado estado-ok" title="Ya está en Clientes">✓ cliente</span>
                       : <button className="link" onClick={() => setNuevoCliente(l)}>+ Agregar cliente</button>)}
+                    {l.empresa_postula && <span className={`estado ${l.empresa_postula === "ambas" ? "estado-warn" : "estado-info"}`} title={l.empresa_postula === "ambas" ? "Postulan las dos empresas: revisar art. 60" : "Empresa que postula"}>{l.empresa_postula === "ambas" ? "⚠ Kenott y Tactics" : `postula ${l.empresa_postula === "tactics" ? "Tactics" : "Kenott"}`}</span>}
+                    {l.checklist?.length > 0 && <span className={l.checklist.every((x) => x.listo) ? "estado estado-ok" : ""}>docs {l.checklist.filter((x) => x.listo).length}/{l.checklist.length}</span>}
+                    {l.cotizaciones?.length > 0 && <span>{l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero}`).join(" · ")}</span>}
                     {l.estado_interno !== "nueva" && <span className={`estado estado-${l.estado_interno === "cotizada" ? "ok" : l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
                   </div>
                   {l.relevancia != null
@@ -146,6 +153,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                   {l.monto_estimado && <div className="hist-total">{fmt(l.monto_estimado)}</div>}
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => { setAbierta(l); if (l.estado_interno === "nueva") marcar(l, "revisada"); }}>Ver productos</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setFichaL(l)}>Ficha para postular</button>
                     {l.items?.length > 0 && <button className="btn btn-success btn-sm" onClick={() => setCotizar(l)}>Cotizar</button>}
                     {l.estado_interno !== "descartada"
                       ? <button className="btn btn-ghost btn-sm" onClick={() => marcar(l, "descartada")}>Descartar</button>
@@ -160,6 +168,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
 
       {nuevoCliente && <ClienteDesdeLicitacion l={nuevoCliente} notify={notify} onClose={() => setNuevoCliente(null)}
         onCreado={async () => { setNuevoCliente(null); await recargarClientes?.(); }} />}
+      {fichaL && <FichaPostular l={fichaL} notify={notify} onClose={() => setFichaL(null)} onGuardada={() => { setFichaL(null); cargar(); }} />}
       {abierta && <DetalleLicitacion codigo={abierta.codigo} ficha={abierta.ficha} tipo={tipoDe(abierta)} notify={notify} onClose={() => { setAbierta(null); cargar(); }} onCotizar={(l) => { setAbierta(null); setCotizar(l); }} />}
       {cotizar && (
         <ImportarLista tipo="convenio" esAdmin={esAdmin} notify={notify} titulo={`// Cotizar ${tipoDe(cotizar)} ${cotizar.codigo}`}
@@ -168,6 +177,96 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
           onAgregar={(nuevas) => { const l = cotizar; setCotizar(null); alCotizador(l, nuevas); }} />
       )}
     </>
+  );
+}
+
+// Documentos que suelen exigir las bases (M22, M29); se pueden agregar o quitar
+const CHECKLIST_BASE = ["Patente comercial", "Ficha técnica de los productos", "Datos bancarios (banco y N° de cuenta)", "Declaración jurada / anexos de las bases", "Cotización firmada con plazo de entrega"];
+const EMPRESAS_POSTULA = [["", "Sin definir"], ["kenott", "Kenott"], ["tactics", "Tactics"], ["ambas", "Ambas"]];
+
+// Ficha para postular (M29) y empresa que postula (M32)
+function FichaPostular({ l, notify, onClose, onGuardada }) {
+  const [f, setF] = useState({
+    empresa_postula: l.empresa_postula || "",
+    presupuesto: l.presupuesto ?? (l.monto_estimado ? Math.round(l.monto_estimado) : ""),
+    lugar_entrega: l.lugar_entrega || (l.fuente === "compra_agil" ? l.comuna || "" : ""),
+    criterios: l.criterios || "",
+    grupos: l.grupos?.length ? l.grupos : [],
+    checklist: l.checklist?.length ? l.checklist : CHECKLIST_BASE.map((doc) => ({ doc, listo: false })),
+    nota: l.nota || "",
+  });
+  const [nuevoDoc, setNuevoDoc] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const faltan = f.checklist.filter((x) => !x.listo);
+  const sumaGrupos = f.grupos.reduce((s, g) => s + (Number(g.monto) || 0), 0);
+  const elegirEmpresa = (v) => {
+    if (v === "ambas" && !confirm("Kenott y Tactics son empresas relacionadas. Según el art. 60 del reglamento de compras públicas, si las dos ofertan al mismo proceso ambas ofertas pueden quedar inadmisibles (falta confirmar si aplica igual en Compra Ágil).\n\n¿Marcar que postulan las dos?")) return;
+    setF({ ...f, empresa_postula: v });
+  };
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await api(`/mercado-publico/licitaciones/${encodeURIComponent(l.codigo)}`, { method: "PUT", body: { ...f, presupuesto: f.presupuesto === "" ? null : Number(f.presupuesto) } });
+      notify("✓ Ficha guardada");
+      onGuardada();
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setGuardando(false); }
+  };
+  return (
+    <Modal titulo={`// Ficha ${l.codigo}`} onClose={onClose} ancho={760}
+      footer={<>
+        <a className="btn btn-ghost" href={l.ficha} target="_blank" rel="noreferrer">Bases en Mercado Público ↗</a>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={guardando} onClick={guardar}>{guardando ? "Guardando..." : "Guardar ficha"}</button>
+      </>}>
+      <div className="hist-nombre">{l.nombre}</div>
+      <div className="hist-meta">
+        <span>{l.organismo}</span>
+        {l.fecha_cierre && <span>Cierra {new Date(l.fecha_cierre).toLocaleString("es-CL")}</span>}
+        {l.monto_estimado && <span>Monto informado {fmt(l.monto_estimado)}</span>}
+        {l.cotizaciones?.map((c) => <span key={c.id} className="id-solicitud">{c.empresa === "tactics" ? "Tactics" : "Kenott"} N{c.numero} · {fmt(c.total)}</span>)}
+      </div>
+      <div className="field">
+        <label>Empresa que postula</label>
+        <div className="chips">
+          {EMPRESAS_POSTULA.map(([v, t]) => <button key={t} className={`chip ${f.empresa_postula === v ? "activo" : ""}`} onClick={() => elegirEmpresa(v)}>{t}</button>)}
+        </div>
+        {f.empresa_postula === "ambas" && <div className="aviso">⚠ Postulan las dos empresas: revisen el art. 60 antes de enviar.</div>}
+        <span className="mini">Se marca sola al cotizar con el ID {l.codigo}.</span>
+      </div>
+      <div className="fields-row">
+        <div className="field"><label>Presupuesto disponible (con IVA)</label><input type="number" value={f.presupuesto} onChange={(e) => setF({ ...f, presupuesto: e.target.value })} /></div>
+        <div className="field"><label>Lugar de entrega</label><input value={f.lugar_entrega} onChange={(e) => setF({ ...f, lugar_entrega: e.target.value })} placeholder="Ej: Bodega municipal, Linares" /></div>
+      </div>
+      <div className="field"><label>Criterios de evaluación</label><input value={f.criterios} onChange={(e) => setF({ ...f, criterios: e.target.value })} placeholder="Ej: precio 50%, plazo de entrega 30%, localidad 20%" /></div>
+      <div className="field">
+        <label>Montos por grupo de ítems (con IVA, si las bases los separan)</label>
+        {f.grupos.map((g, k) => (
+          <div key={k} className="pago-form" style={{ marginBottom: 6 }}>
+            <input value={g.nombre} placeholder="Grupo (ej. Pinturas)" onChange={(e) => setF({ ...f, grupos: f.grupos.map((x, j) => (j === k ? { ...x, nombre: e.target.value } : x)) })} />
+            <input type="number" value={g.monto} placeholder="Monto con IVA" onChange={(e) => setF({ ...f, grupos: f.grupos.map((x, j) => (j === k ? { ...x, monto: e.target.value } : x)) })} />
+            <button className="btn btn-danger btn-sm" onClick={() => setF({ ...f, grupos: f.grupos.filter((_, j) => j !== k) })}>✕</button>
+          </div>
+        ))}
+        <button className="link" onClick={() => setF({ ...f, grupos: [...f.grupos, { nombre: "", monto: "" }] })}>+ Agregar grupo</button>
+        {f.grupos.length > 0 && <span className="mini"> Suma de grupos: {fmt(sumaGrupos)}</span>}
+      </div>
+      <div className="field">
+        <label>Lista de chequeo antes de postular {faltan.length ? `· faltan ${faltan.length}` : "· ✓ completa"}</label>
+        {f.checklist.map((x, k) => (
+          <label key={k} className="check" style={{ display: "flex", gap: 8 }}>
+            <input type="checkbox" checked={x.listo} onChange={(e) => setF({ ...f, checklist: f.checklist.map((y, j) => (j === k ? { ...y, listo: e.target.checked } : y)) })} />
+            <span style={{ textDecoration: x.listo ? "line-through" : "none" }}>{x.doc}</span>
+            <button className="link" style={{ marginLeft: "auto" }} onClick={(e) => { e.preventDefault(); setF({ ...f, checklist: f.checklist.filter((_, j) => j !== k) }); }}>quitar</button>
+          </label>
+        ))}
+        <div className="pago-form">
+          <input value={nuevoDoc} placeholder="Otro documento que piden las bases" onChange={(e) => setNuevoDoc(e.target.value)} />
+          <button className="btn btn-ghost btn-sm" disabled={!nuevoDoc.trim()} onClick={() => { setF({ ...f, checklist: [...f.checklist, { doc: nuevoDoc.trim(), listo: false }] }); setNuevoDoc(""); }}>+ Agregar</button>
+        </div>
+      </div>
+      <div className="field"><label>Notas</label><textarea className="textarea" rows={2} value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} /></div>
+    </Modal>
   );
 }
 
