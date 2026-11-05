@@ -1,7 +1,9 @@
 import { useState, useMemo } from "react";
 import { Totales, Estado } from "./ui";
 import ImportarLista from "./ImportarLista";
-import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses } from "./lib";
+import { api, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
+
+const PLAZO_DEFECTO = "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra";
 
 // Cotizador: arma la cotización con nuestros precios según el tipo de cliente.
 // borrador: { id?, numero?, cliente_id, tipo_precio, nombre_cotizacion, validez_dias, notas, items }
@@ -24,13 +26,20 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       items: b.items.map((i) => (i.auto ? { ...i, precio: nuevo === "particular" ? i.particular : i.convenio } : i)),
     }));
   };
+  const esGeneral = cliente?.codigo === "CG";
   const elegirCliente = (id) => {
     const c = clientes.find((x) => String(x.id) === String(id));
     const nuevoTipo = c?.tipo || "convenio";
-    setBorrador((b) => ({
+    setBorrador((b) => {
+      // El ID impreso sigue al cliente, salvo que se haya escrito otro (p.ej. el de la solicitud de Mercado Público)
+      const anterior = clientes.find((x) => String(x.id) === String(b.cliente_id));
+      const idAuto = !b.id_solicitud || b.id_solicitud === anterior?.codigo;
+      return {
       ...b, cliente_id: id, tipo_precio: nuevoTipo,
+      id_solicitud: idAuto ? (c && c.codigo !== "CG" ? c.codigo || "" : "") : b.id_solicitud,
       items: b.items.map((i) => (i.auto ? { ...i, precio: nuevoTipo === "particular" ? i.particular : i.convenio } : i)),
-    }));
+      };
+    });
   };
 
   const sugerencias = useMemo(() => {
@@ -55,7 +64,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const sinPrecio = items.filter((i) => !(Number(i.precio) > 0)).length;
   const antiguos = items.filter((i) => i.precio_antiguo).length;
 
-  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", items: [] }));
+  const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", items: [] }));
   const empresa = borrador.empresa || "kenott";
 
   // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
@@ -76,10 +85,15 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const guardar = async (estado, salida = null) => {
     if (!items.length) return;
     if (sinPrecio && estado !== "borrador" && !confirm(`${sinPrecio} línea(s) sin precio. ¿Guardar igual?`)) return;
+    if (estado !== "borrador" && !String(borrador.id_solicitud || "").trim() && !confirm("La cotización va sin ID (del cliente o de la solicitud). ¿Guardar igual?")) return;
+    if (esGeneral && !String(borrador.cliente_nombre_doc || "").trim()) { notify("Cliente general: escribe el nombre que va en esta cotización", "danger"); return; }
     setGuardando(true);
     try {
       const body = {
         cliente_id: borrador.cliente_id ? Number(borrador.cliente_id) : null,
+        ...(esGeneral ? { cliente: borrador.cliente_nombre_doc.trim() } : {}),
+        id_solicitud: String(borrador.id_solicitud || "").trim() || null,
+        plazo_entrega: String(borrador.plazo_entrega || "").trim() || null,
         tipo_precio: tipo,
         empresa,
         nombre_cotizacion: borrador.nombre_cotizacion || undefined,
@@ -92,8 +106,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       const cot = borrador.id
         ? await api(`/cotizaciones/${borrador.id}`, { method: "PUT", body })
         : await api("/cotizaciones", { method: "POST", body });
-      if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${cot.empresa === "tactics" ? "Cotizacion_TACTICS_N" : "COT-"}${cot.numero}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
-      notify(`✓ Cotización ${cot.empresa === "tactics" ? "Tactics" : "Kenott"} N° ${cot.numero} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
+      if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${idCot(cot)}${cot.anterior ? "_anterior" : ""}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
+      notify(`✓ ${nombreCot(cot)} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
       limpiar();
       onGuardada?.(cot);
     } catch (e) { notify(e.message, "danger"); }
@@ -102,13 +116,13 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   return (
     <>
-      {borrador.id && <div className="aviso">Editando la cotización {empresa === "tactics" ? "Tactics" : "Kenott"} N° {borrador.numero}. <button className="link" onClick={limpiar}>Cancelar edición</button></div>}
+      {borrador.id && <div className="aviso">Editando la {nombreCot({ ...borrador, empresa: borrador.empresa_original || empresa })}. <button className="link" onClick={limpiar}>Cancelar edición</button></div>}
       <div className="panel">
         <div className="field">
           <label>Cotiza la empresa</label>
           <div className="chips">
             {[["kenott", "Inversiones Kenott"], ["tactics", "Tactics Inversiones"]].map(([v, t]) => (
-              <button key={v} className={`chip ${empresa === v ? "activo" : ""}`} onClick={() => set({ empresa: v })}>{empresa === v ? "● " : ""}{t}</button>
+              <button key={v} className={`chip ${empresa === v ? "activo" : ""}`} disabled={borrador.anterior && v !== borrador.empresa_original} onClick={() => set({ empresa: v })}>{empresa === v ? "● " : ""}{t}</button>
             ))}
             <span className="mini" style={{ alignSelf: "center" }}>El PDF y el Excel salen con los datos, el formato y la numeración de esa empresa.{borrador.id && borrador.empresa_original && borrador.empresa_original !== empresa ? " Al guardar recibe un número nuevo de esa empresa." : ""}</span>
           </div>
@@ -119,7 +133,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
             <div style={{ display: "flex", gap: 6 }}>
               <select value={borrador.cliente_id || ""} onChange={(e) => elegirCliente(e.target.value)}>
                 <option value="">— Seleccionar cliente —</option>
-                {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                {clientes.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} · ` : ""}{c.nombre}</option>)}
               </select>
               <button className="btn btn-ghost btn-sm" title="Nuevo cliente" onClick={irAClientes}>+</button>
             </div>
@@ -136,8 +150,26 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
             <input type="number" min="1" value={borrador.validez_dias} onChange={(e) => set({ validez_dias: e.target.value })} />
           </div>
         </div>
+        {esGeneral && (
+          <div className="field">
+            <label>Nombre del cliente en esta cotización</label>
+            <input value={borrador.cliente_nombre_doc || ""} onChange={(e) => set({ cliente_nombre_doc: e.target.value })} placeholder="Ej: Juan Pérez (solo para este documento, no se crea un cliente)" />
+          </div>
+        )}
+        <div className="fields-row">
+          <div className="field">
+            <label>ID del cliente o de la solicitud</label>
+            <input value={borrador.id_solicitud || ""} onChange={(e) => set({ id_solicitud: e.target.value })} placeholder={cliente?.codigo && !esGeneral ? cliente.codigo : "Ej: 1422-20-COT26"} />
+            <div className="mini">Se imprime en la cotización y queda en la venta y sus compras.</div>
+          </div>
+          <div className="field">
+            <label>Plazo de entrega</label>
+            <input value={borrador.plazo_entrega || ""} onChange={(e) => set({ plazo_entrega: e.target.value })} placeholder={PLAZO_DEFECTO} />
+            <div className="mini">Vacío = el de Configuración. Va en las condiciones comerciales.</div>
+          </div>
+        </div>
         <div className="field">
-          <label>Nombre de la cotización</label>
+          <label>{empresa === "tactics" ? "Proyecto" : "Descripción"} (se imprime)</label>
           <input value={borrador.nombre_cotizacion} onChange={(e) => set({ nombre_cotizacion: e.target.value })} placeholder="Ej: Materiales mantención Liceo Laura Urrutia" />
         </div>
         {!cliente && <div className="mini">Sin cliente se usa precio convenio. Si es institución, usa convenio; en duda, convenio.</div>}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Estado, Cargando } from "./ui";
-import { api, fmt, fecha } from "./lib";
+import { api, fmt, fecha, nombreCot } from "./lib";
 
 const ICONOS = { oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞" };
 const GRUPOS = [["oportunidad", "Oportunidades"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["cobrar", "Cobrar"], ["pagar", "Pagar"], ["llamar", "Llamar a clientes"]];
@@ -174,7 +174,7 @@ export default function Dashboard({ notify, irA, esAdmin, depto }) {
               <tbody>
                 {porSeguir.detalle.map((c) => (
                   <tr key={c.id} className="clickable" onClick={() => irA("cotizaciones-seguir")}>
-                    <td className="id-cell">{c.numero}</td><td>{c.cliente || "—"}<div className="mini">{c.nombre}</div></td>
+                    <td className="id-cell">{nombreCot(c)}{c.id_solicitud && <div className="id-solicitud">ID {c.id_solicitud}</div>}</td><td>{c.cliente || "—"}<div className="mini">{c.nombre}</div></td>
                     <td className="mini">{fecha(c.fecha)}</td><td className="mini">{c.ultimo_contacto ? fecha(c.ultimo_contacto) : "nunca"}</td>
                     <td className="price-cell">{fmt(c.neto)}</td>
                   </tr>

@@ -6,6 +6,8 @@ const DEFAULTS = {
   margen_particular: "50",        // % sobre el precio de compra
   ultimo_numero_cotizacion: "0",  // la próxima cotización usa el siguiente número
   validez_cotizacion_dias: "30",
+  // Plazo de entrega que se imprime en las condiciones comerciales (se puede cambiar en cada cotización)
+  plazo_entrega: "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra",
   meses_precio_antiguo: "6",        // un precio más viejo que esto se marca para volver a cotizar
   dias_seguimiento: "5",            // días sin respuesta para llamar al cliente
   respaldo_email: "",               // a dónde llega el respaldo semanal
@@ -24,9 +26,9 @@ const DEFAULTS = {
   mp_ultima_sincronizacion: "",
   ultimo_resumen_licitaciones: "",
   // Datos de la empresa para el PDF de la cotización
-  empresa_nombre: "INVERSIONES KENOTT SpA",
+  empresa_nombre: "Inversiones Kenott SpA",
   empresa_rut: "78.060.315-1",
-  empresa_giro: "Comercialización y Distribución de Productos",
+  empresa_giro: "Comercialización y distribución de productos",
   empresa_contacto: "Marcela Espinosa",
   empresa_fono: "+56 9 4709 6606",
   empresa_email: "kenottinversiones@gmail.com",

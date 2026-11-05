@@ -43,10 +43,13 @@ const crearVentaEnTransaccion = async (datos, t) => {
 
   let cliente_nombre = datos.cliente_nombre || null;
   let tipo = datos.tipo_precio || "convenio";
+  let codigo_cliente = null;
   if (datos.cliente_id) {
     const c = await Cliente.findByPk(datos.cliente_id, { transaction: t });
     if (!c) throw new ErrorNegocio("Cliente no encontrado", 404);
-    cliente_nombre = c.nombre;
+    // Cliente general: se respeta el nombre escrito para esta venta
+    cliente_nombre = c.codigo === "CG" && datos.cliente_nombre ? datos.cliente_nombre : c.nombre;
+    codigo_cliente = c.codigo;
     tipo = datos.tipo_precio || c.tipo || "convenio";
   }
 
@@ -79,6 +82,8 @@ const crearVentaEnTransaccion = async (datos, t) => {
     cotizacion_id: datos.cotizacion_id || null,
     empresa: validarEmpresa(datos.empresa),
     orden_compra_cliente: datos.orden_compra_cliente || null,
+    // ID del cliente o de la solicitud (ventas sin OC se identifican con él)
+    id_solicitud: String(datos.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null),
     fecha_vencimiento: venc,
     documento: datos.documento || null,
     notas: datos.notas || null,
@@ -108,7 +113,7 @@ const getVentas = handler(async (req, res) => {
   if (cliente_id) where.cliente_id = cliente_id;
   if (desde || hasta) where.fecha = { ...(desde && { [Op.gte]: desde }), ...(hasta && { [Op.lte]: hasta }) };
   if (busqueda) {
-    where[Op.or] = ["numero", "cliente_nombre", "documento", "orden_compra_cliente"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
+    where[Op.or] = ["numero", "cliente_nombre", "documento", "orden_compra_cliente", "id_solicitud"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   }
   if (req.query.empresa) where.empresa = req.query.empresa;
   if (req.query.proyecto_id === "ninguno") where.proyecto_id = null;
@@ -190,6 +195,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
       cliente_nombre: cot.cliente,
       tipo_precio: cot.tipo_precio,
       cotizacion_id: cot.id,
+      id_solicitud: cot.id_solicitud,
       empresa: cot.empresa,
       creado_por: req.usuario.nombre,
       notas: req.body?.notas || cot.nombre_cotizacion,
@@ -252,7 +258,7 @@ const actualizarDatos = handler(async (req, res) => {
   const v = await Venta.findByPk(req.params.id);
   if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
   const cambios = {};
-  for (const c of ["documento", "orden_compra_cliente", "fecha_vencimiento", "notas"]) if (c in req.body) cambios[c] = req.body[c] || null;
+  for (const c of ["documento", "orden_compra_cliente", "id_solicitud", "fecha_vencimiento", "notas"]) if (c in req.body) cambios[c] = req.body[c] || null;
   await v.update(cambios);
   res.json({ ok: true, data: verVenta(req, v) });
 });
@@ -314,7 +320,7 @@ const getCuadroCompra = handler(async (req, res) => {
   res.json({
     ok: true,
     data: {
-      venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, subtotal: venta.subtotal, costo_total: venta.costo_total },
+      venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, id_solicitud: venta.id_solicitud, subtotal: venta.subtotal, costo_total: venta.costo_total },
       grupos: lista,
       totales: {
         compra: redondear(Number(venta.costo_total)),

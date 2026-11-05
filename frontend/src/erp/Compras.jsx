@@ -127,7 +127,7 @@ function GrupoCompras({ g, verDetalle }) {
   const recibidas = vivas.filter((o) => o.estado === "recibida").length;
   const saldo = vivas.filter((o) => o.estado === "recibida").reduce((s, o) => s + Number(o.total) - Number(o.monto_pagado), 0);
   const titulo = g.venta
-    ? <>Venta <strong>{g.venta.numero}</strong> · {g.venta.cliente_nombre || "Sin cliente"}{g.venta.orden_compra_cliente ? ` · OC cliente ${g.venta.orden_compra_cliente}` : ""}{g.venta.empresa === "tactics" ? " · Tactics" : ""}</>
+    ? <>Venta <strong>{g.venta.numero}</strong> · {g.venta.cliente_nombre || "Sin cliente"}{g.venta.orden_compra_cliente ? ` · OC cliente ${g.venta.orden_compra_cliente}` : ""}{g.venta.id_solicitud ? ` · ID ${g.venta.id_solicitud}` : ""}{g.venta.empresa === "tactics" ? " · Tactics" : ""}</>
     : g.proyecto ? <>Proyecto <strong>{g.proyecto.numero}</strong> · {g.proyecto.nombre} (compra consolidada)</>
     : <>Compras sueltas (sin venta)</>;
   return (
@@ -148,7 +148,7 @@ function FilaOrden({ o, verDetalle, conPara, sangria }) {
       <td className="id-cell" style={sangria ? { paddingLeft: 28 } : undefined}>{sangria ? "└ " : ""}{o.numero}</td>
       <td className="mini">{fecha(o.fecha)}</td>
       <td>{o.proveedor_nombre}</td>
-      {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}` : o.proyecto ? `${o.proyecto.numero} (proyecto)` : "—"}</td>}
+      {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}${o.venta.id_solicitud ? ` · ID ${o.venta.id_solicitud}` : ""}` : o.proyecto ? `${o.proyecto.numero} (proyecto)` : "—"}</td>}
       <td className="mini">{o.documento || "—"}</td>
       <td className="price-cell">{fmt(o.total)}</td>
       <td><Estado valor={o.estado} /></td>
@@ -164,7 +164,7 @@ function SelectorVenta({ valor, onChange, disabled }) {
   return (
     <select value={valor || ""} disabled={disabled} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
       <option value="">— Sin venta (compra suelta) —</option>
-      {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre || "Sin cliente"}{v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : ""}</option>)}
+      {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre || "Sin cliente"}{v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : ""}{v.id_solicitud ? ` · ID ${v.id_solicitud}` : ""}</option>)}
     </select>
   );
 }

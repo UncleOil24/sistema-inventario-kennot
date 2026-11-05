@@ -70,6 +70,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
     onCotizar({
       cliente_id: cliente?.id || "", tipo_precio: cliente?.tipo || "convenio",
       nombre_cotizacion: `${tipoDe(l)} ${l.codigo} – ${l.nombre}`.slice(0, 250),
+      id_solicitud: l.codigo,
       validez_dias: l.fuente === "compra_agil" ? 10 : 30, notas: `Mercado Público ${l.codigo}`, archivo_cliente: `${tipoDe(l)} ${l.codigo}`, items: nuevas,
     });
     marcar(l, "cotizada");
@@ -208,6 +209,8 @@ function DetalleLicitacion({ codigo, ficha, tipo, notify, onClose, onCotizar }) 
 // Crea el organismo de la licitación en Clientes (convenio), con los datos de Mercado Público
 function ClienteDesdeLicitacion({ l, notify, onClose, onCreado }) {
   const [form, setForm] = useState({
+    // ID del cliente = unidad de compra (lo que va antes del primer guion en el código, p.ej. 1422-20-COT26 → 1422)
+    codigo: String(l.codigo || "").split("-")[0] || "",
     nombre: (l.organismo || "").trim(), rut: l.rut_unidad || "", tipo: "convenio",
     contacto: l.unidad || "", direccion: l.fuente === "compra_agil" ? (l.comuna || "") : "", comuna: l.fuente === "compra_agil" ? "" : (l.comuna || ""),
     telefono: "", email: "",
@@ -230,7 +233,10 @@ function ClienteDesdeLicitacion({ l, notify, onClose, onCreado }) {
         <button className="btn btn-primary" disabled={guardando || !form.nombre.trim()} onClick={guardar}>{guardando ? "Guardando..." : "Agregar a Clientes"}</button>
       </>}>
       <div className="mini">Datos tomados de Mercado Público ({l.codigo}). Revísalos y completa lo que falte.</div>
-      <div className="field"><label>Nombre</label><input value={form.nombre} onChange={(e) => set("nombre", e.target.value)} /></div>
+      <div className="fields-row">
+        <div className="field" style={{ maxWidth: 200 }}><label>ID (unidad de compra)</label><input value={form.codigo} onChange={(e) => set("codigo", e.target.value)} /></div>
+        <div className="field"><label>Nombre</label><input value={form.nombre} onChange={(e) => set("nombre", e.target.value)} /></div>
+      </div>
       <div className="fields-row">
         <div className="field"><label>RUT</label><input value={form.rut} onChange={(e) => set("rut", e.target.value)} /></div>
         <div className="field">

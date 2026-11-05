@@ -98,6 +98,7 @@ export default function Config({ notify }) {
             {campo("ultimo_numero_cotizacion", "Último N° de cotización Kenott", "La próxima cotización usa el número siguiente")}
             {campo("validez_cotizacion_dias", "Validez por defecto (días)")}
           </div>
+          {campo("plazo_entrega", "Plazo de entrega por defecto", "Se imprime en las condiciones comerciales; se puede cambiar en cada cotización", "text")}
           <div className="fields-row">
             {campo("dias_seguimiento", "Llamar al cliente después de (días)", "Una cotización sin respuesta pasa a \"Por llamar\"")}
             {campo("meses_precio_antiguo", "Precio antiguo después de (meses)", "Se marca ⏱ para volver a cotizarlo")}

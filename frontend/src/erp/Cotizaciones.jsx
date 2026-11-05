@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, Totales } from "./ui";
-import { api, fmt, fecha, descargar, cargarProductos, hoyISO } from "./lib";
+import { api, fmt, fecha, descargar, cargarProductos, hoyISO, idCot, nombreCot } from "./lib";
 
 const FILTROS = [
   ["", "Todas"], ["seguir", "Por llamar"], ["cotizacion", "Abiertas"], ["borrador", "Borradores"],
@@ -36,17 +36,17 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
   useEffect(() => { const t = setTimeout(cargar, 250); return () => clearTimeout(t); }, [cargar]);
 
   const accion = async (fn, ok) => { try { await fn(); notify(ok); cargar(); } catch (e) { notify(e.message, "danger"); } };
-  const nombreArchivo = (c, ext) => `${c.empresa === "tactics" ? "Cotizacion_TACTICS_N" : "COT-"}${c.numero}-${c.cliente || "cliente"}.${ext}`;
+  const nombreArchivo = (c, ext) => `${idCot(c)}${c.anterior ? "_anterior" : ""}-${c.cliente || "cliente"}.${ext}`;
   const excel = (c) => descargar(`/cotizaciones/${c.id}/excel`, nombreArchivo(c, "xlsx")).catch((e) => notify(e.message, "danger"));
   const pdf = (c) => descargar(`/cotizaciones/${c.id}/pdf`, nombreArchivo(c, "pdf")).catch((e) => notify(e.message, "danger"));
   const rechazar = (c) => {
-    const motivo = prompt(`¿Por qué se rechazó la N° ${c.numero}? (precio, plazo, se compró a otro...)`, "");
+    const motivo = prompt(`¿Por qué se rechazó la ${nombreCot(c)}? (precio, plazo, se compró a otro...)`, "");
     if (motivo !== null) accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } }), "Cotización marcada como rechazada");
   };
   const reabrir = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "cotizacion" } }), "Cotización reabierta");
   const emitir = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "cotizacion" } }), "Cotización emitida");
   const vencer = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "vencida" } }), "Cotización marcada como vencida");
-  const eliminar = (c) => confirm(`¿Eliminar la cotización N° ${c.numero}? Es mejor marcarla rechazada o vencida para no perder el historial.`)
+  const eliminar = (c) => confirm(`¿Eliminar la ${nombreCot(c)}? Es mejor marcarla rechazada o vencida para no perder el historial.`)
     && accion(() => api(`/cotizaciones/${c.id}`, { method: "DELETE" }), "Cotización eliminada");
 
   // Carga la cotización en el cotizador (conserva precios cotizados)
@@ -66,6 +66,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
       onEditar({
         id: c.id, numero: c.numero, empresa: c.empresa || "kenott", empresa_original: c.empresa || "kenott", cliente_id: c.cliente_id || "", tipo_precio: c.tipo_precio,
         nombre_cotizacion: c.nombre_cotizacion || "", validez_dias: c.validez_dias || 30, notas: c.notas || "", archivo_cliente: c.archivo_cliente || "", items,
+        id_solicitud: c.id_solicitud || "", plazo_entrega: c.plazo_entrega || "", cliente_nombre_doc: c.cliente || "", anterior: c.anterior,
       });
     } catch (e) { notify(e.message, "danger"); }
   };
@@ -83,7 +84,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
       <div className="toolbar">
         <div className="search-wrap">
           <span className="search-icon">⌕</span>
-          <input className="search-input" placeholder="Buscar por N°, cliente o nombre..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
+          <input className="search-input" placeholder="Buscar por N°, ID del cliente o solicitud, cliente o nombre..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)} />
         </div>
         <div className="chips">
           {[["", "Ambas"], ["kenott", "Kenott"], ["tactics", "Tactics"]].map(([v, t]) => <button key={`e${v}`} className={`chip ${empresa === v ? "activo" : ""}`} onClick={() => setEmpresa(v)}>{t}</button>)}
@@ -100,8 +101,9 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
             {lista.map((c) => (
               <div key={c.id} className="hist-card">
                 <div className="hist-info">
-                  <div className="hist-nombre">N° {c.numero} · {c.nombre_cotizacion || "Sin nombre"}</div>
+                  <div className="hist-nombre">{nombreCot(c)} · {c.nombre_cotizacion || "Sin nombre"}</div>
                   <div className="hist-meta">
+                    {c.id_solicitud && <span className="id-solicitud" title="ID del cliente o de la solicitud">ID {c.id_solicitud}</span>}
                     <Estado valor={c.empresa || "kenott"} />
                     <span>{c.cliente || "Sin cliente"}</span>
                     <span>{fecha(c.fecha || c.createdAt)}</span>
@@ -147,13 +149,14 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
 
 function DetalleCotizacion({ cot, esAdmin, onClose, onVencer }) {
   return (
-    <Modal titulo={`// Cotización ${cot.empresa === "tactics" ? "Tactics" : "Kenott"} N° ${cot.numero}`} onClose={onClose} ancho={820}
+    <Modal titulo={`// ${nombreCot(cot)}`} onClose={onClose} ancho={820}
       footer={<>
         {cot.estado === "cotizacion" && <button className="btn btn-ghost" onClick={onVencer}>Marcar vencida</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
-        <span>{cot.cliente || "Sin cliente"}</span><span>{fecha(cot.fecha || cot.createdAt)}</span>
+        <span>{cot.cliente || "Sin cliente"}</span>{cot.id_solicitud && <span className="id-solicitud">ID {cot.id_solicitud}</span>}<span>{fecha(cot.fecha || cot.createdAt)}</span>
+        {cot.plazo_entrega && <span>Entrega: {cot.plazo_entrega}</span>}
         <span>Validez {cot.validez_dias} días{cot.fecha_validez ? ` (hasta ${fecha(cot.fecha_validez)})` : ""}</span>
         {cot.creado_por && <span>Por {cot.creado_por}</span>}
         {cot.archivo_cliente && <span>Lista del cliente: {cot.archivo_cliente}</span>}
@@ -206,7 +209,7 @@ function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
     finally { setEnviando(false); }
   };
   return (
-    <Modal titulo={`// Cliente aceptó la N° ${cot.numero}`} onClose={onClose}
+    <Modal titulo={`// Cliente aceptó la ${nombreCot(cot)}`} onClose={onClose}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-success" disabled={enviando} onClick={confirmar}>{enviando ? "Creando..." : "Confirmar venta"}</button>
@@ -264,7 +267,7 @@ function Seguimiento({ cot, notify, onClose, onHecho }) {
   };
   const historial = [...(cot.seguimientos || [])].reverse();
   return (
-    <Modal titulo={`// Seguimiento N° ${cot.numero}`} onClose={onClose} ancho={620}
+    <Modal titulo={`// Seguimiento ${nombreCot(cot)}`} onClose={onClose} ancho={620}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={enviando} onClick={guardar}>{enviando ? "Guardando..." : "Registrar contacto"}</button>
