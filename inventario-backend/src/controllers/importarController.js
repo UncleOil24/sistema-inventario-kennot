@@ -1,3 +1,4 @@
+const { firma } = require("../middlewares/auth");
 const crypto = require("crypto");
 const { handler, ErrorNegocio } = require("../services/erp");
 const { importarPlanilla: importar } = require("../services/importarPlanilla");
@@ -19,7 +20,7 @@ const importarPlanilla = handler(async (req, res) => {
   trabajos.set(id, trabajo);
   enCurso = id;
   importar(req.file.buffer, {
-    usuario: req.usuario.nombre,
+    usuario: firma(req),
     desactivarOtros: req.body?.desactivar_otros === "1" || req.body?.desactivar_otros === "true",
     onProgreso: (paso) => { trabajo.paso = paso; },
   })

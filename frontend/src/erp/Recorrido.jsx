@@ -62,6 +62,10 @@ export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify
   return (
     <>
       <Recorrido etapa={venta.etapa} />
+      <div className="mini" style={{ marginTop: -8, marginBottom: 10 }}>
+        {[["Registró", venta.creado_por], ["Aceptó", venta.aceptada_por], ["Confirmó productos", venta.lista_por], ["Despachó", venta.despacho_por]]
+          .filter(([, q]) => q).map(([t, q]) => `${t}: ${q}`).join(" · ")}
+      </div>
       <div className="accion-etapa">
         {contenido}
         {esAdmin && venta.etapa !== "registrada" && <button className="link" style={{ marginLeft: "auto" }} disabled={enviando}

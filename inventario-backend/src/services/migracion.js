@@ -37,6 +37,10 @@ async function migrar() {
   await codigosClientes(q);
   await recorridoVentas();
   await catalogoPaso7();
+  // "Cotizada" solo si de verdad existe una cotización con el ID del proceso (antes se marcaba al abrir el cotizador)
+  await q(`UPDATE licitaciones l SET estado_interno = 'revisada' WHERE estado_interno = 'cotizada'
+    AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo) AND c.estado NOT IN ('rechazada','vencida'))`);
+  await idsDeClientes(q);
   // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
 }
@@ -54,6 +58,22 @@ async function catalogoPaso7() {
   const { recalcularDeProveedor } = require("../controllers/proveedoresController");
   for (const b of brizz) await recalcularDeProveedor(b.nombre, "Sistema", "Proveedor excluido (flete desde Santiago)");
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_catalogo_paso7', NOW()::text, NOW(), NOW())`);
+}
+
+// ID de cada cliente = unidad de compra de Mercado Público (cifras antes del primer guion del ID de la solicitud).
+// Se asigna a los clientes que tienen un ID automático (P-###) cuando alguna de sus cotizaciones o ventas trae un
+// ID de Mercado Público; también se completa el ID de las cotizaciones y ventas que no tenían.
+async function idsDeClientes(q) {
+  await q(`UPDATE cotizaciones c SET id_solicitud = l.codigo FROM licitaciones l WHERE l.cotizacion_id = c.id AND c.id_solicitud IS NULL`);
+  await q(`UPDATE cotizaciones c SET id_solicitud = cl.codigo FROM clientes cl WHERE c.cliente_id = cl.id AND c.id_solicitud IS NULL AND cl.codigo IS NOT NULL AND cl.codigo <> 'CG'`);
+  await q(`UPDATE ventas v SET id_solicitud = c.id_solicitud FROM cotizaciones c WHERE v.cotizacion_id = c.id AND v.id_solicitud IS NULL AND c.id_solicitud IS NOT NULL`);
+  const { asignarUnidadCliente } = require("./clientesMP");
+  const [filas] = await sequelize.query(`SELECT DISTINCT ON (cliente_id) cliente_id, id_solicitud FROM (
+      SELECT cliente_id, id_solicitud, "createdAt" FROM cotizaciones UNION ALL SELECT cliente_id, id_solicitud, "createdAt" FROM ventas) x
+    JOIN clientes cl ON cl.id = x.cliente_id
+    WHERE x.cliente_id IS NOT NULL AND x.id_solicitud ~ '^[0-9]+-[0-9]+-[A-Za-z]' AND cl.codigo ~ '^P-[0-9]+$'
+    ORDER BY cliente_id, x."createdAt" DESC`);
+  for (const f of filas) await asignarUnidadCliente(f.cliente_id, f.id_solicitud);
 }
 
 // Una sola vez (paso 3, nov-2026): cada venta toma su etapa según cómo va, el N° de factura que tenía pasa

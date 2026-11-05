@@ -53,9 +53,10 @@ export function InicioDepto({ depto, notify, irA }) {
   const cargar = useCallback(async () => {
     try { setData(await api("/dashboard?meses=3")); } catch (e) { notify(e.message, "danger"); }
   }, [notify]);
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { cargar(); const t = setInterval(cargar, 5 * 60 * 1000); return () => clearInterval(t); }, [cargar]); // se actualiza cada 5 minutos
   if (!data) return <Cargando />;
-  const tareas = (data.tareas || []).filter((t) => t.depto === depto);
+  // Una oportunidad cuyo cierre ya pasó deja de ser tarea (se informa abajo como cerrada)
+  const tareas = (data.tareas || []).filter((t) => t.depto === depto && !(t.cierre && new Date(t.cierre) < new Date()));
   const adj = data.adjudicado;
   const f = data.flujo || {};
   const tarjeta = (titulo, r) => (
@@ -73,6 +74,21 @@ export function InicioDepto({ depto, notify, irA }) {
         <div className="kpis">
           <Kpi label="Por facturar" valor={f.por_facturar ?? 0} sub="productos listos, sin factura completa" onClick={() => irA("facturacion")} />
           <Kpi label="En compra" valor={(f.por_aceptar ?? 0) + (f.por_comprar ?? 0)} sub="Operativo las está gestionando" onClick={() => irA("ventas")} />
+        </div>
+      )}
+      {depto === "comercial" && data.mp_cerradas?.length > 0 && (
+        <div className="panel">
+          <div className="panel-titulo">Cerraron sin postular (últimos 7 días) <span className="mini">· ya no se pueden ejecutar, quedan como registro</span></div>
+          <table className="table table-compacta">
+            <tbody>{data.mp_cerradas.slice(0, 8).map((l) => (
+              <tr key={l.codigo} className="clickable" onClick={() => irA("licitaciones", l.codigo)}>
+                <td className="id-cell">{l.codigo}</td><td>{l.nombre}<div className="mini">{l.organismo}</div></td>
+                <td className="mini">cerró {new Date(l.fecha_cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                <td className="price-cell">{l.monto_estimado ? fmt(l.monto_estimado) : ""}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {data.mp_cerradas.length > 8 && <div className="mini">y {data.mp_cerradas.length - 8} más</div>}
         </div>
       )}
       {depto === "comercial" && adj && (

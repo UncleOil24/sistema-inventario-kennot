@@ -3,9 +3,10 @@ import { Modal, Estado, SelectorProducto } from "./ui";
 import { api, fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses, invalidarProductos, sinTildes } from "./lib";
 
 // Unidades de Mercado Público y listas de clientes -> las del catálogo
-const UNIDADES = { EA: "UNIDAD", UN: "UNIDAD", UND: "UNIDAD", UNIDAD: "UNIDAD", U: "UNIDAD", GL: "GALÓN", GAL: "GALÓN", GALON: "GALÓN", KG: "KG", KGM: "KG",
-  MT: "METRO", MTR: "METRO", M: "METRO", METRO: "METRO", M2: "M2", MTK: "M2", M3: "M3", MTQ: "M3", LT: "LITRO", LTR: "LITRO", L: "LITRO", LITRO: "LITRO",
-  CJ: "CAJA", CAJA: "CAJA", BX: "CAJA", RO: "ROLLO", ROLLO: "ROLLO", SAC: "SACO", SACO: "SACO", BG: "BOLSA", BOLSA: "BOLSA", PK: "PACK", PAQ: "PACK", JGO: "JUEGO", SET: "JUEGO" };
+const UNIDADES = { EA: "UNIDAD", UN: "UNIDAD", UND: "UNIDAD", UNIDAD: "UNIDAD", U: "UNIDAD", JGO: "UNIDAD", SET: "UNIDAD", KIT: "UNIDAD",
+  GL: "GALÓN", GAL: "GALÓN", GALON: "GALÓN", KG: "KILO", KGM: "KILO", KILO: "KILO", MT: "METRO", MTR: "METRO", M: "METRO", METRO: "METRO", ML: "METRO",
+  M3: "M3", MTQ: "M3", CJ: "CAJA", CAJA: "CAJA", BX: "CAJA", RO: "ROLLO", ROLLO: "ROLLO", SAC: "SACO", SACO: "SACO", BG: "SACO", BOLSA: "SACO",
+  PAR: "PAR", PR: "PAR", TIN: "TINETA", TINETA: "TINETA", PLIEGO: "PLIEGO", PLANCHA: "PLIEGO", TIRA: "TIRA", BARRA: "TIRA" };
 const unidadCatalogo = (u) => UNIDADES[sinTildes(u || "").replace(/[^A-Z0-9]/g, "")] || "UNIDAD";
 // "Pinturas al esmalte - Pintura piscina ... similar o equivalente a Sipa" -> "PINTURA PISCINA ..."
 const nombreSugerido = (desc) => {
@@ -28,6 +29,23 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
   const [leyendo, setLeyendo] = useState(false);
   const [res, setRes] = useState(null);
   const [lineas, setLineas] = useState([]);
+  const [extraArchivo, setExtraArchivo] = useState(null);
+  const [extraUrl, setExtraUrl] = useState("");
+  // Agrega líneas leídas de un documento (bases, anexo, lista) subido desde el computador o desde un enlace
+  const leerExtra = async () => {
+    setLeyendo(true);
+    try {
+      const r = extraArchivo ? await subirArchivo("/ia/lista-cliente", extraArchivo) : await api("/ia/lista-cliente", { method: "POST", body: { url: extraUrl.trim() } });
+      setLineas((ls) => {
+        const base = ls.length ? Math.max(...ls.map((l) => l.i)) + 1 : 0;
+        return [...ls, ...r.lineas.map((l, k) => ({ ...l, i: base + k, incluir: true }))];
+      });
+      setRes((x) => ({ ...(x || {}), sin_detalle: false, archivo: [x?.archivo, r.archivo].filter(Boolean).join(" + ") }));
+      notify(`✓ ${r.lineas.length} línea(s) leídas de ${r.archivo}`);
+      setExtraArchivo(null); setExtraUrl("");
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setLeyendo(false); }
+  };
 
   const leer = async () => {
     if (!archivo) return;
@@ -35,7 +53,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
     try {
       const r = await subirArchivo("/ia/lista-cliente", archivo);
       setRes(r);
-      setLineas(r.lineas.map((l, i) => ({ ...l, i, incluir: !!l.producto })));
+      setLineas(r.lineas.map((l, i) => ({ ...l, i, incluir: true })));
     } catch (e) { notify(e.message, "danger"); }
     finally { setLeyendo(false); }
   };
@@ -45,7 +63,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
     let vivo = true;
     setLeyendo(true);
     cargar()
-      .then((r) => { if (vivo) { setRes(r); setLineas(r.lineas.map((l, i) => ({ ...l, i, incluir: !!l.producto }))); } })
+      .then((r) => { if (vivo) { setRes(r); setLineas(r.lineas.map((l, i) => ({ ...l, i, incluir: true }))); } })
       .catch((e) => { notify(e.message, "danger"); onClose(); })
       .finally(() => vivo && setLeyendo(false));
     return () => { vivo = false; };
@@ -65,7 +83,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
       for (const l of sinProducto) {
         const nombre = nombreSugerido(l.descripcion);
         const existente = (productos || []).find((p) => sinTildes(p.nombre) === sinTildes(nombre));
-        const p = existente || await api("/productos", { method: "POST", body: { nombre, unidad: unidadCatalogo(l.unidad), categoria: categoriaSugerida(l) } });
+        const p = existente || await api("/productos", { method: "POST", body: { nombre, unidad: unidadCatalogo(l.unidad), categoria: categoriaSugerida(l), forzar: true } });
         usarNuevo(l, p);
         n++;
       }
@@ -122,7 +140,21 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
             {res.cliente && <span>Cliente en el documento: <strong>{res.cliente}</strong></span>}
             {res.observaciones && <span>{res.observaciones}</span>}
             <Estado valor={tipo} />
+            {res.presupuesto && <span className="id-solicitud">Presupuesto de la propuesta: {fmt(res.presupuesto)}</span>}
+            {res.cierre && <span>Cierra {new Date(res.cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
+          {res.sin_detalle && <div className="aviso">Mercado Público no trae el detalle de productos de este proceso. Sube las bases o el anexo con la lista (desde el computador o con el enlace) y Claude la lee.</div>}
+          {cargar && (
+            <div className="panel" style={{ marginBottom: 10 }}>
+              <div className="panel-titulo">¿Faltan productos? Agregar desde un documento</div>
+              <div className="pago-form">
+                <input type="file" accept=".xlsx,.xlsm,.xls,.pdf,.docx,.csv,.txt,.jpg,.jpeg,.png,.webp" onChange={(e) => { setExtraArchivo(e.target.files?.[0] || null); setExtraUrl(""); }} />
+                <span className="mini">o</span>
+                <input placeholder="Pega el enlace del documento (PDF, Excel...)" value={extraUrl} onChange={(e) => { setExtraUrl(e.target.value); setExtraArchivo(null); }} />
+                <button className="btn btn-primary btn-sm" disabled={leyendo || (!extraArchivo && !/^https?:\/\//.test(extraUrl.trim()))} onClick={leerExtra}>{leyendo ? <><span className="spinner"></span>Leyendo...</> : "Leer y agregar"}</button>
+              </div>
+            </div>
+          )}
           {res.truncado && <div className="aviso">El documento es muy largo y la lectura pudo quedar incompleta: revisa que estén todas las líneas.</div>}
           <div className="table-wrap">
             <table className="table table-compacta">
@@ -139,7 +171,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
                       <td><Estado valor={l.calce} />{l.nota && !/^placeholder$/i.test(l.nota) && <div className="mini" style={{ maxWidth: 200 }}>{l.nota}</div>}</td>
                       <td>
                         <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => precioSegun(p, tipo)}
-                          onChange={(p) => set(l.i, { producto: p, incluir: !!p, calce: p ? (p.id === l.producto?.id ? l.calce : "exacto") : "sin_producto", nota: p && p.id !== l.producto?.id ? "Elegido a mano" : l.nota })} />
+                          onChange={(p) => set(l.i, { producto: p, incluir: true, calce: p ? (p.id === l.producto?.id ? l.calce : "exacto") : "sin_producto", nota: p && p.id !== l.producto?.id ? "Elegido a mano" : l.nota })} />
                         {l.producto && <div className="mini">{l.producto.unidad}{l.producto.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(l.producto.fecha_precio)}</span>}</div>}
                         {(!l.producto || l.calce === "parecido") && <button className="link" onClick={() => setAlCatalogo(l)}>+ Agregar al catálogo como producto nuevo</button>}
                       </td>
@@ -177,7 +209,7 @@ function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado 
   const guardar = async () => {
     setGuardando(true);
     try {
-      const body = { nombre: form.nombre, unidad: form.unidad, categoria: form.categoria || "General" };
+      const body = { nombre: form.nombre, unidad: form.unidad, categoria: form.categoria || "General", forzar: true }; // los parecidos ya se muestran arriba
       if (esAdmin && Number(form.precio_compra) > 0 && form.proveedor.trim()) Object.assign(body, { precio_compra: Number(form.precio_compra), proveedor: form.proveedor, documento: form.documento || null });
       const p = await api("/productos", { method: "POST", body });
       invalidarProductos();
@@ -202,7 +234,7 @@ function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado 
         </div>
       )}
       <div className="fields-row">
-        <div className="field"><label>Unidad</label><input value={form.unidad} onChange={(e) => set("unidad", e.target.value.toUpperCase())} /></div>
+        <div className="field"><label>Unidad</label><select value={form.unidad} onChange={(e) => set("unidad", e.target.value)}>{["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLIEGO", "TIRA", "M3"].map((u) => <option key={u}>{u}</option>)}</select></div>
         <div className="field">
           <label>Categoría</label>
           <input list="cats-nuevo" value={form.categoria} onChange={(e) => set("categoria", e.target.value)} />

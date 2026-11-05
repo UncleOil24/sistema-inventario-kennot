@@ -1,3 +1,4 @@
+const { firma } = require("../middlewares/auth");
 const { Op, fn, col, literal } = require("sequelize");
 const sequelize = require("../../config/database");
 const Producto = require("../models/Producto");
@@ -176,10 +177,10 @@ const fusionar = handler(async (req, res) => {
         WHERE items @> :filtro::jsonb`, { replacements: { p: p.id, d: dup.id, filtro: JSON.stringify([{ producto_id: dup.id }]) }, transaction: t });
     }
     await dup.update({ activo: false, fusionado_en: p.id, revisar: `Fusionado con N° ${p.codigo ?? p.id} ${p.nombre}` }, { transaction: t });
-    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: p.id, campo: "fusion", antes: `${dup.codigo ?? dup.id} ${dup.nombre}`, despues: p.nombre, motivo: "Fusionado (repetido)" }, t);
-    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: dup.id, campo: "activo", antes: "true", despues: "false", motivo: `Fusionado en ${p.codigo ?? p.id} ${p.nombre}` }, t);
+    await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "fusion", antes: `${dup.codigo ?? dup.id} ${dup.nombre}`, despues: p.nombre, motivo: "Fusionado (repetido)" }, t);
+    await registrar({ usuario: firma(req), tabla: "productos", registro_id: dup.id, campo: "activo", antes: "true", despues: "false", motivo: `Fusionado en ${p.codigo ?? p.id} ${p.nombre}` }, t);
     if (p.confirmado) await p.update({ confirmado: p.confirmado }, { transaction: t });
-    await recalcular(p, { t, usuario: req.usuario.nombre, motivo: "Fusión de repetidos" });
+    await recalcular(p, { t, usuario: firma(req), motivo: "Fusión de repetidos" });
     return { producto: p, precios_movidos: precios?.rowCount ?? null };
   });
   res.json({ ok: true, data: { ...resultado, producto: vista(req, await getParametros())(resultado.producto) } });
@@ -211,11 +212,11 @@ const crearProducto = handler(async (req, res) => {
     if (veCostos(req) && Number(req.body.precio_compra) > 0 && req.body.proveedor) {
       await PrecioProveedor.create({
         producto_id: p.id, proveedor: normProv(req.body.proveedor), precio: Math.round(Number(req.body.precio_compra)),
-        documento: req.body.documento || null, origen: await origenDe(req.body.proveedor, t), creado_por: req.usuario.nombre,
+        documento: req.body.documento || null, origen: await origenDe(req.body.proveedor, t), creado_por: firma(req),
       }, { transaction: t });
-      await recalcular(p, { t, usuario: req.usuario.nombre, motivo: "Producto nuevo" });
+      await recalcular(p, { t, usuario: firma(req), motivo: "Producto nuevo" });
     }
-    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: p.id, campo: "creado", despues: p.nombre }, t);
+    await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "creado", despues: p.nombre }, t);
     return p;
   });
   res.status(201).json({ ok: true, data: vista(req, await getParametros())(producto) });
@@ -236,7 +237,7 @@ const actualizarProducto = handler(async (req, res) => {
       if (String(v) !== String(p[c])) cambios[c] = v;
     }
     for (const [campo, v] of Object.entries(cambios)) {
-      await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: p.id, campo, antes: String(p[campo] ?? ""), despues: String(v), motivo: req.body.motivo || null }, t);
+      await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo, antes: String(p[campo] ?? ""), despues: String(v), motivo: req.body.motivo || null }, t);
     }
     await p.update(cambios, { transaction: t });
     return p;
@@ -251,7 +252,7 @@ const eliminarProducto = handler(async (req, res) => {
   const precios = await PrecioProveedor.count({ where: { producto_id: producto.id } });
   if (precios > 0) {
     await producto.update({ activo: false });
-    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: producto.id, campo: "activo", antes: "true", despues: "false", motivo: "Eliminado (tenía historial de precios)" });
+    await registrar({ usuario: firma(req), tabla: "productos", registro_id: producto.id, campo: "activo", antes: "true", despues: "false", motivo: "Eliminado (tenía historial de precios)" });
     return res.json({ ok: true, message: "Producto desactivado (se conserva su historial de precios)" });
   }
   await producto.destroy();
@@ -292,9 +293,9 @@ const agregarPrecio = handler(async (req, res) => {
       // M2: el descuento por volumen se anota, pero el precio de compra queda a precio lista
       descuento_pct: Number(b.descuento_pct) > 0 ? Number(b.descuento_pct) : null,
       descuento_desde: Number(b.descuento_desde) > 0 ? Number(b.descuento_desde) : null,
-      creado_por: req.usuario.nombre,
+      creado_por: firma(req),
     }, { transaction: t });
-    await recalcular(p, { t, usuario: req.usuario.nombre, motivo: `Precio ${precio.proveedor} ${b.documento || ""}`.trim() });
+    await recalcular(p, { t, usuario: firma(req), motivo: `Precio ${precio.proveedor} ${b.documento || ""}`.trim() });
     return { precio, producto: p };
   });
   res.status(201).json({ ok: true, data: { precio: resultado.precio, producto: vista(req, await getParametros())(resultado.producto) } });
@@ -308,7 +309,7 @@ const descartarPrecio = (descartar) => handler(async (req, res) => {
     if (descartar && !req.body?.motivo) throw new ErrorNegocio("Indica el motivo para descartar");
     await precio.update({ descartado: descartar, motivo: descartar ? req.body.motivo : null }, { transaction: t });
     const p = await Producto.findByPk(precio.producto_id, { transaction: t, lock: t.LOCK.UPDATE });
-    await recalcular(p, { t, usuario: req.usuario.nombre, motivo: `${descartar ? "Descartado" : "Restaurado"} precio ${precio.proveedor}` });
+    await recalcular(p, { t, usuario: firma(req), motivo: `${descartar ? "Descartado" : "Restaurado"} precio ${precio.proveedor}` });
     return p;
   });
   res.json({ ok: true, data: vista(req, await getParametros())(resultado) });
@@ -328,14 +329,14 @@ const confirmarPrecio = handler(async (req, res) => {
     }
     if (!(Number(cambios.precio_compra ?? p.precio_compra) > 0)) throw new ErrorNegocio("El producto no tiene precio para confirmar");
     await registrar({
-      usuario: req.usuario.nombre, tabla: "productos", registro_id: p.id, campo: "confirmado",
+      usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "confirmado",
       antes: `${p.proveedor || ""} ${p.precio_compra}`.trim(),
       despues: `${cambios.proveedor || p.proveedor || ""} ${cambios.precio_compra ?? p.precio_compra}`.trim(),
       motivo: req.body?.motivo || "Precio confirmado",
     }, t);
     await p.update(cambios, { transaction: t });
     // Las opciones 2 y 3 se recalculan sin tocar el principal confirmado
-    await recalcular(p, { t, usuario: req.usuario.nombre, motivo: "Confirmación" });
+    await recalcular(p, { t, usuario: firma(req), motivo: "Confirmación" });
     if (p.revisar) await p.update({ revisar: null }, { transaction: t });
     return p;
   });
@@ -348,8 +349,8 @@ const desconfirmarPrecio = handler(async (req, res) => {
     const p = await Producto.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!p) throw new ErrorNegocio("Producto no encontrado", 404);
     await p.update({ confirmado: false, fecha_confirmado: null }, { transaction: t });
-    await registrar({ usuario: req.usuario.nombre, tabla: "productos", registro_id: p.id, campo: "confirmado", antes: "sí", despues: "no" }, t);
-    await recalcular(p, { t, usuario: req.usuario.nombre, motivo: "Quitar confirmación" });
+    await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "confirmado", antes: "sí", despues: "no" }, t);
+    await recalcular(p, { t, usuario: firma(req), motivo: "Quitar confirmación" });
     return p;
   });
   res.json({ ok: true, data: vista(req, await getParametros())(producto) });
