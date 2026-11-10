@@ -208,17 +208,20 @@ Para cada línea recibes candidatos del catálogo (id | descripción estándar |
 - "parecido": se parece pero difiere en algo importante (medida, calidad, presentación, unidad de venta). Indica qué difiere en la nota.
 - "sin_producto": ningún candidato sirve. producto_id = 0.
 Las medidas importan: 20 mm no es 25 mm, 1/2" no es 3/4", 25 kg no es 50 kg. Nunca inventes un id que no esté en los candidatos.
+Pero si el producto es el mismo y solo cambia un dato secundario (largo de una broca con el mismo diámetro, color o presentación cercana,
+"A-63" escrito como "A630", rollo vs. por metro), elige ese candidato como "parecido" y anota la diferencia: es mejor que "sin_producto".
+Usa "sin_producto" solo si ningún candidato es el mismo tipo de producto con la medida principal correcta.
 Notas cortas, en español.`;
 
 async function calzarLineas(lineas, indice, { usuario, tipo, archivo } = {}) {
-  const resultado = lineas.map((l) => ({ ...l, candidatos: candidatos(`${l.descripcion} ${l.marca || ""}`, indice) }));
-  const BLOQUE = 30;
+  const resultado = lineas.map((l) => ({ ...l, calce: undefined, candidatos: candidatos(`${l.descripcion} ${l.marca || ""}`, indice) }));
   let uso = { input_tokens: 0, output_tokens: 0 };
   const respuestas = [];
-  for (let i = 0; i < resultado.length; i += BLOQUE) {
-    const parte = resultado.slice(i, i + BLOQUE);
+  // Cada bloque se numera desde L1 (antes se numeraba con el n° global y Claude a veces respondía desde 1 en el
+  // segundo bloque: esas respuestas se perdían y las líneas 31+ quedaban "sin respuesta").
+  const calzarBloque = async (parte) => {
     const texto = parte.map((l, k) => {
-      const n = i + k + 1;
+      const n = k + 1;
       const cands = l.candidatos.length
         ? l.candidatos.map((p) => `   ${p.id} | ${p.nombre} | ${p.unidad}`).join("\n")
         : "   (sin candidatos)";
@@ -226,22 +229,37 @@ async function calzarLineas(lineas, indice, { usuario, tipo, archivo } = {}) {
     }).join("\n\n");
     const { datos, uso: u } = await llamar({
       system: SYSTEM_CALCE,
-      contenido: [{ type: "text", text: `Calza estas ${parte.length} líneas:\n\n${texto}` }],
+      contenido: [{ type: "text", text: `Calza estas ${parte.length} líneas (L1 a L${parte.length}) y responde una entrada por cada línea:\n\n${texto}` }],
       herramienta: HERR_CALCE,
-      maxTokens: 4000,
+      maxTokens: 6000,
     });
     uso = { input_tokens: uso.input_tokens + (u.input_tokens || 0), output_tokens: uso.output_tokens + (u.output_tokens || 0) };
     respuestas.push(datos);
     for (const c of datos.calces || []) {
-      const l = resultado[Number(c.linea) - 1];
+      const l = parte[Number(c.linea) - 1];
       if (!l || l.calce) continue;
       const elegido = l.candidatos.find((p) => p.id === Number(c.producto_id)) || null;
       l.producto_id = elegido ? elegido.id : null;
       l.calce = elegido ? (c.calce === "sin_producto" ? "parecido" : c.calce) : "sin_producto";
       l.nota = /^placeholder$/i.test(String(c.nota || "").trim()) ? "" : c.nota || "";
     }
+  };
+  const BLOQUE = 25;
+  for (let i = 0; i < resultado.length; i += BLOQUE) {
+    try { await calzarBloque(resultado.slice(i, i + BLOQUE)); } catch (e) { if (i === 0) throw e; console.error("calce bloque", i, e.message); }
   }
-  for (const l of resultado) if (!l.calce) Object.assign(l, { producto_id: null, calce: "sin_producto", nota: "Sin respuesta para esta línea" });
+  // Las que quedaron sin respuesta se vuelven a preguntar una vez
+  const faltan = resultado.filter((l) => !l.calce && l.candidatos.length);
+  for (let i = 0; i < faltan.length; i += BLOQUE) {
+    try { await calzarBloque(faltan.slice(i, i + BLOQUE)); } catch (e) { console.error("calce reintento", e.message); }
+  }
+  // Si aun así no hay respuesta, se propone el mejor candidato por puntaje como "parecido", para revisar
+  for (const l of resultado) {
+    if (l.calce) continue;
+    const mejor = l.candidatos[0];
+    if (mejor) Object.assign(l, { producto_id: mejor.id, calce: "parecido", nota: "Propuesto por similitud: revisar" });
+    else Object.assign(l, { producto_id: null, calce: "sin_producto", nota: "No hay productos parecidos en el catálogo" });
+  }
   await auditar({ tipo: `calce_${tipo}`, archivo, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: respuestas });
   return resultado;
 }
@@ -327,6 +345,13 @@ const HERR_PROVEEDOR = {
 };
 
 async function leerDocumentoProveedor(file, indice, usuario) {
+  const r = await extraerDocumentoProveedor(file, usuario);
+  const calzadas = await calzarLineas(r.lineas, indice, { usuario, tipo: "documento_proveedor", archivo: file.originalname });
+  return { ...r, lineas: calzadas };
+}
+
+// Solo la lectura del documento (encabezado, líneas con precio neto y control de totales), sin calzar
+async function extraerDocumentoProveedor(file, usuario) {
   const contenido = await contenidoArchivo(file);
   const { datos, uso, truncado } = await llamar({
     system: "Lees cotizaciones y facturas de proveedores de una ferretería chilena. Extrae proveedor, número, fecha y cada línea con descripción, unidad, cantidad y precio unitario. Los montos chilenos usan punto como separador de miles ($1.392 = 1392). Si hay descuento por línea, el precio unitario es el que queda después del descuento.",
@@ -360,14 +385,13 @@ async function leerDocumentoProveedor(file, indice, usuario) {
     precios_incluyen_iva: conIva,
   };
 
-  const calzadas = await calzarLineas(lineas, indice, { usuario, tipo: "documento_proveedor", archivo: file.originalname });
   return {
     encabezado: {
       proveedor: String(datos.proveedor || "").trim().toUpperCase(), razon_social: datos.razon_social || "", rut: datos.rut || "",
       tipo_documento: datos.tipo_documento || "cotizacion", numero_documento: datos.numero_documento || "",
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || "") ? datos.fecha : null,
     },
-    control, lineas: calzadas, truncado,
+    control, lineas, truncado,
   };
 }
 
@@ -453,5 +477,5 @@ async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistem
 module.exports = {
   clasificarProcesos,
   calzarLineas,
-  iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, crearIndice, candidatos, normalizar, contenidoArchivo,
+  iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, extraerDocumentoProveedor, crearIndice, candidatos, normalizar, contenidoArchivo,
 };

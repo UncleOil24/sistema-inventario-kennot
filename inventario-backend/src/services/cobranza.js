@@ -127,7 +127,7 @@ async function suspenderMorosos() {
   const [filas] = await sequelize.query(`SELECT v.cliente_id, MIN(v.fecha_vencimiento) AS venc, MIN(v.numero) AS numero
     FROM ventas v JOIN clientes c ON c.id = v.cliente_id
     WHERE v.estado = 'emitida' AND v.total - v.monto_pagado > 0.5 AND v.fecha_vencimiento IS NOT NULL
-      AND v.fecha_vencimiento <= (:hoy::date - 31) AND c.estado_credito = 'activo' AND COALESCE(c.codigo, '') <> 'CG'
+      AND v.fecha_vencimiento <= (:hoy::date - 31) AND c.estado_credito = 'activo' AND COALESCE(c.codigo, '') <> 'P-001'
     GROUP BY v.cliente_id`, { replacements: { hoy } });
   for (const f of filas) {
     await Cliente.update({ estado_credito: "suspendido", motivo_credito: `Automático: ${f.numero} con ${dias(f.venc, hoy)} días vencida (morosidad crítica)` }, { where: { id: f.cliente_id } });

@@ -73,7 +73,7 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
                   <td style={{ fontWeight: 500 }}>
                     {c.nombre}
                     {c.organismo && c.organismo !== c.nombre && <div className="mini">{c.organismo}</div>}
-                    {c.codigo === "CG" && <div className="mini">Ventas sueltas: el nombre se escribe en cada cotización</div>}
+                    {c.codigo === "P-001" && <div className="mini">Ventas sueltas: el nombre se escribe en cada cotización</div>}
                   </td>
                   <td><Estado valor={c.tipo || "convenio"} /></td>
                   <td className="mini">{plazoTxt(c)}{c.estado_credito === "suspendido" && <div><span className="estado estado-warn">Crédito suspendido</span></div>}</td>
@@ -83,7 +83,7 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
                   <td onClick={(e) => e.stopPropagation()}><div className="actions">
                     <button className="btn btn-ghost btn-sm" onClick={() => setFicha(c.id)}>Ficha</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...VACIO, ...c, limite_credito: c.limite_credito ?? "" })}>Editar</button>
-                    {esAdmin && c.codigo !== "CG" && <button className="btn btn-danger btn-sm" onClick={() => eliminar(c)}>✕</button>}
+                    {esAdmin && c.codigo !== "P-001" && <button className="btn btn-danger btn-sm" onClick={() => eliminar(c)}>✕</button>}
                   </div></td>
                 </tr>
               ))}
@@ -99,7 +99,7 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
           </>}>
           <div className="panel-titulo">Identificación</div>
           <div className="fields-row">
-            {campo("codigo", "ID del cliente", "Automático: P-001", { style: { maxWidth: 190 }, disabled: form.codigo === "CG" && !!form.id })}
+            {campo("codigo", "ID del cliente", "Automático: P-001", { style: { maxWidth: 190 }, disabled: form.codigo === "P-001" && !!form.id })}
             {campo("nombre", "Nombre o razón social", "Ej: Municipalidad de Talca – Salud")}
           </div>
           <div className="mini" style={{ marginTop: -6, marginBottom: 10 }}>Instituciones: su unidad de compra de Mercado Público (Ej: 1422 = CONAF; 2295 = Municipalidad de Talca compras generales; 2292 = Municipalidad de Talca Salud). Vacío = se asigna P-001, P-002...</div>

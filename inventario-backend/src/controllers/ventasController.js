@@ -65,7 +65,7 @@ const crearVentaEnTransaccion = async (datos, t) => {
       throw new ErrorNegocio(`${c.nombre} tiene el crédito suspendido (deuda vencida). ¿Registrar la venta igual?`, 409);
     }
     // Cliente general: se respeta el nombre escrito para esta venta
-    cliente_nombre = c.codigo === "CG" && datos.cliente_nombre ? datos.cliente_nombre : c.nombre;
+    cliente_nombre = c.codigo === "P-001" && datos.cliente_nombre ? datos.cliente_nombre : c.nombre;
     codigo_cliente = c.codigo;
     tipo = datos.tipo_precio || c.tipo || "convenio";
   }
@@ -105,7 +105,7 @@ const crearVentaEnTransaccion = async (datos, t) => {
     empresa: validarEmpresa(datos.empresa),
     orden_compra_cliente: String(datos.orden_compra_cliente || "").trim() || null,
     // ID del cliente o de la solicitud (ventas sin OC se identifican con él)
-    id_solicitud: String(datos.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null),
+    id_solicitud: String(datos.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "P-001" ? codigo_cliente : null),
     fecha_vencimiento: venc,
     plazo_pago_dias: plazo,
     base_vencimiento: base,
@@ -209,7 +209,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
     const cot = await Cotizacion.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!cot) throw new ErrorNegocio("Cotización no encontrada", 404);
     if (cot.estado === "aceptada" || cot.venta_id) throw new ErrorNegocio("Esta cotización ya fue convertida en venta");
-    if (cot.estado === "borrador") throw new ErrorNegocio("La cotización está en borrador: emítela antes de convertirla en venta");
+    if (["borrador", "espera_proveedor"].includes(cot.estado)) throw new ErrorNegocio("La cotización aún está en preparación: finalízala antes de convertirla en venta");
     const sinProducto = (cot.items || []).filter((i) => !i.producto_id);
     if (sinProducto.length) throw new ErrorNegocio(`Hay ${sinProducto.length} línea(s) que no están en el catálogo (en rojo): asócialas a un producto (o agrégalo al catálogo) en la cotización antes de convertirla en venta, para poder comprarlas. Ej: "${sinProducto[0].descripcion_cliente || sinProducto[0].nombre}"`);
 

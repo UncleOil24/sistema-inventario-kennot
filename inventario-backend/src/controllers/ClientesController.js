@@ -57,7 +57,7 @@ const getClientes = async (req, res) => {
       ];
     }
     // El Cliente general va primero
-    const clientes = await Cliente.findAll({ where, order: [[sequelize.literal(`(codigo = 'CG')`), "DESC NULLS LAST"], ["nombre", "ASC"]] });
+    const clientes = await Cliente.findAll({ where, order: [[sequelize.literal(`(codigo = 'P-001')`), "DESC NULLS LAST"], ["nombre", "ASC"]] });
     res.json({ ok: true, data: clientes });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -86,9 +86,9 @@ const actualizarCliente = async (req, res) => {
     if (!cliente) return res.status(404).json({ ok: false, error: "Cliente no encontrado" });
     const cambios = datosFicha(sinCredito(req));
     if ("nombre" in cambios && !cambios.nombre) return res.status(400).json({ ok: false, error: "Nombre requerido" });
-    if (req.body.codigo !== undefined && cliente.codigo !== "CG") {
+    if (req.body.codigo !== undefined && cliente.codigo !== "P-001") {
       cambios.codigo = limpiarCodigo(req.body.codigo) || cliente.codigo || await siguienteCodigo();
-      if (cambios.codigo === "CG") throw Object.assign(new Error("El ID CG es del Cliente general"), { status: 400 });
+      if (cambios.codigo === "P-001") throw Object.assign(new Error("El ID P-001 es del Cliente general"), { status: 400 });
       await codigoLibre(cambios.codigo, cliente.id);
     }
     await cliente.update(cambios);
@@ -103,7 +103,7 @@ const eliminarCliente = async (req, res) => {
   try {
     const cliente = await Cliente.findByPk(req.params.id);
     if (!cliente) return res.status(404).json({ ok: false, error: "Cliente no encontrado" });
-    if (cliente.codigo === "CG") return res.status(400).json({ ok: false, error: "El Cliente general no se puede borrar" });
+    if (cliente.codigo === "P-001") return res.status(400).json({ ok: false, error: "El Cliente general no se puede borrar" });
     await cliente.destroy();
     res.json({ ok: true, message: "Cliente eliminado" });
   } catch (error) {

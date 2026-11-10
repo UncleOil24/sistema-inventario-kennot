@@ -8,7 +8,7 @@ const Cliente = sequelize.define("Cliente", {
     autoIncrement: true,
   },
   // ID del cliente: unidad de compra de Mercado Público (p.ej. 1422 = CONAF), P-001... para el resto,
-  // y "CG" para el Cliente general (ventas sueltas, el nombre se escribe en cada documento)
+  // y "P-001" para el Cliente general (ventas sueltas, el nombre se escribe en cada documento)
   codigo: { type: DataTypes.STRING(30), allowNull: true },
   nombre: {
     type: DataTypes.STRING(255),

@@ -14,7 +14,7 @@ async function asignarUnidadCliente(clienteId, idSolicitud, t) {
   const unidad = unidadDe(idSolicitud);
   if (!clienteId || !unidad) return null;
   const c = await Cliente.findByPk(clienteId, { transaction: t });
-  if (!c || !/^P-\d+$/.test(c.codigo || "")) return null;
+  if (!c || !/^P-\d+$/.test(c.codigo || "") || c.codigo === "P-001") return null; // P-001 = Cliente general
   const otro = await Cliente.findOne({ where: { codigo: unidad }, transaction: t });
   if (otro) return null;
   const viejo = c.codigo;

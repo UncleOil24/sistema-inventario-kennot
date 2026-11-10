@@ -70,7 +70,7 @@ async function catalogoPaso7() {
 // ID de Mercado Público; también se completa el ID de las cotizaciones y ventas que no tenían.
 async function idsDeClientes(q) {
   await q(`UPDATE cotizaciones c SET id_solicitud = l.codigo FROM licitaciones l WHERE l.cotizacion_id = c.id AND c.id_solicitud IS NULL`);
-  await q(`UPDATE cotizaciones c SET id_solicitud = cl.codigo FROM clientes cl WHERE c.cliente_id = cl.id AND c.id_solicitud IS NULL AND cl.codigo IS NOT NULL AND cl.codigo <> 'CG'`);
+  await q(`UPDATE cotizaciones c SET id_solicitud = cl.codigo FROM clientes cl WHERE c.cliente_id = cl.id AND c.id_solicitud IS NULL AND cl.codigo IS NOT NULL AND cl.codigo <> 'P-001'`);
   await q(`UPDATE ventas v SET id_solicitud = c.id_solicitud FROM cotizaciones c WHERE v.cotizacion_id = c.id AND v.id_solicitud IS NULL AND c.id_solicitud IS NOT NULL`);
   const { asignarUnidadCliente } = require("./clientesMP");
   const [filas] = await sequelize.query(`SELECT DISTINCT ON (cliente_id) cliente_id, id_solicitud FROM (
@@ -146,10 +146,27 @@ async function reinicioCotizaciones(q) {
   });
 }
 
-// Cada cliente tiene su ID: los que no tienen quedan P-001, P-002...; existe el "Cliente general" (CG)
+// Cada cliente tiene su ID: los que no tienen quedan P-002, P-003...; el "Cliente general" es P-001
 async function codigosClientes(q) {
+  // Reinicio de clientes (decisión de gerencia, 10-nov-2026): se borran todos y queda solo el Cliente general con
+  // el ID P-001, para volver a ingresarlos ordenados por su ID. Las cotizaciones y ventas conservan el nombre escrito.
+  const [[reinicio]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_clientes_reinicio'`);
+  if (!reinicio) {
+    await sequelize.transaction(async (t) => {
+      const tq = (s) => sequelize.query(s, { transaction: t });
+      await tq(`CREATE TABLE IF NOT EXISTS clientes_eliminados AS SELECT * FROM clientes WHERE false`);
+      await tq(`INSERT INTO clientes_eliminados SELECT * FROM clientes WHERE NOT (codigo IN ('CG','P-001') OR nombre ILIKE 'cliente general')`);
+      await tq(`UPDATE cotizaciones SET cliente_id = NULL WHERE cliente_id IN (SELECT id FROM clientes WHERE NOT (codigo IN ('CG','P-001') OR nombre ILIKE 'cliente general'))`);
+      await tq(`UPDATE ventas SET cliente_id = NULL WHERE cliente_id IN (SELECT id FROM clientes WHERE NOT (codigo IN ('CG','P-001') OR nombre ILIKE 'cliente general'))`);
+      const [, r] = await tq(`DELETE FROM clientes WHERE NOT (codigo IN ('CG','P-001') OR nombre ILIKE 'cliente general')`);
+      await tq(`DELETE FROM clientes WHERE id NOT IN (SELECT MIN(id) FROM clientes)`);
+      await tq(`UPDATE clientes SET codigo = 'P-001'`);
+      await tq(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_clientes_reinicio', '${new Date().toISOString()}', NOW(), NOW())`);
+      console.log(`✓ Clientes reiniciados: ${r?.rowCount ?? "?"} borrados (respaldo en clientes_eliminados); queda Cliente general P-001`);
+    });
+  }
   await q(`INSERT INTO clientes (codigo, nombre, tipo, "createdAt", "updatedAt")
-    SELECT 'CG', 'Cliente general', 'particular', NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM clientes WHERE codigo = 'CG')`);
+    SELECT 'P-001', 'Cliente general', 'particular', NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM clientes WHERE codigo = 'P-001')`);
   await q(`WITH base AS (SELECT COALESCE(MAX(SUBSTRING(codigo FROM 3)::int), 0) AS n FROM clientes WHERE codigo ~ '^P-[0-9]+$'),
     nuevos AS (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS k FROM clientes WHERE codigo IS NULL OR TRIM(codigo) = '')
     UPDATE clientes c SET codigo = 'P-' || LPAD((base.n + nuevos.k)::text, 3, '0') FROM nuevos, base WHERE c.id = nuevos.id`);

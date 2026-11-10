@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { Estado, Cargando } from "./ui";
 import { api, fmt, fecha, nombreCot } from "./lib";
+import { AceptarCotizacion } from "./Cotizaciones";
 
 const ICONOS = { avisar_cobro: "📅", recordar_cobro: "📞", moroso: "⛔", iva: "🏛", margen: "📉", oportunidad: "📋", cobrar: "💰", comprar: "🛒", recibir: "📦", pagar: "💳", llamar: "📞", aceptar: "✋", confirmar: "✅", facturar: "🧾", despachar: "🚚", entregar: "🏁" };
 const GRUPOS = [["oportunidad", "Oportunidades"], ["llamar", "Llamar a clientes"], ["facturar", "Facturar"], ["aceptar", "Aceptar ventas"], ["comprar", "Comprar"], ["recibir", "Recibir pedidos"], ["confirmar", "Confirmar ventas"], ["despachar", "Despachar"], ["entregar", "Confirmar entregas"], ["avisar_cobro", "Facturas por vencer"], ["recordar_cobro", "Recordar pagos"], ["moroso", "Morosidad crítica"], ["iva", "IVA"], ["margen", "Margen bajo"], ["cobrar", "Cobrar"], ["pagar", "Pagar"]];
 
 // Lista de lo que hay que hacer, lo urgente primero
-function QueHacer({ tareas, irA }) {
+function QueHacer({ tareas, irA, onDescartar }) {
   const [todas, setTodas] = useState(false);
   const urgentes = tareas.filter((t) => t.urgencia === 0).length;
   const visibles = todas ? tareas : tareas.slice(0, 8);
@@ -25,7 +26,11 @@ function QueHacer({ tareas, irA }) {
                 <div>{t.texto}</div>
                 {t.detalle && <div className="mini">{t.detalle}</div>}
               </div>
-              <button className="btn btn-ghost btn-sm" onClick={() => irA(t.vista, t.id)}>{t.boton || "Ir"} →</button>
+              {t.monto_label && <div className={`tarea-monto ${t.monto ? "" : "sin"}`}>{t.monto ? fmt(t.monto) : "monto no informado"}</div>}
+              <div className="tarea-acciones">
+                {t.descartar && onDescartar && <button className="btn btn-ghost btn-sm" title="No se va a postular: sale de la lista" onClick={() => onDescartar(t)}>Descartar</button>}
+                <button className="btn btn-ghost btn-sm" onClick={() => irA(t.vista, t.id)}>{t.boton || "Ir"} →</button>
+              </div>
             </div>
           ))}
           {tareas.length > 8 && <button className="link" onClick={() => setTodas((v) => !v)}>{todas ? "Ver menos" : `Ver las ${tareas.length - 8} restantes`}</button>}
@@ -50,10 +55,28 @@ const compacto = (n) => {
 // Inicio de Comercial y de Operativo: solo sus tareas y, en Comercial, el total adjudicado (sin información financiera)
 export function InicioDepto({ depto, notify, irA }) {
   const [data, setData] = useState(null);
+  const [aceptar, setAceptar] = useState(null);
   const cargar = useCallback(async () => {
     try { setData(await api("/dashboard?meses=3")); } catch (e) { notify(e.message, "danger"); }
   }, [notify]);
   useEffect(() => { cargar(); const t = setInterval(cargar, 5 * 60 * 1000); return () => clearInterval(t); }, [cargar]); // se actualiza cada 5 minutos
+  const descartar = async (t) => {
+    try {
+      await api(`/mercado-publico/licitaciones/${encodeURIComponent(t.descartar)}`, { method: "PUT", body: { estado_interno: "descartada" } });
+      setData((d) => ({ ...d, tareas: d.tareas.filter((x) => x !== t) }));
+      notify(`Oportunidad ${t.descartar} descartada`);
+    } catch (e) { notify(e.message, "danger"); }
+  };
+  const abrirAceptar = async (c) => { try { setAceptar(await api(`/cotizaciones/${c.id}`)); } catch (e) { notify(e.message, "danger"); } };
+  const rechazar = async (c) => {
+    const motivo = prompt(`¿Por qué se rechazó la ${nombreCot(c)}? (precio, plazo, se compró a otro...)`, "");
+    if (motivo === null) return;
+    try {
+      await api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } });
+      setData((d) => ({ ...d, enviadas: d.enviadas.filter((x) => x.id !== c.id) }));
+      notify(`${nombreCot(c)} marcada como rechazada`);
+    } catch (e) { notify(e.message, "danger"); }
+  };
   if (!data) return <Cargando />;
   // Una oportunidad cuyo cierre ya pasó deja de ser tarea (se informa abajo como cerrada)
   const tareas = (data.tareas || []).filter((t) => t.depto === depto && !(t.cierre && new Date(t.cierre) < new Date()));
@@ -69,26 +92,49 @@ export function InicioDepto({ depto, notify, irA }) {
   );
   return (
     <>
-      <QueHacer tareas={tareas} irA={irA} />
+      <QueHacer tareas={tareas} irA={irA} onDescartar={depto === "comercial" ? descartar : null} />
+      {depto === "comercial" && (
+        <div className="inicio-dos" style={{ marginBottom: 14 }}>
+          <div className="panel">
+            <div className="panel-titulo">Cerraron sin postular (últimos 3 días) <span className="mini">· solo registro</span></div>
+            {!(data.mp_cerradas?.length) ? <div className="mini">// ninguno</div> : (
+              <table className="table table-compacta">
+                <tbody>{data.mp_cerradas.slice(0, 10).map((l) => (
+                  <tr key={l.codigo} className="clickable" onClick={() => irA("licitaciones", l.codigo)}>
+                    <td>{l.nombre}<div className="mini">{l.codigo} · {l.organismo} · cerró {new Date(l.fecha_cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</div></td>
+                    <td className="price-cell">{l.monto_estimado ? fmt(l.monto_estimado) : ""}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+            {data.mp_cerradas?.length > 10 && <div className="mini">y {data.mp_cerradas.length - 10} más</div>}
+          </div>
+          <div className="panel">
+            <div className="panel-titulo">Enviadas: REVISAR <span className="mini">· {data.enviadas?.length || 0} sin respuesta · marca cómo terminó cada una</span></div>
+            {!(data.enviadas?.length) ? <div className="mini">// no hay cotizaciones enviadas pendientes</div> : (
+              <table className="table table-compacta">
+                <tbody>{data.enviadas.slice(0, 8).map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.cliente || "Sin cliente"}<div className="mini">{nombreCot(c)}{c.id_solicitud ? ` · ${c.id_solicitud}` : ""} · enviada {fecha(c.fecha)}{c.por ? ` · ${c.por}` : ""}</div></td>
+                    <td className="price-cell">{fmt(c.total)}</td>
+                    <td><div className="tarea-acciones">
+                      <button className="btn btn-success btn-sm" onClick={() => abrirAceptar(c)}>Aceptada</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => rechazar(c)}>Rechazada</button>
+                    </div></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+            {data.enviadas?.length > 8 && <button className="link" onClick={() => irA("cotizaciones", "enviadas")}>Ver las {data.enviadas.length} en Cotizaciones → Enviadas</button>}
+          </div>
+        </div>
+      )}
+      {aceptar && <AceptarCotizacion cot={aceptar} notify={notify} onClose={() => setAceptar(null)}
+        onHecho={(venta) => { setAceptar(null); setData((d) => ({ ...d, enviadas: d.enviadas.filter((x) => x.id !== aceptar.id) })); irA("ventas", venta.id); }} />}
       {depto === "comercial" && (
         <div className="kpis">
           <Kpi label="Por facturar" valor={f.por_facturar ?? 0} sub="productos listos, sin factura completa" onClick={() => irA("facturacion")} />
           <Kpi label="En compra" valor={(f.por_aceptar ?? 0) + (f.por_comprar ?? 0)} sub="Operativo las está gestionando" onClick={() => irA("ventas")} />
-        </div>
-      )}
-      {depto === "comercial" && data.mp_cerradas?.length > 0 && (
-        <div className="panel">
-          <div className="panel-titulo">Cerraron sin postular (últimos 7 días) <span className="mini">· ya no se pueden ejecutar, quedan como registro</span></div>
-          <table className="table table-compacta">
-            <tbody>{data.mp_cerradas.slice(0, 8).map((l) => (
-              <tr key={l.codigo} className="clickable" onClick={() => irA("licitaciones", l.codigo)}>
-                <td className="id-cell">{l.codigo}</td><td>{l.nombre}<div className="mini">{l.organismo}</div></td>
-                <td className="mini">cerró {new Date(l.fecha_cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                <td className="price-cell">{l.monto_estimado ? fmt(l.monto_estimado) : ""}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-          {data.mp_cerradas.length > 8 && <div className="mini">y {data.mp_cerradas.length - 8} más</div>}
         </div>
       )}
       {depto === "comercial" && adj && (

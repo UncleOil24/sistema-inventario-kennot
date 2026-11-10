@@ -8,6 +8,8 @@ router.get("/categorias", c.getCategorias);
 router.get("/resumen", c.getResumen);
 router.get("/similares", c.getSimilares);
 router.get("/unidades", c.getUnidades);
+router.get("/exportar/para-cotizar", c.exportarParaCotizar);
+router.get("/exportar/consolidado", catalogoPrecios, c.exportarConsolidado);
 router.get("/:id", c.getProducto);
 router.post("/", c.crearProducto);
 router.put("/:id", c.actualizarProducto);

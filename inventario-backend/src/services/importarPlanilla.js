@@ -238,7 +238,8 @@ async function importarPlanilla(buffer, { usuario = "importación", desactivarOt
 
     // --- Productos: por descripción exacta; si no, por N° (solo productos que ya vinieron de la planilla) ---
     const actuales = await Producto.findAll({ attributes: ["id", "codigo", "nombre", "en_planilla"], raw: true, transaction: t });
-    const porCodigo = new Map(actuales.filter((p) => p.codigo && p.en_planilla).map((p) => [Number(p.codigo), p]));
+    // El N° también sirve para los productos creados en el sistema (vuelven en el consolidado descargado)
+    const porCodigo = new Map(actuales.filter((p) => p.codigo).map((p) => [Number(p.codigo), p]));
     const porDesc = new Map(actuales.map((p) => [sinTildes(p.nombre), p]));
     const idPorCodigo = new Map();
     const tocados = new Set();
