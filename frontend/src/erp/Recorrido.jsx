@@ -2,7 +2,7 @@
 // Operativo acepta y confirma (productos listos) → Comercial factura (una o varias facturas) → Operativo despacha → entregada.
 import { useState } from "react";
 import { api, fmt, fecha, hoyISO } from "./lib";
-import { Recorrido, EstadoFactura, confirmar } from "./ui";
+import { Recorrido, EstadoFactura, confirmar, pedirTexto } from "./ui";
 import { FichaSII, SubirSII, DocumentosSII } from "./SII";
 
 // Llama a la API; si el servidor pide confirmación (409), pregunta y reintenta con { forzar: true }
@@ -17,7 +17,7 @@ export async function conConfirmacion(url, body = {}, method = "POST") {
 }
 
 // Paso actual + el botón de lo que toca hacer ahora (según el departamento)
-export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify, onCambio, abrirCuadro }) {
+export function AccionesVenta({ venta, puedeOperar, notify, onCambio, abrirCuadro }) {
   const [despacho, setDespacho] = useState(null); // { fecha, guia }
   const [entrega, setEntrega] = useState(null); // { fecha, recibido_por }
   const [enviando, setEnviando] = useState(false);
@@ -49,12 +49,12 @@ export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify
     contenido = <>
       <span>Productos listos. {faltaFactura ? "Falta la factura (Comercial)." : "Facturada."}</span>
       {puedeOperar && !despacho && <button className="btn btn-primary btn-sm" onClick={() => setDespacho({ fecha: hoyISO(), guia: "" })}>🚚 Despachar</button>}
-      {(puedeOperar || puedeVender) && !entrega && <button className="btn btn-ghost btn-sm" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>Retiró / entregada</button>}
+      {puedeOperar && !entrega && <button className="btn btn-ghost btn-sm" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>Retiró / entregada</button>}
     </>;
   } else if (venta.etapa === "despachada") {
     contenido = <>
       <span>Despachada el {fecha(venta.despacho_fecha)}{venta.guia_despacho ? ` · guía ${venta.guia_despacho}` : ""}.</span>
-      {(puedeOperar || puedeVender) && !entrega && <button className="btn btn-success btn-sm" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>✓ El cliente recibió</button>}
+      {puedeOperar && !entrega && <button className="btn btn-success btn-sm" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>✓ El cliente recibió</button>}
     </>;
   } else if (venta.etapa === "entregada") {
     contenido = <span>Entregada el {fecha(venta.entrega_fecha)}{venta.recibido_por ? ` · recibió ${venta.recibido_por}` : ""}.{faltaFactura ? " ⚠ Aún falta facturar." : ""}</span>;
@@ -69,8 +69,11 @@ export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify
       </div>
       <div className="accion-etapa">
         {contenido}
-        {esAdmin && venta.etapa !== "registrada" && <button className="link" style={{ marginLeft: "auto" }} disabled={enviando}
-          onClick={async () => (await confirmar("¿Deshacer el último paso de esta venta?", { titulo: "Deshacer paso", boton: "Deshacer" })) && hacer(() => api(`/ventas/${venta.id}/retroceder`, { method: "POST" }), "Paso deshecho")}>↺ deshacer último paso</button>}
+        {puedeOperar && venta.etapa !== "registrada" && <button className="link" style={{ marginLeft: "auto" }} disabled={enviando}
+          onClick={async () => {
+            const motivo = await pedirTexto("¿Por qué se deshace el último paso? Queda registrado en el historial de la venta.", { titulo: "Deshacer último paso", placeholder: "Ej.: se marcó despachada por error", obligatorio: true, boton: "Deshacer" });
+            if (motivo) hacer(() => api(`/ventas/${venta.id}/retroceder`, { method: "POST", body: { motivo } }), "Paso deshecho (queda en el historial)");
+          }}>↺ deshacer último paso</button>}
       </div>
       {despacho && (
         <div className="pago-form">
@@ -117,8 +120,9 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
     catch (e) { notify(e.message, "danger"); }
   };
   const quitar = async (f) => {
-    if (!(await confirmar(`¿Quitar la factura ${f.numero}?\nSolo si se ingresó por error.`, { titulo: "Quitar factura", boton: "Quitar", peligro: true }))) return;
-    try { await api(`/ventas/${venta.id}/facturas/${f.id}`, { method: "DELETE" }); notify("Factura quitada"); onCambio(); }
+    const motivo = await pedirTexto(`¿Por qué se quita la factura ${f.numero}? Queda registrado y se avisa a gerencia.`, { titulo: "Quitar factura", placeholder: "Ej.: se anuló con nota de crédito / N° mal escrito", obligatorio: true, boton: "Quitar", peligro: true });
+    if (!motivo) return;
+    try { await api(`/ventas/${venta.id}/facturas/${f.id}?motivo=${encodeURIComponent(motivo)}`, { method: "DELETE", body: { motivo } }); notify("Factura quitada (queda en el historial)"); onCambio(); }
     catch (e) { notify(e.message, "danger"); }
   };
   return (
@@ -161,6 +165,33 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
           <input type="number" placeholder={`Monto con IVA (vacío = ${fmt(falta)})`} value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} />
           <button className="btn btn-primary btn-sm" disabled={enviando || !form.numero.trim()} onClick={registrar}>+ Registrar factura</button>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Historial de la venta: cada paso, quién y cuándo; los retrocesos y facturas quitadas con su motivo
+const ICONO = { paso: "•", factura: "🧾", retroceso: "↺", factura_quitada: "✕", anulacion: "⛔" };
+export function HistorialVenta({ venta }) {
+  const [abierto, setAbierto] = useState(false);
+  const h = venta.historial || [];
+  const alertas = h.filter((x) => ["retroceso", "factura_quitada", "anulacion"].includes(x.tipo)).length;
+  return (
+    <div className="panel">
+      <div className="panel-titulo clickable" onClick={() => setAbierto(!abierto)} style={{ cursor: "pointer" }}>
+        {abierto ? "▾" : "▸"} Historial ({h.length + 1}){alertas ? <span className="badge-alerta"> · {alertas} corrección(es)</span> : null}
+      </div>
+      {abierto && (
+        <table className="table table-compacta"><tbody>
+          <tr><td className="mini">{fecha(venta.createdAt || venta.fecha)}</td><td>• Registró la venta</td><td className="mini">{venta.creado_por || ""}</td></tr>
+          {h.map((x) => (
+            <tr key={x.id} className={["retroceso", "factura_quitada", "anulacion"].includes(x.tipo) ? "fila-alerta" : ""}>
+              <td className="mini">{new Date(x.createdAt).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+              <td>{ICONO[x.tipo] || "•"} {x.texto}{x.motivo && <div className="mini">Motivo: {x.motivo}</div>}</td>
+              <td className="mini">{x.por || ""}</td>
+            </tr>
+          ))}
+        </tbody></table>
       )}
     </div>
   );

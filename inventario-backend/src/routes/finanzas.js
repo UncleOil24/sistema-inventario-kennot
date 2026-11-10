@@ -84,6 +84,12 @@ router.get("/produccion", handler(async (req, res) => {
     ordenes_compra: await q(`SELECT COALESCE(creado_por, 'Sin registro') AS persona, COUNT(*)::int AS cantidad, SUM(total)::float AS monto
       FROM ordenes_compra WHERE estado <> 'anulada' AND ${enRango('"createdAt"')} GROUP BY 1 ORDER BY 1`),
   };
+  // Control: pasos deshechos y facturas quitadas, por persona, con el detalle
+  r.correcciones = await q(`SELECT COALESCE(por, 'Sin registro') AS persona,
+      COUNT(*) FILTER (WHERE tipo = 'retroceso')::int AS retrocesos, COUNT(*) FILTER (WHERE tipo = 'factura_quitada')::int AS facturas_quitadas
+    FROM historial_venta WHERE tipo IN ('retroceso', 'factura_quitada') AND ${enRango('"createdAt"')} GROUP BY 1 ORDER BY 1`);
+  r.correcciones_detalle = await q(`SELECT h."createdAt" AS fecha, h.por, h.tipo, h.texto, h.motivo, v.id AS venta_id, v.numero FROM historial_venta h
+    JOIN ventas v ON v.id = h.venta_id WHERE h.tipo IN ('retroceso', 'factura_quitada') AND ${enRango('h."createdAt"')} ORDER BY h."createdAt" DESC LIMIT 100`);
   res.json({ ok: true, data: r });
 }));
 

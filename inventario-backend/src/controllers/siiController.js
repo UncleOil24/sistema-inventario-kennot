@@ -104,6 +104,7 @@ const registrar = handler(async (req, res) => {
     } else if (tipo === "guia") {
       await v.update({ guia_despacho: folio }, { transaction: t });
     }
+    await require("../models/HistorialVenta").anotar(v, tipo === "guia" ? "paso" : "factura", `Subió ${tipo === "guia" ? "guía de despacho" : tipo === "nota_credito" ? "nota de crédito" : "factura"} del SII N° ${folio}`, req, t);
     const archivo = b.archivo_token ? pendientes.get(b.archivo_token) : null;
     if (archivo) {
       await DocumentoVenta.create({ venta_id: v.id, tipo: tipo.startsWith("factura") ? "factura" : tipo, folio, fecha, monto: Math.round(Number(b.monto) || 0) || null,

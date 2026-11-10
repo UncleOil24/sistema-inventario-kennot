@@ -75,6 +75,25 @@ export default function Produccion({ notify, irA }) {
       <TablaPersonas titulo="Operativo · Despachos" filas={d.operativo.despachadas} conMonto={false} />
 
       <div className="panel">
+        <div className="panel-titulo">Control · Pasos deshechos y facturas quitadas</div>
+        {!(d.correcciones || []).length ? <div className="mini">Ninguno en el período ✓</div> : <>
+          <table className="table table-compacta">
+            <thead><tr><th>Persona</th><th>Pasos deshechos</th><th>Facturas quitadas</th></tr></thead>
+            <tbody>{d.correcciones.map((c) => <tr key={c.persona}><td>{c.persona}</td><td>{c.retrocesos}</td><td>{c.facturas_quitadas}</td></tr>)}</tbody>
+          </table>
+          <table className="table table-compacta" style={{ marginTop: 8 }}>
+            <tbody>{d.correcciones_detalle.map((h, k) => (
+              <tr key={k} className="clickable" onClick={() => irA?.("ventas", h.venta_id)}>
+                <td className="id-cell">{h.numero}</td>
+                <td className="mini">{new Date(h.fecha).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                <td>{h.texto}<div className="mini">Motivo: {h.motivo || "—"}</div></td><td className="mini">{h.por}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </>}
+      </div>
+
+      <div className="panel">
         <div className="panel-titulo">Procesos que cerraron sin postular</div>
         {!d.sin_postular.length ? <div className="mini">Ninguno 🎉</div> : (
           <table className="table table-compacta">

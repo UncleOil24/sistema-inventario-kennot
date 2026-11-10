@@ -198,6 +198,11 @@ async function codigosClientes(q) {
   await q(`UPDATE ventas v SET cliente_id = c.id, cliente_nombre = c.nombre FROM clientes c
     WHERE c.codigo ~ '^[0-9]+$' AND SPLIT_PART(TRIM(v.id_solicitud), '-', 1) = c.codigo
       AND (v.cliente_id IS NULL OR v.cliente_id IN (SELECT id FROM clientes WHERE codigo IN ('P-001','CG')) OR v.cliente_id NOT IN (SELECT id FROM clientes))`);
+  // Igual con el N° de OC de Mercado Público (su primer número también es la unidad de compra), si la venta no tiene ID
+  await q(`UPDATE ventas v SET cliente_id = c.id, cliente_nombre = c.nombre, id_solicitud = COALESCE(NULLIF(TRIM(v.id_solicitud), ''), c.codigo) FROM clientes c
+    WHERE c.codigo ~ '^[0-9]+$' AND v.orden_compra_cliente ~ '^[0-9]+-[0-9]+-[A-Za-z]' AND SPLIT_PART(TRIM(v.orden_compra_cliente), '-', 1) = c.codigo
+      AND (v.id_solicitud IS NULL OR TRIM(v.id_solicitud) = '' OR v.id_solicitud ~ '^P-')
+      AND (v.cliente_id IS NULL OR v.cliente_id IN (SELECT id FROM clientes WHERE codigo IN ('P-001','CG')) OR v.cliente_id NOT IN (SELECT id FROM clientes))`);
   await q(`UPDATE cotizaciones z SET cliente_id = c.id FROM clientes c
     WHERE c.codigo ~ '^[0-9]+$' AND SPLIT_PART(TRIM(z.id_solicitud), '-', 1) = c.codigo
       AND (z.cliente_id IS NULL OR z.cliente_id IN (SELECT id FROM clientes WHERE codigo IN ('P-001','CG')) OR z.cliente_id NOT IN (SELECT id FROM clientes))`);

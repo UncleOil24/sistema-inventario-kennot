@@ -284,6 +284,8 @@ const styles = `
   .subpestanas { margin-bottom: 16px; }
   .subpestanas .chip { font-size: 12.5px; padding: 8px 16px; }
   .header-nav { overflow: visible; }
+  .fila-alerta td { background: color-mix(in srgb, var(--warn, #c98a00) 12%, transparent); }
+  .badge-alerta { color: var(--danger); font-weight: 600; }
   .fila-periodo td { background: var(--surface); font-size: 14px; border-top: 3px solid var(--accent); padding-top: 10px; }
   .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
   .fila-alerta td { background: rgba(240,190,40,0.16); }
