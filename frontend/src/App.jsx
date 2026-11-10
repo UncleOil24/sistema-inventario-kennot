@@ -256,11 +256,11 @@ const styles = `
   .nav-btn { padding: 6px 10px; }
   .menu-mas { position: relative; flex-shrink: 0; }
   .deptos-nav { gap: 6px; }
-  .depto-btn { background: none; border: 1px solid transparent; cursor: pointer; padding: 8px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--text2); text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
-  .depto-btn:hover { color: var(--text); background: var(--surface2); }
-  .depto-btn.active { color: var(--accent); border-color: rgba(var(--accent-rgb),0.35); background: rgba(var(--accent-rgb),0.08); }
-  .depto-num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 10px; background: var(--surface2); color: var(--text2); }
-  .depto-btn.active .depto-num { background: var(--accent); color: #fff; }
+  .depto-btn { background: #cdd6e0; border: 1px solid #b4c0cd; cursor: pointer; padding: 8px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--text2); text-transform: uppercase; display: flex; align-items: center; gap: 8px; }
+  .depto-btn:hover { color: var(--text); background: #c2ccd8; }
+  .depto-btn.active { color: #fff; border-color: var(--accent2); background: var(--accent); }
+  .depto-num { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; font-size: 10px; background: #e9edf2; color: var(--text2); }
+  .depto-btn.active .depto-num { background: #fff; color: var(--accent); }
   .secciones-nav { display: flex; gap: 2px; flex-wrap: wrap; padding: 6px 2rem; background: var(--bg); border-bottom: 1px solid var(--border); position: sticky; top: 56px; z-index: 90; }
   .que-hacer { border-color: var(--border2); }
   .adjudicado .adj-fila { display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -358,11 +358,11 @@ const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizac
 
 // Departamentos (Estructura del sistema, 4-nov-2026). Cada uno con sus secciones; cada persona ve solo el suyo y gerencia todo.
 const DEPTOS = [
-  { id: "comercial", nombre: "Comercial", roles: ["comercial", "usuario"], secciones: [
+  { id: "comercial", nombre: "Comercial", area: "Área Comercial", roles: ["comercial", "usuario"], secciones: [
     ["inicio", "Inicio"], ["licitaciones", "Merc. Público"], ["cotizaciones", "Cotizaciones"], ["ventas", "Ventas"], ["facturacion", "Facturación"], ["clientes", "Clientes"], ["catalogo", "Catálogo"]] },
-  { id: "operativo", nombre: "Operativo", roles: ["operativo"], secciones: [
+  { id: "operativo", nombre: "Operativo", area: "Área Operativa", roles: ["operativo"], secciones: [
     ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
-  { id: "finanzas", nombre: "Finanzas y Control", roles: [], secciones: [
+  { id: "finanzas", nombre: "Finanzas y Control", area: "Área Finanzas y Control", roles: [], secciones: [
     ["inicio", "Resumen"], ["produccion", "Producción"], ["cobranza", "Cobranza"], ["por-pagar", "Por pagar"], ["iva", "IVA"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
 ];
 const ROL_TEXTO = { admin: "administrador", gerencia: "gerencia", comercial: "comercial", operativo: "operativo", usuario: "usuario" };
@@ -455,7 +455,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
           <nav className="header-nav deptos-nav">
             {deptos.map((d, k) => (
               <button key={d.id} className={`depto-btn ${d.id === dep.id ? "active" : ""}`} onClick={() => elegirDepto(d.id)}>
-                <span className="depto-num">{DEPTOS.indexOf(d) + 1}</span>{d.nombre}
+                <span className="depto-num">{DEPTOS.indexOf(d) + 1}</span>{d.area || d.nombre}
               </button>
             ))}
           </nav>
