@@ -154,7 +154,7 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
       const v = await conConfirmacion("/ventas", {
         ...form,
         cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
-        cliente_nombre: cli?.codigo === "CG" ? form.cliente_nombre || null : null,
+        cliente_nombre: cli?.codigo === "P-001" ? form.cliente_nombre || null : null,
         dias_credito: form.pagada_al_contado ? 0 : Number(form.dias_credito),
         items: items.map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad), precio: Number(i.precio) })),
       });
@@ -186,11 +186,11 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
             <option value="">— Sin cliente —</option>
             {clientes.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} · ` : ""}{c.nombre}</option>)}
           </select>
-          {cli?.codigo === "CG" && <input style={{ marginTop: 6 }} value={form.cliente_nombre} onChange={(e) => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente para esta venta" />}
+          {cli?.codigo === "P-001" && <input style={{ marginTop: 6 }} value={form.cliente_nombre} onChange={(e) => setForm({ ...form, cliente_nombre: e.target.value })} placeholder="Nombre del cliente para esta venta" />}
         </div>
         <div className="field">
           <label>ID del cliente o de la solicitud</label>
-          <input value={form.id_solicitud} onChange={(e) => setForm({ ...form, id_solicitud: e.target.value })} placeholder={cli?.codigo && cli.codigo !== "CG" ? `${cli.codigo} (del cliente)` : "Ej: 1422-20-COT26"} />
+          <input value={form.id_solicitud} onChange={(e) => setForm({ ...form, id_solicitud: e.target.value })} placeholder={cli?.codigo && cli.codigo !== "P-001" ? `${cli.codigo} (del cliente)` : "Ej: 1422-20-COT26"} />
         </div>
       </div>
       <div className="fields-row">

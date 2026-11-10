@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, SelectorCategoria } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
-import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses } from "./lib";
+import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar } from "./lib";
 
 // Unidad de medida: lista cerrada (M11)
 const UNIDADES = ["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLIEGO", "TIRA", "M3"];
@@ -9,6 +9,7 @@ const ORIGENES = [["", "Cotización de proveedor"], ["web", "Tienda / web (con I
 const POR_PAGINA = 150;
 const FILTROS = [
   ["", "Todos"],
+  ["nuevos_sin_precio", "Nuevos sin precio (agregados al cotizar)"],
   ["aviso", "Con aviso en REVISAR"],
   ["sin_precio", "Sin precio (falta cotizar)"],
   ["sin_confirmar", "Con precio sin confirmar"],
@@ -18,6 +19,7 @@ const FILTROS = [
 ];
 
 export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, onCotizar, proveedores }) {
+  const [consolidado, setConsolidado] = useState(false);
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
@@ -83,6 +85,8 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
           {FILTROS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
         </select>
         {esAdmin && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura de proveedor (PDF o foto)">⇪ Documento proveedor</button>}
+        {esAdmin && <button className="btn btn-ghost" title="Excel con los productos agregados en el sistema que aún no tienen precio, para cotizarlos" onClick={() => descargar("/productos/exportar/para-cotizar", `Productos_nuevos_para_cotizar_${hoyISO()}.xlsx`).catch((e) => notify(e.message, "danger"))}>↓ Para cotizar</button>}
+        {esAdmin && <button className="btn btn-ghost" onClick={() => setConsolidado(true)} title="Catálogo completo en el formato del LISTADO CONSOLIDADO, con los cambios marcados">↓ Consolidado</button>}
         <button className="btn btn-primary" onClick={() => setEditar({ nombre: "", categoria: categoria !== "Todas" ? categoria : (categorias[0]?.categoria || ""), unidad: "UNIDAD" })}>+ Nuevo producto</button>
       </div>
 
@@ -158,6 +162,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} onClose={() => { setDocumento(false); refrescar(); }} />}
       {precios && <PreciosProducto producto={precios} puedeConfirmar={esGerencia} proveedores={proveedores} notify={notify}
         onClose={() => setPrecios(null)} onCambio={refrescar} />}
+      {consolidado && <DescargarConsolidado notify={notify} onClose={() => setConsolidado(false)} />}
     </>
   );
 }
@@ -449,3 +454,31 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
   );
 }
 
+
+// Descargar el catálogo completo en el formato del LISTADO CONSOLIDADO, con la columna CAMBIO
+function DescargarConsolidado({ notify, onClose }) {
+  const [desde, setDesde] = useState("");
+  const [solo, setSolo] = useState(false);
+  const [bajando, setBajando] = useState(false);
+  const bajar = async () => {
+    setBajando(true);
+    try {
+      const q = new URLSearchParams();
+      if (desde) q.append("desde", desde);
+      if (solo) q.append("solo_cambios", "1");
+      await descargar(`/productos/exportar/consolidado?${q}`, `LISTADO_CONSOLIDADO_sistema_${hoyISO()}.xlsx`);
+      notify("✓ Consolidado descargado");
+      onClose();
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setBajando(false); }
+  };
+  return (
+    <Modal titulo="// Descargar consolidado" onClose={onClose}
+      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button><button className="btn btn-primary" disabled={bajando} onClick={bajar}>{bajando ? "Generando..." : "Descargar"}</button></>}>
+      <div className="mini" style={{ marginBottom: 10 }}>Baja el catálogo en el mismo formato del LISTADO CONSOLIDADO. La columna CAMBIO marca los productos <strong>Nuevo sin precio</strong>, <strong>Nuevo con precio</strong> y <strong>Precio actualizado</strong>. Después de actualizarlo, se vuelve a subir con Importar planilla.</div>
+      <div className="field"><label>Marcar cambios desde</label><input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
+        <div className="mini">Vacío = desde la última descarga del consolidado.</div></div>
+      <label className="check"><input type="checkbox" checked={solo} onChange={(e) => setSolo(e.target.checked)} /> Solo los productos con cambios</label>
+    </Modal>
+  );
+}

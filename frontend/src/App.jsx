@@ -190,6 +190,15 @@ const styles = `
   .pago-form input:focus { border-color: var(--accent); }
   .check { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--text2); cursor: pointer; }
   .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .franja-edicion { position: sticky; top: 100px; z-index: 80; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; background: #24384a; color: #f2f5f8; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-family: var(--mono); font-size: 12.5px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+  .franja-edicion span:first-child { font-weight: 700; }
+  .franja-edicion .link { color: #ffd59a; margin-left: auto; }
+  .panel-cotizando { background: #cfd8e2; border-color: #9fb0c2; }
+  .tarea-monto { font-family: var(--mono); font-weight: 700; font-size: 14px; color: var(--accent2); white-space: nowrap; text-align: right; min-width: 110px; }
+  .tarea-monto.sin { font-weight: 400; font-size: 11px; color: var(--text3); }
+  .tarea-acciones { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .inicio-dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; align-items: start; }
+  .inicio-dos > .panel { margin: 0; }
   .aviso { background: rgba(232,163,61,0.08); border: 1px solid rgba(232,163,61,0.3); color: var(--warn); border-radius: 6px; padding: 10px 14px; font-family: var(--mono); font-size: 12px; margin-bottom: 1rem; }
   .items-editor { display: flex; flex-direction: column; gap: 10px; }
   .sugerencias { position: absolute; top: 100%; left: 0; right: 0; z-index: 10; background: var(--surface2); border: 1px solid var(--border2); border-radius: 6px; margin-top: 4px; max-height: 260px; overflow-y: auto; box-shadow: 0 8px 24px rgba(20,35,25,0.12); }
@@ -416,8 +425,8 @@ function App({ usuario: usuarioInicial, onLogout }) {
   // Ir a una sección (desde tareas o enlaces): en el departamento actual si la tiene; si no, en el primero que la tenga
   const irA = (vista, id) => {
     let v = vista;
-    if (vista === "cotizaciones-seguir") { setFiltroCot("seguir"); v = "cotizaciones"; }
-    else if (vista === "cotizaciones") setFiltroCot("");
+    if (vista === "cotizaciones-seguir") { setFiltroCot("enviadas"); v = "cotizaciones"; }
+    else if (vista === "cotizaciones") setFiltroCot(["borrador", "espera_proveedor", "enviadas"].includes(id) ? id : "borrador");
     if (vista === "dashboard") v = "inicio";
     if (vista === "licitaciones" || vista === "cotizar") v = vista;
     const base = v === "cotizar" ? "cotizaciones" : v;
@@ -471,7 +480,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
         </header>
         <nav className="secciones-nav">
           {dep.secciones.map(([sid, texto]) => (
-            <button key={sid} className={`nav-btn ${seccionActiva === sid ? "active" : ""}`} onClick={() => { if (sid === "cotizaciones") setFiltroCot(""); setView(sid); }}>
+            <button key={sid} className={`nav-btn ${seccionActiva === sid ? "active" : ""}`} onClick={() => { if (sid === "cotizaciones") { setFiltroCot("borrador"); setView(borrador.items.length ? "cotizar" : "cotizaciones"); return; } setView(sid); }}>
               {texto}{sid === "cotizaciones" && borrador.items.length > 0 && <span className="badge" title="Productos en la cotización que estás armando">{borrador.items.length}</span>}
             </button>
           ))}
@@ -487,16 +496,18 @@ function App({ usuario: usuarioInicial, onLogout }) {
           )}
           {(view === "cotizar" || view === "cotizaciones") && (
             <div className="chips subpestanas">
-              {puedeVender && <button className={`chip ${view === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>＋ Nueva cotización{borrador.items.length > 0 ? ` (${borrador.items.length} productos)` : ""}</button>}
-              <button className={`chip ${view === "cotizaciones" ? "activo" : ""}`} onClick={() => { setFiltroCot(""); setView("cotizaciones"); }}>Cotizaciones guardadas</button>
+              {puedeVender && <button className={`chip ${view === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>{borrador.id ? `✎ Editando N°${borrador.numero}` : borrador.items.length > 0 ? `✎ Cotización en preparación (${borrador.items.length})` : "＋ Nueva cotización"}</button>}
+              {[["borrador", "En ejecución"], ["espera_proveedor", "Esperando proveedor"], ["enviadas", "Enviadas"]].map(([t, txt]) => (
+                <button key={t} className={`chip ${view === "cotizaciones" && (filtroCot || "borrador") === t ? "activo" : ""}`} onClick={() => { setFiltroCot(t); setView("cotizaciones"); }}>{txt}</button>
+              ))}
             </div>
           )}
           {view === "cotizar" && (
             <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={veCostos} notify={showNotif}
-              irAClientes={() => setView("clientes")} onGuardada={() => setView("cotizaciones")} />
+              irAClientes={() => setView("clientes")} onGuardada={(cot) => { setFiltroCot(cot?.estado === "cotizacion" ? "enviadas" : cot?.estado || "borrador"); setView("cotizaciones"); }} />
           )}
           {view === "cotizaciones" && (
-            <Cotizaciones key={filtroCot} filtroInicial={filtroCot} esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} verVenta={verVenta}
+            <Cotizaciones key={filtroCot || "borrador"} tab={filtroCot || "borrador"} esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} verVenta={verVenta}
               onEditar={(b) => { setBorrador(b); setView("cotizar"); }}
               onVenta={(v) => verVenta(v.id)} />
           )}

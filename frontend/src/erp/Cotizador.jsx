@@ -32,7 +32,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       items: b.items.map((i) => (i.auto ? { ...i, precio: nuevo === "particular" ? i.particular : i.convenio } : i)),
     }));
   };
-  const esGeneral = cliente?.codigo === "CG";
+  const esGeneral = cliente?.codigo === "P-001";
   const elegirCliente = (id) => {
     const c = clientes.find((x) => String(x.id) === String(id));
     const nuevoTipo = c?.tipo || "convenio";
@@ -42,7 +42,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       const idAuto = !b.id_solicitud || b.id_solicitud === anterior?.codigo;
       return {
       ...b, cliente_id: id, tipo_precio: nuevoTipo,
-      id_solicitud: idAuto ? (c && c.codigo !== "CG" ? c.codigo || "" : "") : b.id_solicitud,
+      id_solicitud: idAuto ? (c && c.codigo !== "P-001" ? c.codigo || "" : "") : b.id_solicitud,
       items: b.items.map((i) => (i.auto ? { ...i, precio: nuevoTipo === "particular" ? i.particular : i.convenio } : i)),
       };
     });
@@ -108,10 +108,12 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
     notify(`✓ ${nuevas.length} líneas agregadas desde la lista del cliente`);
   };
 
-  const guardar = async (estado, salida = null) => {
+  const guardar = async (estadoPedido, salida = null) => {
     if (!items.length) return;
-    if (sinPrecio && estado !== "borrador" && !confirm(`${sinPrecio} línea(s) sin precio. ¿Guardar igual?`)) return;
-    if (estado !== "borrador" && !String(borrador.id_solicitud || "").trim() && !confirm("La cotización va sin ID (del cliente o de la solicitud). ¿Guardar igual?")) return;
+    // Una cotización ya enviada que se corrige sigue enviada al "Guardar"
+    const estado = estadoPedido === "borrador" && borrador.estado === "cotizacion" ? "cotizacion" : estadoPedido;
+    if (sinPrecio && estado === "cotizacion" && !confirm(`${sinPrecio} línea(s) sin precio. ¿Guardar igual?`)) return;
+    if (estado === "cotizacion" && !String(borrador.id_solicitud || "").trim() && !confirm("La cotización va sin ID (del cliente o de la solicitud). ¿Guardar igual?")) return;
     if (esGeneral && !String(borrador.cliente_nombre_doc || "").trim()) { notify("Cliente general: escribe el nombre que va en esta cotización", "danger"); return; }
     setGuardando(true);
     try {
@@ -139,19 +141,31 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       const cot = borrador.id
         ? await conConfirmacion(`/cotizaciones/${borrador.id}`, body, "PUT")
         : await conConfirmacion("/cotizaciones", body);
-      if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${idCot(cot)}${cot.anterior ? "_anterior" : ""}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
-      notify(`✓ ${nombreCot(cot)} ${estado === "borrador" ? "guardada como borrador" : "guardada"}${salida ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
+      if (salida === "pedido-proveedor") await descargar(`/cotizaciones/${cot.id}/pedido-proveedor`, `Pedido_cotizacion_${idCot(cot)}.xlsx`);
+      else if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${idCot(cot)}${cot.anterior ? "_anterior" : ""}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
+      const que = { borrador: "guardada (En ejecución)", espera_proveedor: "guardada en Esperando proveedor · Excel del pedido descargado", cotizacion: "finalizada (Enviadas)" }[estado];
+      notify(`✓ ${nombreCot(cot)} ${que}${salida && salida !== "pedido-proveedor" ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
       limpiar();
       onGuardada?.(cot);
     } catch (e) { if (!e.cancelado) notify(e.message, "danger"); }
     finally { setGuardando(false); }
   };
   const grupos = (borrador.presupuesto?.grupos || []).filter((g) => g.nombre);
+  const sinCostoTodas = items.filter((i) => !(Number(i.costo) > 0)).length;
 
   return (
     <>
-      {borrador.id && <div className="aviso">Editando la {nombreCot({ ...borrador, empresa: borrador.empresa_original || empresa })}. <button className="link" onClick={limpiar}>Cancelar edición</button></div>}
-      <div className="panel">
+      {(borrador.id || items.length > 0) && (
+        <div className="franja-edicion">
+          <span>✎ {borrador.id ? `Editando ${nombreCot({ ...borrador, empresa: borrador.empresa_original || empresa })}` : "Cotización nueva en preparación (el número se asigna al guardar)"}</span>
+          {((esGeneral ? borrador.cliente_nombre_doc : cliente?.nombre) || borrador.cliente_nombre_doc) && <span>· {(esGeneral ? borrador.cliente_nombre_doc : cliente?.nombre) || borrador.cliente_nombre_doc}</span>}
+          {borrador.id_solicitud && <span>· ID {borrador.id_solicitud}</span>}
+          {borrador.creado_por && <span>· por {borrador.creado_por}</span>}
+          <span>· {items.length} línea(s)</span>
+          <button className="link" onClick={() => { if (confirm(borrador.id ? "¿Salir sin guardar los cambios? La cotización guardada no se pierde." : "¿Descartar esta cotización nueva? Se pierden las líneas.")) limpiar(); }}>{borrador.id ? "Salir sin guardar" : "Descartar"}</button>
+        </div>
+      )}
+      <div className={`panel ${borrador.id || items.length ? "panel-cotizando" : ""}`}>
         <div className="field">
           <label>Cotiza la empresa</label>
           <div className="chips">
@@ -214,10 +228,12 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         {!cliente && <div className="mini">Sin cliente se usa precio convenio. Si es institución, usa convenio; en duda, convenio.</div>}
       </div>
 
-      <div className="toolbar" style={{ marginBottom: 8 }}>
-        <button className="btn btn-ghost" onClick={() => setImportar(true)}>⇪ Subir lista del cliente (Excel, PDF, Word o foto)</button>
-        {borrador.archivo_cliente && <span className="mini">Lista: {borrador.archivo_cliente}</span>}
-      </div>
+      {/* El documento del cliente se sube solo al comenzar: después no se reemplaza lo ya armado */}
+      {items.length === 0 ? (
+        <div className="toolbar" style={{ marginBottom: 8 }}>
+          <button className="btn btn-ghost" onClick={() => setImportar(true)}>⇪ Subir lista del cliente (Excel, PDF, Word o foto)</button>
+        </div>
+      ) : borrador.archivo_cliente && <div className="mini" style={{ marginBottom: 8 }}>Lista del cliente: {borrador.archivo_cliente}</div>}
       <div className="field" style={{ position: "relative", marginBottom: "1rem" }}>
         <label>Agregar producto</label>
         {asociando && <div className="aviso">Buscando el producto nuestro para "{items.find((i) => idL(i) === asociando)?.descripcion_cliente}": elige uno de la lista. <button className="link" onClick={() => setAsociando(null)}>Cancelar</button></div>}
@@ -315,13 +331,11 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       )}
 
       <div className="toolbar" style={{ marginTop: "1rem", justifyContent: "flex-end" }}>
-        <button className="btn btn-ghost" onClick={limpiar} disabled={guardando}>Limpiar</button>
-        <button className="btn btn-ghost" onClick={() => guardar("borrador")} disabled={!items.length || guardando}>Guardar borrador</button>
-        <button className="btn btn-ghost" onClick={() => guardar("cotizacion")} disabled={!items.length || guardando}>Guardar cotización</button>
-        <button className="btn btn-ghost" onClick={() => guardar("cotizacion", "excel")} disabled={!items.length || guardando}>Guardar + Excel</button>
-        <button className="btn btn-primary" onClick={() => guardar("cotizacion", "pdf")} disabled={!items.length || guardando}>
-          {guardando ? <><span className="spinner"></span>Guardando...</> : "Guardar y descargar PDF"}
-        </button>
+        {guardando && <span className="mini"><span className="spinner"></span>Guardando...</span>}
+        <button className="btn btn-ghost" title="Queda en Cotizaciones → En ejecución para seguir después" onClick={() => guardar("borrador")} disabled={!items.length || guardando}>Guardar</button>
+        <button className="btn btn-ghost" title={`Descarga un Excel con las ${sinCostoTodas} línea(s) sin precio para enviar al proveedor. Queda en Esperando proveedor.`} onClick={() => guardar("espera_proveedor", "pedido-proveedor")} disabled={!items.length || guardando}>Pedir cotización a proveedor{sinCostoTodas ? ` (${sinCostoTodas})` : ""}</button>
+        <button className="btn btn-ghost" title="Queda en Enviadas" onClick={() => guardar("cotizacion", "excel")} disabled={!items.length || guardando}>Finalizar + Excel</button>
+        <button className="btn btn-primary" title="Queda en Enviadas" onClick={() => guardar("cotizacion", "pdf")} disabled={!items.length || guardando}>Finalizar + PDF</button>
       </div>
       {importar && <ImportarLista tipo={tipo} esAdmin={esAdmin} notify={notify} onClose={() => setImportar(false)} onAgregar={agregarLista} />}
     </>

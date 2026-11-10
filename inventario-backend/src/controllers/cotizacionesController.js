@@ -11,7 +11,13 @@ const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
 const { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion } = require("../services/cotizacionFormato");
-const ESTADOS = ["borrador", "cotizacion", "aceptada", "rechazada", "vencida"];
+// borrador = "En ejecución" · espera_proveedor = "Esperando proveedor" · cotizacion = "Enviada" (sin respuesta aún)
+const ESTADOS = ["borrador", "espera_proveedor", "cotizacion", "aceptada", "rechazada", "vencida"];
+const EDITABLES = ["borrador", "espera_proveedor", "cotizacion"];
+const PrecioProveedor = require("../models/PrecioProveedor");
+const Proveedor = require("../models/Proveedor");
+const ia = require("../services/ia");
+const { recalcular, normProv, origenDe, registrar } = require("../services/precios");
 const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const sumarDias = (iso, dias) => {
   const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
@@ -154,7 +160,7 @@ const datosCliente = async (body, t) => {
     const c = await Cliente.findByPk(body.cliente_id, { transaction: t });
     if (!c) throw new ErrorNegocio("Cliente no encontrado", 404);
     // Cliente general: el nombre se escribe solo para este documento
-    const nombre = c.codigo === "CG" && String(body.cliente || "").trim() && body.cliente !== c.nombre ? String(body.cliente).trim() : c.nombre;
+    const nombre = c.codigo === "P-001" && String(body.cliente || "").trim() && body.cliente !== c.nombre ? String(body.cliente).trim() : c.nombre;
     return { cliente_id: c.id, cliente: nombre, codigo_cliente: c.codigo, tipo_precio: body.tipo_precio || c.tipo || "convenio" };
   }
   return { cliente_id: null, cliente: body.cliente || null, codigo_cliente: null, tipo_precio: body.tipo_precio || "convenio" };
@@ -181,7 +187,8 @@ const getCotizaciones = handler(async (req, res) => {
   await marcarVencidas();
   const { estado, busqueda } = req.query;
   const where = req.query.seguimiento === "1" ? await wherePorSeguir() : {};
-  if (estado) where.estado = estado;
+  if (estado === "enviadas") where.estado = ["cotizacion", "aceptada", "rechazada", "vencida"];
+  else if (estado) where.estado = estado;
   if (req.query.empresa) where.empresa = req.query.empresa;
   if (busqueda) where[Op.or] = ["numero", "cliente", "nombre_cotizacion", "id_solicitud"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   const data = await Cotizacion.findAll({ where, order: [["anterior", "ASC"], ["createdAt", "DESC"]] });
@@ -207,7 +214,7 @@ const crearCotizacion = handler(async (req, res) => {
     const fecha = hoyISO();
     const validez = Number(b.validez_dias) || Number(params.validez_cotizacion_dias) || 30;
     const empresa = validarEmpresa(b.empresa);
-    const idSol = String(b.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "CG" ? codigo_cliente : null);
+    const idSol = String(b.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "P-001" ? codigo_cliente : null);
     await revisarPostulacion({ id_solicitud: idSol, empresa, forzar: b.forzar }, t);
     const numero = await siguienteNumero(t, empresa);
     const nueva = await Cotizacion.create({
@@ -219,7 +226,7 @@ const crearCotizacion = handler(async (req, res) => {
       plazo_entrega: String(b.plazo_entrega || "").trim() || params.plazo_entrega || null,
       nombre_cotizacion: b.nombre_cotizacion || null, // se imprime como "Descripción" (Kenott) o "Proyecto" (Tactics)
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
-      estado: b.estado === "borrador" ? "borrador" : "cotizacion",
+      estado: EDITABLES.includes(b.estado) ? b.estado : "cotizacion",
       notas: b.notas || null,
       archivo_cliente: b.archivo_cliente || null,
       items, ...calcularTotales(items),
@@ -241,13 +248,13 @@ const actualizarCotizacion = handler(async (req, res) => {
   const cot = await sequelize.transaction(async (t) => {
     const c = await Cotizacion.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!c) throw new ErrorNegocio("Cotización no encontrada", 404);
-    if (!["borrador", "cotizacion"].includes(c.estado)) throw new ErrorNegocio(`No se puede editar una cotización ${c.estado}`);
+    if (!EDITABLES.includes(c.estado)) throw new ErrorNegocio(`No se puede editar una cotización ${c.estado}`);
     const cambios = {};
     if ("cliente_id" in b || "cliente" in b || "tipo_precio" in b) {
       const { codigo_cliente, ...cli } = await datosCliente({ cliente_id: c.cliente_id, cliente: c.cliente, ...b }, t);
       Object.assign(cambios, cli);
       // Si cambia el cliente y no se indicó otro ID, toma el del cliente nuevo
-      if (cli.cliente_id !== c.cliente_id && !("id_solicitud" in b) && codigo_cliente && codigo_cliente !== "CG") cambios.id_solicitud = codigo_cliente;
+      if (cli.cliente_id !== c.cliente_id && !("id_solicitud" in b) && codigo_cliente && codigo_cliente !== "P-001") cambios.id_solicitud = codigo_cliente;
     }
     if (b.id_solicitud !== undefined) cambios.id_solicitud = String(b.id_solicitud || "").trim() || null;
     if (b.plazo_entrega !== undefined) cambios.plazo_entrega = String(b.plazo_entrega || "").trim() || null;
@@ -263,7 +270,14 @@ const actualizarCotizacion = handler(async (req, res) => {
       cambios.validez_dias = Number(b.validez_dias);
       cambios.fecha_validez = sumarDias(c.fecha || hoyISO(), b.validez_dias);
     }
-    if (b.estado && ["borrador", "cotizacion"].includes(b.estado)) cambios.estado = b.estado;
+    if (b.estado && EDITABLES.includes(b.estado)) {
+      cambios.estado = b.estado;
+      // Al enviarla (finalizar) empieza a correr su validez desde hoy
+      if (b.estado === "cotizacion" && c.estado !== "cotizacion") {
+        cambios.fecha = hoyISO();
+        cambios.fecha_validez = sumarDias(hoyISO(), cambios.validez_dias || c.validez_dias || 30);
+      }
+    }
     // Cambiar de empresa le da el número siguiente de la otra empresa
     if (b.empresa && validarEmpresa(b.empresa) !== c.empresa) {
       if (c.anterior) throw new ErrorNegocio("Una cotización anterior no se puede cambiar de empresa");
@@ -327,6 +341,116 @@ const eliminarCotizacion = handler(async (req, res) => {
   res.json({ ok: true, message: "Cotización eliminada" });
 });
 
+// GET /api/cotizaciones/:id/pedido-proveedor
+// Excel para pedir precio a proveedores: las líneas sin costo, con lo que pidió el cliente (sin precios nuestros)
+const descargarPedidoProveedor = async (req, res) => {
+  try {
+    const cot = await Cotizacion.findByPk(req.params.id);
+    if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
+    const ExcelJS = require("exceljs");
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Solicitud de cotización");
+    const emp = datosEmpresa(cot.empresa, await getParametros());
+    const todas = req.query.todas === "1";
+    const lineas = (cot.items || []).filter((i) => todas || !(Number(i.costo) > 0));
+    ws.columns = [{ width: 6 }, { width: 62 }, { width: 11 }, { width: 12 }, { width: 18 }, { width: 18 }, { width: 30 }];
+    ws.addRow([`SOLICITUD DE COTIZACIÓN · ${emp.nombre || (cot.empresa === "tactics" ? "Tactics Inversiones" : "Inversiones Kenott")}`]).font = { bold: true, size: 13 };
+    ws.addRow([`Referencia: ${idCotizacion(cot)}${cot.lugar_entrega ? ` · Entrega en ${cot.lugar_entrega}` : ""} · Fecha ${hoyISO().split("-").reverse().join("-")}`]);
+    ws.addRow(["Por favor indicar precio unitario NETO (sin IVA), marca y plazo de entrega."]);
+    ws.addRow([]);
+    const h = ws.addRow(["N°", "Descripción", "Cantidad", "Unidad", "Precio unit. neto", "Marca", "Observación / plazo"]);
+    h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF26747B" } }; c.border = { bottom: { style: "thin" } }; });
+    lineas.forEach((i, k) => {
+      const r = ws.addRow([k + 1, i.descripcion_cliente || i.nombre, Number(i.cantidad), i.unidad || "", null, "", ""]);
+      r.getCell(2).alignment = { wrapText: true, vertical: "top" };
+      r.getCell(5).numFmt = '"$"#,##0';
+      r.eachCell({ includeEmpty: true }, (c, n) => { if (n <= 7) c.border = { bottom: { style: "hair", color: { argb: "FFBBBBBB" } } }; });
+    });
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="Pedido_cotizacion_${idCotizacion(cot)}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) {
+    console.error(e);
+    if (!res.headersSent) res.status(500).json({ ok: false, error: "No se pudo generar el Excel" });
+  }
+};
+
+// POST /api/cotizaciones/:id/leer-proveedor   (multipart: archivo)
+// Lee la cotización del proveedor y propone, para cada línea de nuestra cotización, el precio que corresponde.
+const leerProveedor = handler(async (req, res) => {
+  const cot = await Cotizacion.findByPk(req.params.id);
+  if (!cot) throw new ErrorNegocio("Cotización no encontrada", 404);
+  if (!req.file) throw new ErrorNegocio("Adjunta la cotización del proveedor");
+  const doc = await ia.extraerDocumentoProveedor(req.file, firma(req));
+  // Se calza cada línea del proveedor contra las líneas de esta cotización (no contra todo el catálogo)
+  const items = cot.items || [];
+  const indice = ia.crearIndice(items.map((i, k) => ({ id: k + 1, nombre: `${i.descripcion_cliente || ""} ${i.nombre || ""}`.trim(), unidad: i.unidad })));
+  const calzadas = await ia.calzarLineas(doc.lineas, indice, { usuario: firma(req), tipo: "cotizacion_proveedor", archivo: req.file.originalname });
+  const RANGO = { exacto: 0, equivalente: 1, parecido: 2 };
+  const elegidas = new Set();
+  const propuesta = items.map((i, k) => {
+    const l = calzadas.filter((c) => c.producto_id === k + 1 && c.calce !== "sin_producto" && !elegidas.has(c))
+      .sort((a, b2) => (RANGO[a.calce] ?? 3) - (RANGO[b2.calce] ?? 3))[0];
+    if (l) elegidas.add(l);
+    return {
+      idx: k, descripcion: i.descripcion_cliente || i.nombre, cantidad: i.cantidad, unidad: i.unidad, costo_actual: Number(i.costo) || 0,
+      producto: i.producto_id ? `${i.codigo} · ${i.nombre}` : null,
+      proveedor_linea: l ? { descripcion: l.descripcion, precio_neto: l.precio_neto, marca: l.marca, unidad: l.unidad, calce: l.calce, nota: l.nota } : null,
+    };
+  });
+  const usadas = new Set([...elegidas].map((c) => c.descripcion));
+  res.json({ ok: true, data: { encabezado: doc.encabezado, control: doc.control, archivo: req.file.originalname, propuesta, sin_usar: doc.lineas.filter((l) => !usadas.has(l.descripcion)).map((l) => ({ descripcion: l.descripcion, precio_neto: l.precio_neto })) } });
+});
+
+// POST /api/cotizaciones/:id/aplicar-proveedor
+// { proveedor, documento, fecha, lineas: [{ idx, precio, descripcion_proveedor, marca }] }
+// Guarda el precio en el catálogo (historial del proveedor; las líneas que no estaban en catálogo se crean como
+// producto nuevo en POR CLASIFICAR) y actualiza el costo y el precio de venta de esas líneas. Vuelve a "En ejecución".
+const aplicarProveedor = handler(async (req, res) => {
+  const b = req.body || {};
+  const proveedor = normProv(b.proveedor);
+  if (!proveedor) throw new ErrorNegocio("Indica el proveedor");
+  const lineas = (b.lineas || []).filter((l) => Number(l.precio) > 0);
+  if (!lineas.length) throw new ErrorNegocio("No hay precios para aplicar");
+  const cot = await sequelize.transaction(async (t) => {
+    const c = await Cotizacion.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!c) throw new ErrorNegocio("Cotización no encontrada", 404);
+    if (!EDITABLES.includes(c.estado)) throw new ErrorNegocio(`No se puede modificar una cotización ${c.estado}`);
+    let ficha = await Proveedor.findOne({ where: sequelize.where(sequelize.fn("upper", sequelize.col("nombre")), proveedor), transaction: t });
+    if (!ficha) ficha = await Proveedor.create({ nombre: proveedor, tipo: "proveedor" }, { transaction: t });
+    const origen = await origenDe(ficha.nombre, t);
+    const params = await getParametros(t);
+    const items = (c.items || []).map((i) => ({ ...i }));
+    let siguiente = (Number(await Producto.max("codigo", { transaction: t })) || 0) + 1;
+    for (const l of lineas) {
+      const it = items[Number(l.idx)];
+      if (!it) continue;
+      const precio = Math.round(Number(l.precio));
+      let p = it.producto_id ? await Producto.findByPk(it.producto_id, { transaction: t, lock: t.LOCK.UPDATE }) : null;
+      if (!p) {
+        p = await Producto.create({ codigo: siguiente++, nombre: String(it.descripcion_cliente || it.nombre).trim().toUpperCase().slice(0, 250), categoria: "POR CLASIFICAR", unidad: String(it.unidad || "UNIDAD").toUpperCase() }, { transaction: t });
+        await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "creado", despues: p.nombre, motivo: `Desde cotización ${idCotizacion(c)} (precio de ${ficha.nombre})` }, t);
+      }
+      await PrecioProveedor.create({
+        producto_id: p.id, proveedor: ficha.nombre, precio, fecha: b.fecha || new Date(), documento: b.documento || null,
+        descripcion_proveedor: l.descripcion_proveedor || null, marca: l.marca || null, unidad: it.unidad || null, cantidad: it.cantidad || null,
+        origen, creado_por: firma(req),
+      }, { transaction: t });
+      await recalcular(p, { t, usuario: firma(req), motivo: `Cotización ${ficha.nombre} ${b.documento || ""} para ${idCotizacion(c)}`.trim() });
+      Object.assign(it, {
+        producto_id: p.id, codigo: p.codigo, nombre: p.nombre, caso: it.caso === "nuevo" ? "mismo" : it.caso,
+        costo: precio, proveedor: ficha.nombre, fecha_precio: b.fecha || hoyISO(),
+        precio: precioVenta(precio, c.tipo_precio, params),
+      });
+    }
+    await c.update({ items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad), 0), estado: c.estado === "espera_proveedor" ? "borrador" : c.estado }, { transaction: t });
+    return c;
+  });
+  res.json({ ok: true, data: vista(req)(cot) });
+});
+
 // GET /api/cotizaciones/:id/excel   (plantilla de la empresa, sin costos)
 const limpioArchivo = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s.-]/g, "").trim().slice(0, 60) || "cliente";
 const nombreArchivo = (cot, ext) => `${idCotizacion(cot)}${cot.anterior ? "_anterior" : ""}-${limpioArchivo(cot.cliente)}.${ext}`;
@@ -378,6 +502,7 @@ const descargarPdf = async (req, res) => {
 };
 
 module.exports = {
+  descargarPedidoProveedor, leerProveedor, aplicarProveedor,
   registrarSeguimiento, cantidadPorSeguir, wherePorSeguir,
   descargarPdf, descargarInterna,
   getCotizaciones, getCotizacion, crearCotizacion, actualizarCotizacion, cambiarEstado, eliminarCotizacion, descargarExcel,

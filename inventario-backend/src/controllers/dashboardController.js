@@ -185,7 +185,7 @@ const getDashboard = handler(async (req, res) => {
   })).filter((l) => visible(l, params) && [hoyStr, manana].includes(diaChile(l.fecha_cierre))) : [];
   for (const l of porCerrar) {
     const esHoy = diaChile(l.fecha_cierre) === hoyStr;
-    tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, cierre: l.fecha_cierre, detalle: `${l.organismo || ""} · ${l.codigo} · cierra ${esHoy ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}${l.monto_estimado ? ` · ${"$" + n(l.monto_estimado).toLocaleString("es-CL")}` : ""}`, vista: "licitaciones", id: l.codigo, boton: "Ver oportunidad" });
+    tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, cierre: l.fecha_cierre, detalle: `${l.organismo || ""} · ${l.codigo} · cierra ${esHoy ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}`, monto: l.monto_estimado ? n(l.monto_estimado) : null, monto_label: "monto", descartar: l.codigo, vista: "licitaciones", id: l.codigo, boton: "Ver oportunidad" });
   }
   const yaEnTarea = new Set(porCerrar.map((l) => l.codigo));
   const otrasNuevas = licNuevas.filter((l) => !yaEnTarea.has(l.codigo)).length;
@@ -248,8 +248,7 @@ const getDashboard = handler(async (req, res) => {
     for (const o of ocBorrador.filter((o) => dias(o.fecha) <= -2).slice(0, 8)) tareas.push({ tipo: "recibir", urgencia: 1, texto: `¿Llegó el pedido ${o.numero} de ${o.proveedor_nombre}?`, detalle: `Pedido ${cuando(dias(o.fecha))}: márcalo recibido cuando llegue`, vista: "compras", id: o.id, boton: "Ver pedido" });
   }
   // Llamar a clientes
-  for (const c of comercial ? porSeguir.slice(0, 8) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `Llamar a ${c.cliente || "cliente"} por la cotización N° ${c.numero}`, detalle: `${c.nombre_cotizacion || ""} · ${c.ultimo_contacto ? `último contacto ${cuando(dias(c.ultimo_contacto))}` : `enviada ${cuando(dias(c.fecha))}, sin respuesta`}`, vista: "cotizaciones-seguir", boton: "Ver" });
-  for (const c of comercial ? cotPorVencer.filter((c) => !porSeguir.some((p) => p.id === c.id)) : []) tareas.push({ tipo: "llamar", urgencia: 1, texto: `La cotización N° ${c.numero} (${c.cliente || "sin cliente"}) vence ${cuando(dias(c.fecha_validez))}`, detalle: "Llama al cliente antes de que venza", vista: "cotizaciones", boton: "Ver" });
+  // Las llamadas por cotizaciones enviadas ya no van como tarea: las enviadas se revisan en su propio recuadro (Aceptada / Rechazada)
   // Departamento de cada tarea (cada pestaña muestra las suyas)
   const DEPTO = { avisar_cobro: "comercial", recordar_cobro: "comercial", moroso: "finanzas", iva: "finanzas", margen: "finanzas", oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
   tareas.forEach((t) => { t.depto = DEPTO[t.tipo] || "comercial"; });
@@ -270,13 +269,18 @@ const getDashboard = handler(async (req, res) => {
   // Procesos de Mercado Público que cerraron en los últimos 7 días sin que se cotizaran (informativo, ya no se ejecutan)
   const [cerradasSinPostular] = await sequelize.query(`SELECT l.codigo, l.nombre, l.organismo, l.fecha_cierre, l.monto_estimado, l.fuente, l.estado_interno
     FROM licitaciones l
-    WHERE l.fecha_cierre < NOW() AND l.fecha_cierre >= NOW() - INTERVAL '7 days' AND l.estado_interno <> 'descartada'
+    WHERE l.fecha_cierre < NOW() AND l.fecha_cierre >= NOW() - INTERVAL '3 days' AND l.estado_interno <> 'descartada'
       AND COALESCE(l.relevancia, 100) >= :rel
       AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo))
     ORDER BY l.fecha_cierre DESC LIMIT 30`, { replacements: { rel: Number(params.mp_relevancia_minima) || 0 } });
 
+  // Cotizaciones enviadas sin respuesta: se revisan y se marcan Aceptada o Rechazada
+  const enviadas = comercial ? await Cotizacion.findAll({ where: { estado: "cotizacion" }, order: [["fecha", "DESC"], ["id", "DESC"]], limit: 40,
+    attributes: ["id", "numero", "empresa", "anterior", "cliente", "id_solicitud", "nombre_cotizacion", "fecha", "fecha_validez", "total", "creado_por"] }) : [];
+
   const data = {
     tareas,
+    enviadas: enviadas.map((c) => ({ id: c.id, numero: c.numero, empresa: c.empresa, anterior: c.anterior, cliente: c.cliente, id_solicitud: c.id_solicitud, nombre: c.nombre_cotizacion, fecha: c.fecha, vence: c.fecha_validez, total: n(c.total), por: c.creado_por })),
     mp_cerradas: cerradasSinPostular.map((l) => ({ ...l, monto_estimado: l.monto_estimado ? n(l.monto_estimado) : null })),
     adjudicado,
     generado: new Date().toISOString(),

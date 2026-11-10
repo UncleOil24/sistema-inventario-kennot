@@ -65,6 +65,8 @@ const getProductos = handler(async (req, res) => {
   if (revision === "sin_precio") y.push({ [Op.or]: [{ precio_compra: null }, { precio_compra: { [Op.lte]: 0 } }] });
   if (revision === "aviso") y.push(literal(SQL_AVISO));
   if (revision === "confirmados") where.confirmado = true;
+  // Agregados en el sistema (no vienen de la planilla) y todavía sin precio: para cotizarlos
+  if (revision === "nuevos_sin_precio") { where.en_planilla = false; y.push({ [Op.or]: [{ precio_compra: null }, { precio_compra: { [Op.lte]: 0 } }] }); }
   // M12: productos genéricos (candados, cables...) que no indican medida
   if (revision === "sin_medida") y.push(literal(SQL_SIN_MEDIDA));
   if (revision === "sin_confirmar") y.push({ confirmado: false, precio_compra: { [Op.gt]: 0 } });
@@ -365,3 +367,85 @@ module.exports = {
   getProductos, getCategorias, getResumen, getProducto, crearProducto, actualizarProducto, eliminarProducto,
   getPrecios, agregarPrecio, descartarPrecio, confirmarPrecio, desconfirmarPrecio, vista,
 };
+
+// --- Exportaciones del catálogo -----------------------------------------------------------------
+// GET /api/productos/exportar/para-cotizar   -> Excel con los productos nuevos sin precio (para pedir precio)
+// GET /api/productos/exportar/consolidado?desde=AAAA-MM-DD&solo_cambios=1
+//   -> el catálogo en el formato del LISTADO_CONSOLIDADO (se vuelve a subir con Importar planilla), con la
+//      columna CAMBIO: Nuevo sin precio / Nuevo con precio / Precio actualizado (desde la fecha indicada o la última descarga)
+const ExcelJS = require("exceljs");
+const { setParametros } = require("../services/parametros");
+const fechaCL = (d) => (d ? String(d).slice(0, 10).split("-").reverse().join("-") : "");
+const enviarExcel = async (res, wb, nombre) => {
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);
+  await wb.xlsx.write(res);
+  res.end();
+};
+const encabezado = (ws, titulos) => {
+  const h = ws.addRow(titulos);
+  h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF26747B" } }; });
+  ws.views = [{ state: "frozen", ySplit: ws.rowCount }];
+};
+
+const exportarParaCotizar = async (req, res) => {
+  try {
+    const productos = await Producto.findAll({
+      where: { activo: true, en_planilla: false, [Op.or]: [{ precio_compra: null }, { precio_compra: { [Op.lte]: 0 } }] },
+      order: [["categoria", "ASC"], ["nombre", "ASC"]],
+    });
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Para cotizar");
+    ws.columns = [{ width: 8 }, { width: 20 }, { width: 60 }, { width: 11 }, { width: 18 }, { width: 24 }, { width: 18 }, { width: 14 }];
+    encabezado(ws, ["N°", "CATEGORÍA", "DESCRIPCIÓN", "UNIDAD", "PRECIO REAL COMPRA", "PROVEEDOR", "CONTACTO", "FECHA ACT."]);
+    for (const p of productos) ws.addRow([p.codigo, p.categoria, p.nombre, p.unidad, null, "", "", ""]).getCell(5).numFmt = '"$"#,##0';
+    ws.addRow([]);
+    ws.addRow(["", "", "Completa precio NETO, proveedor y fecha. Para cargarlos, copia estas filas en la hoja LISTADO CONSOLIDADO del consolidado o súbelo en Catálogo → Precios → Importar planilla (la hoja se puede renombrar a LISTADO CONSOLIDADO)."]).font = { italic: true, color: { argb: "FF6F7C8D" } };
+    await enviarExcel(res, wb, `Productos_nuevos_para_cotizar_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (e) { console.error(e); if (!res.headersSent) res.status(500).json({ ok: false, error: "No se pudo generar el Excel" }); }
+};
+
+const exportarConsolidado = async (req, res) => {
+  try {
+    const params = await getParametros();
+    const desde = /^\d{4}-\d{2}-\d{2}$/.test(req.query.desde || "") ? req.query.desde : (params.catalogo_ultima_descarga || "").slice(0, 10) || null;
+    const productos = await Producto.findAll({ where: { activo: true }, order: [["categoria", "ASC"], ["nombre", "ASC"]] });
+    const cambio = (p) => {
+      const conPrecio = Number(p.precio_compra) > 0;
+      const creado = p.createdAt ? p.createdAt.toISOString().slice(0, 10) : "";
+      if (!p.en_planilla && (!desde || creado >= desde)) return conPrecio ? "Nuevo con precio" : "Nuevo sin precio";
+      if (!p.en_planilla) return conPrecio ? "Nuevo con precio" : "Nuevo sin precio";
+      if (desde && conPrecio && p.fecha_precio && String(p.fecha_precio) >= desde) return "Precio actualizado";
+      return "";
+    };
+    const lista = productos.map((p) => ({ p, c: cambio(p) })).filter((x) => req.query.solo_cambios !== "1" || x.c);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("LISTADO CONSOLIDADO");
+    ws.columns = [8, 20, 60, 11, 16, 24, 22, 13, 28, 22, 14, 13, 22, 14, 13, 20].map((width) => ({ width }));
+    encabezado(ws, ["N°", "CATEGORÍA", "DESCRIPCIÓN", "UNIDAD", "PRECIO REAL COMPRA", "PROVEEDOR", "CONTACTO", "FECHA ACT.", "REVISAR",
+      "PROVEEDOR OPCIÓN 2", "PRECIO OPCIÓN 2", "FECHA OPCIÓN 2", "PROVEEDOR OPCIÓN 3", "PRECIO OPCIÓN 3", "FECHA OPCIÓN 3", "CAMBIO"]);
+    const COLOR = { "Nuevo sin precio": "FFFDE2C4", "Nuevo con precio": "FFD8EFDF", "Precio actualizado": "FFFFF3B0" };
+    for (const { p, c } of lista) {
+      const r = ws.addRow([
+        p.codigo, p.categoria, p.nombre, p.unidad, Number(p.precio_compra) > 0 ? Math.round(Number(p.precio_compra)) : null,
+        p.proveedor || "", p.contacto || "", fechaCL(p.fecha_precio), p.confirmado ? "OK CONFIRMADO" : (p.revisar || ""),
+        p.opcion2_proveedor || "", p.opcion2_precio ? Math.round(Number(p.opcion2_precio)) : null, fechaCL(p.opcion2_fecha),
+        p.opcion3_proveedor || "", p.opcion3_precio ? Math.round(Number(p.opcion3_precio)) : null, fechaCL(p.opcion3_fecha), c,
+      ]);
+      [5, 11, 14].forEach((k) => { r.getCell(k).numFmt = '"$"#,##0'; });
+      if (c) r.getCell(16).fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[c] } };
+    }
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 16 } };
+    const resumen = wb.addWorksheet("RESUMEN");
+    const cuenta = (t) => lista.filter((x) => x.c === t).length;
+    [["Descargado", new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })], ["Cambios desde", desde ? fechaCL(desde) : "siempre (primera descarga)"],
+      ["Productos", lista.length], ["Nuevos sin precio", cuenta("Nuevo sin precio")], ["Nuevos con precio", cuenta("Nuevo con precio")], ["Precio actualizado", cuenta("Precio actualizado")],
+      [], ["Para volver a cargarlo: Catálogo → Precios → Importar planilla. La columna CAMBIO es solo informativa."]].forEach((f) => resumen.addRow(f));
+    resumen.getColumn(1).width = 26; resumen.getColumn(2).width = 40;
+    await setParametros({ catalogo_ultima_descarga: new Date().toISOString() });
+    await enviarExcel(res, wb, `LISTADO_CONSOLIDADO_sistema_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (e) { console.error(e); if (!res.headersSent) res.status(500).json({ ok: false, error: "No se pudo generar el consolidado" }); }
+};
+module.exports.exportarParaCotizar = exportarParaCotizar;
+module.exports.exportarConsolidado = exportarConsolidado;
