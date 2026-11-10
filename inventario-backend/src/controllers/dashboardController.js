@@ -240,6 +240,12 @@ const getDashboard = handler(async (req, res) => {
       for (const d of pp.documentos.filter((x) => x.dias_vencida <= 0 && x.dias_vencida >= -avisoProv).slice(0, 8)) {
         tareas.push({ tipo: "pagar", urgencia: 1, texto: `Vence el pago a ${d.proveedor}${d.factura ? ` (factura ${d.factura})` : ""}`, detalle: `${pesosTxt(d.saldo)} · vence ${cuando(-d.dias_vencida)}${d.pronto_pago ? ` · pagando antes del ${new Date(`${d.pronto_pago.hasta}T12:00:00`).toLocaleDateString("es-CL")} ahorras ${pesosTxt(d.pronto_pago.ahorro)}` : ""}`, vista: "por-pagar", boton: "Ver" });
       }
+      // Control: pasos deshechos y facturas quitadas en los últimos 7 días
+      const [correcciones] = await sequelize.query(`SELECT h.venta_id, h.tipo, h.texto, h.motivo, h.por, h."createdAt", v.numero FROM historial_venta h
+        JOIN ventas v ON v.id = h.venta_id WHERE h.tipo IN ('retroceso', 'factura_quitada') AND h."createdAt" >= NOW() - INTERVAL '7 days' ORDER BY h."createdAt" DESC LIMIT 8`);
+      for (const h of correcciones) {
+        tareas.push({ tipo: "correccion", urgencia: 1, texto: `${h.tipo === "retroceso" ? "Paso deshecho" : "Factura quitada"} en ${h.numero}`, detalle: `${h.texto} · ${h.por || ""} · motivo: ${h.motivo || "—"}`, vista: "ventas", id: h.venta_id, boton: "Ver venta" });
+      }
       const semana = new Date(Date.now() - 7 * 864e5).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
       for (const v of cob.margen_bajo.filter((x) => String(x.fecha) >= semana).slice(0, 5)) {
         tareas.push({ tipo: "margen", urgencia: 1, texto: `Venta ${v.numero} con margen ${String(v.margen_pct).replace(".", ",")}%`, detalle: `${v.cliente || ""} · bajo el mínimo de ${String(cob.margen_minimo).replace(".", ",")}%`, vista: "ventas", id: v.id, boton: "Ver venta" });
@@ -262,7 +268,7 @@ const getDashboard = handler(async (req, res) => {
   // Llamar a clientes
   // Las llamadas por cotizaciones enviadas ya no van como tarea: las enviadas se revisan en su propio recuadro (Aceptada / Rechazada)
   // Departamento de cada tarea (cada pestaña muestra las suyas)
-  const DEPTO = { avisar_cobro: "comercial", recordar_cobro: "comercial", moroso: "finanzas", iva: "finanzas", margen: "finanzas", oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas" };
+  const DEPTO = { avisar_cobro: "comercial", recordar_cobro: "comercial", moroso: "finanzas", iva: "finanzas", margen: "finanzas", oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas", correccion: "finanzas" };
   tareas.forEach((t) => { t.depto = DEPTO[t.tipo] || "comercial"; });
   tareas.sort((a, b) => a.urgencia - b.urgencia);
 

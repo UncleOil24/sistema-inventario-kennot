@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar } from "./ui";
 import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
-import { AccionesVenta, PanelFacturas, conConfirmacion } from "./Recorrido";
+import { AccionesVenta, PanelFacturas, HistorialVenta, conConfirmacion } from "./Recorrido";
 
 // Períodos para filtrar (fechas en hora local de Chile)
 const PERIODOS = [["todo", "Todas las fechas"], ["mes", "Este mes"], ["mes_pasado", "Mes pasado"], ["anio", "Este año"]];
@@ -303,6 +303,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
           </div>
         </div>
       )}
+      <HistorialVenta venta={venta} />
       {(modo !== "operativo" || venta.facturas?.length > 0) && <PanelFacturas venta={venta} puedeVender={editaDatos || (puedeVender && modo === "finanzas" && esAdmin)} notify={notify} onCambio={onCambio} />}
       <div className="table-wrap">
         <table className="table table-compacta">

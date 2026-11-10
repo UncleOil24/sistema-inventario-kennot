@@ -10,6 +10,7 @@ const OrdenCompra = require("../models/OrdenCompra");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
 const Factura = require("../models/Factura");
+const HistorialVenta = require("../models/HistorialVenta");
 const { asignarUnidadCliente } = require("../services/clientesMP");
 const { ETAPAS } = require("../models/Venta");
 const {
@@ -192,7 +193,8 @@ const getVenta = handler(async (req, res) => {
   if (extra.resumen && !esAdmin(req)) extra = { ...extra, resumen: undefined, gastos: [] };
   const facturas = await Factura.findAll({ where: { venta_id: venta.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
   const ocs = await OrdenCompra.findAll({ where: { venta_id: venta.id, estado: { [Op.ne]: "anulada" } }, attributes: ["id", "numero", "proveedor_nombre", "estado"], raw: true });
-  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, facturas, compras: { ordenes: ocs.length, recibidas: ocs.filter((o) => o.estado === "recibida").length, detalle: ocs }, ...extra } });
+  const historial = await HistorialVenta.findAll({ where: { venta_id: venta.id }, order: [["createdAt", "ASC"], ["id", "ASC"]], attributes: ["id", "tipo", "texto", "motivo", "por", "createdAt"], raw: true });
+  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, facturas, historial, compras: { ordenes: ocs.length, recibidas: ocs.filter((o) => o.estado === "recibida").length, detalle: ocs }, ...extra } });
 });
 
 // POST /api/ventas   (venta directa, sin cotización)
@@ -282,6 +284,7 @@ const anularVenta = handler(async (req, res) => {
     if (r.bloqueos.length) throw new ErrorNegocio(`No se puede anular todavía: ${r.bloqueos.map((b) => b.que).join(" · ")}`);
     await OrdenCompra.update({ estado: "anulada" }, { where: { venta_id: v.id, estado: "borrador" }, transaction: t });
     await v.update({ estado: "anulada", motivo_anulacion: motivo.slice(0, 255), anulada_por: firma(req), anulada_fecha: new Date() }, { transaction: t });
+    await HistorialVenta.anotar(v, "anulacion", "Anuló la venta", req, t, motivo);
     if (v.cotizacion_id) {
       await Cotizacion.update({ estado: "cotizacion", venta_id: null }, { where: { id: v.cotizacion_id }, transaction: t });
     }
@@ -346,6 +349,8 @@ const actualizarDatos = handler(async (req, res) => {
   } else if (cambios.id_solicitud && cambios.id_solicitud !== v.id_solicitud) {
     const unidad = cambios.id_solicitud.split("-")[0].trim();
     if (/^\d+$/.test(unidad)) cliente = await Cliente.findOne({ where: { codigo: unidad } });
+  } else if (cambios.orden_compra_cliente && /^\d+-\d+-[A-Za-z]/.test(cambios.orden_compra_cliente) && !(v.id_solicitud || "").match(/^\d/)) {
+    cliente = await Cliente.findOne({ where: { codigo: cambios.orden_compra_cliente.split("-")[0] } });
   }
   if (cliente && cliente.id !== v.cliente_id) {
     const general = ["P-001", "CG"].includes(cliente.codigo);
@@ -498,12 +503,14 @@ const sumarDesde = (iso, dias) => {
   const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + Number(dias || 0))).toISOString().slice(0, 10);
 };
-const conVenta = (fn) => handler(async (req, res) => {
+// accion: texto (o función) que queda en el historial de la venta
+const conVenta = (fn, accion, tipo = "paso") => handler(async (req, res) => {
   const venta = await sequelize.transaction(async (t) => {
     const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
     if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
     await fn(v, req, t);
+    if (accion) await HistorialVenta.anotar(v, tipo, typeof accion === "function" ? accion(v, req) : accion, req, t);
     return v;
   });
   res.json({ ok: true, data: verVenta(req, venta) });
@@ -516,7 +523,7 @@ const exigirEtapa = (v, ...etapas) => {
 const aceptarVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "registrada");
   await v.update({ etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: firma(req) }, { transaction: t });
-});
+}, "Aceptó la venta");
 
 // POST /api/ventas/:id/confirmar   (Operativo: llegaron los productos -> lista para facturar y despachar)
 // { forzar: true } para confirmar aunque haya órdenes de compra sin recibir (p.ej. se retiró en el local)
@@ -531,7 +538,7 @@ const confirmarVenta = conVenta(async (v, req, t) => {
     etapa: "lista", lista_fecha: new Date(), lista_por: firma(req),
     ...(v.aceptada_fecha ? {} : { aceptada_fecha: new Date(), aceptada_por: firma(req) }),
   }, { transaction: t });
-});
+}, "Confirmó productos listos");
 
 // Para despachar (o entregar sin despacho, retiro en local) debe haber guía de despacho o al menos una factura:
 // así no se salta la facturación (decisión de gerencia, 10-nov-2026)
@@ -546,7 +553,7 @@ const despacharVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "lista");
   await exigirDocumentoDespacho(v, req.body?.guia, t);
   await v.update({ etapa: "despachada", despacho_fecha: req.body?.fecha || hoy(), guia_despacho: String(req.body?.guia || "").trim() || null, despacho_por: firma(req) }, { transaction: t });
-});
+}, (v) => `Despachó${v.guia_despacho ? ` · guía ${v.guia_despacho}` : ""}`);
 
 // POST /api/ventas/:id/entregar   { fecha, recibido_por }
 const entregarVenta = conVenta(async (v, req, t) => {
@@ -559,12 +566,19 @@ const entregarVenta = conVenta(async (v, req, t) => {
     ...(v.base_vencimiento === "recepcion" && v.plazo_pago_dias != null ? { fecha_vencimiento: sumarDesde(req.body?.fecha || hoy(), v.plazo_pago_dias) } : {}),
     ...(v.despacho_fecha ? {} : { despacho_fecha: req.body?.fecha || hoy(), despacho_por: firma(req) }),
   }, { transaction: t });
-});
+}, (v) => `Marcó entregada${v.recibido_por ? ` · recibió ${v.recibido_por}` : ""}`);
 
 // POST /api/ventas/:id/retroceder   (gerencia: deshace el último paso si se marcó por error)
+const NOMBRE_ETAPA = { registrada: "Registrada", aceptada: "En compra", lista: "Productos listos", despachada: "Despachada", entregada: "Entregada" };
 const retrocederEtapa = conVenta(async (v, req, t) => {
   const i = ETAPAS.indexOf(v.etapa);
   if (i <= 0) throw new ErrorNegocio("La venta ya está en la primera etapa");
+  const motivo = String(req.body?.motivo || "").trim();
+  if (!motivo) throw new ErrorNegocio("Indica el motivo para deshacer el paso");
+  if (v.etapa === "lista" && Number(v.monto_facturado) > 0) throw new ErrorNegocio("La venta ya tiene factura: primero Comercial debe quitar la factura (con su motivo) para volver a En compra");
+  if (v.etapa === "entregada" && Number(v.monto_pagado) > 0) throw new ErrorNegocio("La venta ya tiene cobros registrados: no se puede deshacer la entrega");
+  const extra = v.etapa === "despachada" && v.guia_despacho ? ` (tenía guía ${v.guia_despacho} del ${v.despacho_fecha || "—"})` : v.etapa === "entregada" && v.recibido_por ? ` (recibió ${v.recibido_por})` : "";
+  await HistorialVenta.anotar(v, "retroceso", `Deshizo "${NOMBRE_ETAPA[v.etapa]}" → vuelve a "${NOMBRE_ETAPA[ETAPAS[i - 1]]}"${extra}`, req, t, motivo);
   const limpiar = {
     aceptada: { aceptada_fecha: null, aceptada_por: null },
     lista: { lista_fecha: null, lista_por: null },
@@ -591,7 +605,7 @@ const cerrarFacturacion = conVenta(async (v, req, t) => {
   if (!abrir && !Number(v.monto_facturado)) throw new ErrorNegocio("Primero registra la factura");
   await v.update({ factura_cerrada: !abrir }, { transaction: t });
   await recalcularFacturas(v, t);
-});
+}, (v, req) => (req.body?.abrir ? "Reabrió la facturación" : `Dio por facturada (${Math.round(Number(v.monto_facturado)).toLocaleString("es-CL")} de ${Math.round(Number(v.total)).toLocaleString("es-CL")})`), "factura");
 
 const recalcularFacturas = async (v, t) => {
   const facturas = await Factura.findAll({ where: { venta_id: v.id }, order: [["fecha", "ASC"], ["id", "ASC"]], transaction: t });
@@ -622,12 +636,15 @@ const agregarFactura = conVenta(async (v, req, t) => {
   if (monto > falta + 1) throw new ErrorNegocio(`El monto supera lo que falta por facturar ($${falta.toLocaleString("es-CL")})`);
   await Factura.create({ venta_id: v.id, numero, fecha: req.body?.fecha || hoy(), monto, notas: req.body?.notas || null, creado_por: firma(req) }, { transaction: t });
   await recalcularFacturas(v, t);
-});
+}, (v, req) => `Registró factura ${String(req.body?.numero || "").trim()}`, "factura");
 
 // DELETE /api/ventas/:id/facturas/:facturaId   (se ingresó por error)
 const quitarFactura = conVenta(async (v, req, t) => {
+  const motivo = String(req.body?.motivo || req.query?.motivo || "").trim();
+  if (!motivo) throw new ErrorNegocio("Indica el motivo para quitar la factura");
   const f = await Factura.findOne({ where: { id: req.params.facturaId, venta_id: v.id }, transaction: t });
   if (!f) throw new ErrorNegocio("Factura no encontrada", 404);
+  await HistorialVenta.anotar(v, "factura_quitada", `Quitó la factura ${f.numero} ($${Math.round(Number(f.monto)).toLocaleString("es-CL")})`, req, t, motivo);
   await f.destroy({ transaction: t });
   await recalcularFacturas(v, t);
 });

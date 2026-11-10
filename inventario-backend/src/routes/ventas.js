@@ -30,7 +30,7 @@ router.post("/:id/sii/registrar", permite("comercial", "operativo"), sii.registr
 router.get("/:id/documentos/:docId", sii.descargar);
 router.delete("/:id/facturas/:facturaId", comercial, c.quitarFactura);
 router.post("/:id/despachar", operativo, c.despacharVenta);
-router.post("/:id/entregar", permite("operativo", "comercial"), c.entregarVenta);
-router.post("/:id/retroceder", soloAdmin, c.retrocederEtapa);
+router.post("/:id/entregar", operativo, c.entregarVenta);
+router.post("/:id/retroceder", operativo, c.retrocederEtapa);
 
 module.exports = router;
