@@ -15,6 +15,7 @@ const { Op } = require("sequelize");
 const Licitacion = require("../models/Licitacion");
 const Producto = require("../models/Producto");
 const { getParametros, setParametros } = require("./parametros");
+const sequelize = require("../../config/database");
 const { ErrorNegocio } = require("./erp");
 const ia = require("./ia");
 
@@ -140,7 +141,7 @@ async function aplicarRelevanciaMinima(params) {
   const min = relevanciaMinima(params);
   const abierta = { [Op.or]: [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }] };
   await Licitacion.update({ estado_interno: "descartada", descarte_auto: true },
-    { where: { estado_interno: "nueva", relevancia: { [Op.lt]: min }, ...abierta } });
+    { where: { estado_interno: "nueva", manual: false, relevancia: { [Op.lt]: min }, ...abierta } });
   const candidatas = await Licitacion.findAll({ where: { estado_interno: "descartada", descarte_auto: true, relevancia: { [Op.gte]: min }, ...abierta } });
   for (const l of candidatas) {
     if (visible(l, params) && !palabraProhibida(l.nombre, params)) await l.update({ estado_interno: "nueva", descarte_auto: false });
@@ -148,14 +149,14 @@ async function aplicarRelevanciaMinima(params) {
 }
 
 // ¿Se muestra en la lista y en el resumen? (los criterios se aplican también a lo que ya estaba guardado)
-const visible = (l, params) => enRegiones(l.region, params) && !organismoExcluido(l, params) && !montoBajo(l, params);
+const visible = (l, params) => !!l.manual || (enRegiones(l.region, params) && !organismoExcluido(l, params) && !montoBajo(l, params));
 
 // Aplica los criterios a un registro ya guardado. Devuelve los cambios (o null si no hay)
 function criterios(l, params) {
   const cambios = {};
   const prio = esPrioridad(l, params);
   if (prio !== l.prioridad) cambios.prioridad = prio;
-  if (l.estado_interno === "nueva" || l.estado_interno === "revisada") {
+  if (!l.manual && (l.estado_interno === "nueva" || l.estado_interno === "revisada")) {
     const prohibida = palabraProhibida(l.nombre, params);
     let motivo = null;
     if (organismoExcluido(l, params)) motivo = "Organismo excluido en Config.";
@@ -421,7 +422,7 @@ async function sincronizar({ onProgreso } = {}) {
 
   // Las que ya cerraron dejan de mostrarse como abiertas; las descartadas solas y cerradas hace un mes se borran
   await Licitacion.update({ estado: "Cerrada" }, { where: { fecha_cierre: { [Op.lt]: new Date() }, estado: { [Op.notIn]: ["Cerrada", "Adjudicada", "Desierta", "Revocada"] } } });
-  await Licitacion.destroy({ where: { descarte_auto: true, estado_interno: "descartada", fecha_cierre: { [Op.lt]: new Date(Date.now() - 30 * 864e5) } } });
+  try { resumen.borradas = await limpiarCerradas(); } catch (e) { console.error("limpieza MP:", e.message); }
   await setParametros({ mp_ultima_sincronizacion: new Date().toISOString() });
   if (errores.length) resumen.avisos = errores;
   return resumen;
@@ -441,11 +442,83 @@ async function cargarDetalle(l) {
   return l;
 }
 
+// --- Limpieza: los procesos cerrados hace más de 3 días que no se cotizaron se borran (decisión de gerencia,
+// 10-nov-2026). Antes se guarda su conteo por día de cierre, para que Producción siga mostrando el mes completo.
+async function limpiarCerradas() {
+  await sequelize.query(`CREATE TABLE IF NOT EXISTS mp_conteo_cerradas (fecha date PRIMARY KEY, cerrados int NOT NULL DEFAULT 0,
+    descartados int NOT NULL DEFAULT 0, sin_postular int NOT NULL DEFAULT 0, compra_agil int NOT NULL DEFAULT 0, licitaciones int NOT NULL DEFAULT 0)`);
+  const [filas] = await sequelize.query(`WITH borradas AS (
+      DELETE FROM licitaciones l WHERE l.fecha_cierre < NOW() - INTERVAL '3 days' AND l.cotizacion_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo))
+      RETURNING fecha_cierre, estado_interno, fuente)
+    INSERT INTO mp_conteo_cerradas AS m (fecha, cerrados, descartados, sin_postular, compra_agil, licitaciones)
+      SELECT (fecha_cierre AT TIME ZONE 'America/Santiago')::date, COUNT(*), COUNT(*) FILTER (WHERE estado_interno = 'descartada'),
+        COUNT(*) FILTER (WHERE estado_interno <> 'descartada'), COUNT(*) FILTER (WHERE fuente = 'compra_agil'), COUNT(*) FILTER (WHERE fuente <> 'compra_agil')
+      FROM borradas GROUP BY 1
+    ON CONFLICT (fecha) DO UPDATE SET cerrados = m.cerrados + EXCLUDED.cerrados, descartados = m.descartados + EXCLUDED.descartados,
+      sin_postular = m.sin_postular + EXCLUDED.sin_postular, compra_agil = m.compra_agil + EXCLUDED.compra_agil, licitaciones = m.licitaciones + EXCLUDED.licitaciones
+    RETURNING cerrados`);
+  return filas.length;
+}
+
+// --- Traer un proceso por su código (el cliente nos envía el ID) ---------------------------------
+// Lo trae aunque no cumpla los filtros y explica por qué no había aparecido en la lista.
+const pesosTxt = (v) => `$${Math.round(Number(v)).toLocaleString("es-CL")}`;
+function motivosNoVisible(l, params, { existia }) {
+  const m = [];
+  const filtros = !enRegiones(l.region, params) || montoBajo(l, params) || organismoExcluido(l, params) || palabraProhibida(l.nombre, params);
+  if (!existia && !filtros) {
+    if (l.fuente === "compra_agil") m.push("No había llegado en las revisiones automáticas (se publicó después de la última revisión o fuera de las regiones revisadas)");
+    else {
+      const palabras = lista(params.mp_palabras);
+      m.push(calzan(l.nombre, palabras).length ? "No había llegado en las revisiones automáticas" : "Es licitación y su nombre no tiene ninguna de las palabras clave de Configuración");
+    }
+  }
+  if (!enRegiones(l.region, params)) m.push(`Su región (${l.region}) no está en Configuración (${params.mp_regiones})`);
+  if (montoBajo(l, params)) m.push(`Monto informado ${pesosTxt(l.monto_estimado)}, menor al mínimo de ${pesosTxt(montoMinimo(params))}`);
+  if (organismoExcluido(l, params)) m.push(`El organismo (${l.organismo}) está excluido en Configuración`);
+  const prohibida = palabraProhibida(l.nombre, params);
+  if (prohibida) m.push(`El nombre contiene una palabra excluida ("${prohibida}")`);
+  if (l.relevancia != null && l.relevancia < relevanciaMinima(params)) m.push(`Calce con el catálogo ${l.relevancia}%, menor al mínimo de ${relevanciaMinima(params)}%`);
+  if (existia && l.estado_interno === "descartada" && !l.descarte_auto) m.push("Alguien lo había descartado");
+  if (l.fecha_cierre && new Date(l.fecha_cierre) < new Date()) m.push(`Ya cerró (${new Date(l.fecha_cierre).toLocaleString("es-CL", { timeZone: "America/Santiago" })})`);
+  return m;
+}
+
+async function traerPorCodigo(codigoBruto) {
+  const codigo = String(codigoBruto || "").trim().toUpperCase();
+  if (!/^\d+-\d+-[A-Z0-9]+$/.test(codigo)) throw Object.assign(new Error("Código inválido. Ej: 2436-1811-COT26 o 1057-25-LE26"), { status: 400 });
+  const params = await getParametros();
+  let l = await Licitacion.findByPk(codigo);
+  const existia = !!l;
+  if (!l) {
+    if (!ticketConfigurado()) throw Object.assign(new Error("Falta configurar MERCADOPUBLICO_TICKET en Render"), { status: 503 });
+    let datos = null;
+    if (/-COT\d*$/.test(codigo)) {
+      const p = await pedirCA(`/${encodeURIComponent(codigo)}`);
+      if (p) datos = { codigo, ...desdeDetalleCA(p) };
+    } else {
+      const d = await pedir({ codigo });
+      const x = (d.Listado || [])[0];
+      if (x) datos = { codigo, fuente: "licitacion", ...desdeDetalle(x) };
+    }
+    if (!datos) throw Object.assign(new Error(`Mercado Público no encontró el proceso ${codigo}`), { status: 404 });
+    l = await Licitacion.create({ ...datos, prioridad: esPrioridad(datos, params), palabras: calzan(datos.nombre, lista(params.mp_palabras)).join(", ") || null });
+  }
+  const motivos = motivosNoVisible(l, params, { existia });
+  // Desde ahora se muestra y no se descarta sola
+  const cambios = { manual: true };
+  if (l.estado_interno === "descartada" && l.descarte_auto) Object.assign(cambios, { estado_interno: "nueva", descarte_auto: false });
+  await l.update(cambios);
+  if (!l.detalle_cargado) { try { await cargarDetalle(l); } catch (e) { console.error("detalle", codigo, e.message); } }
+  return { licitacion: l, existia, motivos };
+}
+
 const fichaUrl = (l) => (l.fuente === "compra_agil"
   ? `https://buscador.mercadopublico.cl/ficha?code=${encodeURIComponent(l.codigo)}`
   : `https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${encodeURIComponent(l.codigo)}`);
 
 module.exports = {
   fecha, fechaCA, sincronizar, ticketConfigurado, enRegiones, visible, pedir, pedirCA, desdeDetalle, desdeDetalleCA, desdeListadoCA,
-  cargarDetalle, fichaUrl, aplicarRelevanciaMinima, codigosRegion, criterios, calzan,
+  cargarDetalle, fichaUrl, aplicarRelevanciaMinima, traerPorCodigo, limpiarCerradas, codigosRegion, criterios, calzan,
 };

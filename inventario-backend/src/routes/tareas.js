@@ -1,6 +1,6 @@
 // Tareas programadas. Las llama GitHub Actions (ver .github/workflows/tareas.yml) en la tarde y en la mañana.
 // Es pública (sin sesión) pero solo hace trabajo cuando corresponde, así que llamarla de más no tiene efecto:
-//  - TARDE (desde las 18:00 de Chile): revisa Mercado Público, una vez por tarde
+//  - 11:00 y 16:00 de Chile: revisa Mercado Público (decisión de gerencia, 10-nov-2026), una vez por turno
 //  - MAÑANA (06:00 a 12:00): envía por correo el resumen de licitaciones nuevas y, una vez por semana, el respaldo
 // La hora se calcula en hora de Chile, así funciona igual con horario de verano o de invierno.
 const router = require("express").Router();
@@ -54,8 +54,9 @@ router.all("/", async (req, res) => {
     const p = await getParametros();
     const hora = horaChile();
     const hecho = { hora_chile: hora };
-    // Tarde: revisar Mercado Público (una vez, aunque GitHub llame dos veces)
-    if (hora >= 18 && mp.ticketConfigurado() && horasDesde(p.mp_ultima_sincronizacion) >= 4) {
+    // 11:00 y 16:00: revisar Mercado Público (una vez por turno, aunque GitHub llame dos veces o con atraso)
+    const turno = (hora >= 11 && hora <= 13) || (hora >= 16 && hora <= 18);
+    if (turno && mp.ticketConfigurado() && horasDesde(p.mp_ultima_sincronizacion) >= 3) {
       hecho.mercado_publico = trabajos.iniciar("mercado_publico", (avisar) => mp.sincronizar({ onProgreso: avisar })).id;
     }
     // Mañana: resumen de licitaciones nuevas y respaldo semanal por correo

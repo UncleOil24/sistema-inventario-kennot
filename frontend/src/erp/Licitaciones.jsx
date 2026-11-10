@@ -32,6 +32,22 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
   const [abierta, setAbierta] = useState(null);
   const [cotizar, setCotizar] = useState(null);
   const [fichaL, setFichaL] = useState(null);
+  const [codigoTraer, setCodigoTraer] = useState("");
+  const [trayendo, setTrayendo] = useState(false);
+  const [traido, setTraido] = useState(null); // { licitacion, existia, motivos }
+  // Traer un proceso por su ID (lo envía el cliente): aunque no cumpla los filtros, y se explica por qué no aparecía
+  const traer = async () => {
+    const codigo = codigoTraer.trim().toUpperCase();
+    if (!codigo) return;
+    setTrayendo(true);
+    try {
+      const r = await api("/mercado-publico/traer", { method: "POST", body: { codigo } });
+      setTraido(r);
+      setCodigoTraer("");
+      setVista("todas"); setFuente(""); setBusqueda(codigo);
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setTrayendo(false); }
+  };
   // Desde Inicio: se abre directo el proceso pedido (aunque ya esté cerrado) y la lista se filtra a él
   useEffect(() => {
     if (!abrirCodigo) return;
@@ -102,7 +118,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
       {!data.ticket && (
         <div className="aviso">
           Falta conectar Mercado Público. Pide el ticket gratuito en chilecompra.cl/api con tu Clave Única y agrégalo en Render como
-          <strong> MERCADOPUBLICO_TICKET</strong>. Después las licitaciones se revisan solas cada tarde a las 18:00.
+          <strong> MERCADOPUBLICO_TICKET</strong>. Después se revisan solas a las 11:00 y a las 16:00.
         </div>
       )}
       <div className="toolbar">
@@ -113,12 +129,30 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
         <div className="chips">{VISTAS.map(([v, t]) => <button key={v} className={`chip ${vista === v ? "activo" : ""}`} onClick={() => setVista(v)}>{t}</button>)}</div>
         <div className="chips">{FUENTES.map(([v, t]) => <button key={v} className={`chip ${fuente === v ? "activo" : ""}`} onClick={() => setFuente(v)}>{t}</button>)}</div>
         <label className="check"><input type="checkbox" checked={todasRegiones} onChange={(e) => setTodasRegiones(e.target.checked)} />Todo Chile</label>
+        {esAdmin && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <input className="search-input" style={{ width: 180, paddingLeft: 12 }} placeholder="Traer por código" title="ID del proceso que envió el cliente. Ej: 2436-1811-COT26" value={codigoTraer}
+              onChange={(e) => setCodigoTraer(e.target.value)} onKeyDown={(e) => e.key === "Enter" && traer()} />
+            <button className="btn btn-ghost" disabled={!codigoTraer.trim() || trayendo} onClick={traer}>{trayendo ? <span className="spinner"></span> : "Traer"}</button>
+          </div>
+        )}
         {esAdmin && <button className="btn btn-primary" disabled={!data.ticket || avance?.estado === "corriendo"} onClick={sincronizar}>{avance?.estado === "corriendo" ? <><span className="spinner"></span>Buscando...</> : "↻ Buscar nuevas"}</button>}
       </div>
+      {traido && (
+        <div className="aviso" style={{ color: "var(--text)" }}>
+          <strong>{traido.licitacion.codigo}</strong> · {traido.licitacion.nombre} {traido.existia ? "(ya estaba en el sistema)" : "(traído desde Mercado Público)"}
+          {traido.motivos.length ? <><div style={{ marginTop: 4 }}>Por qué no aparecía:</div><ul style={{ margin: "4px 0 4px 18px" }}>{traido.motivos.map((m) => <li key={m}>{m}</li>)}</ul></> : <div>Cumple todos los filtros: debería aparecer en la lista.</div>}
+          <div className="mini">Desde ahora se muestra en la lista aunque no cumpla los filtros. Si los motivos se repiten, ajusta Configuración → Mercado Público.</div>
+          <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={() => { setAbierta(traido.licitacion); setTraido(null); }}>Ver proceso</button>
+            <button className="link" onClick={() => setTraido(null)}>Cerrar</button>
+          </div>
+        </div>
+      )}
       <div className="mini" style={{ marginBottom: 10 }}>
         {lista.length} procesos{!todasRegiones && data.regiones ? ` · región: ${data.regiones}` : ""}{data.monto_minimo ? ` · desde ${fmt(data.monto_minimo)}` : ""}{data.relevancia_minima ? ` · calce desde ${data.relevancia_minima}%` : ""}
         {data.ultima_sincronizacion ? ` · revisado ${new Date(data.ultima_sincronizacion).toLocaleString("es-CL")}` : " · aún no se ha revisado"}
-        {" · se buscan solas cada tarde a las 18:00 (nuevas listas en la mañana) · ★ = organismo prioritario · criterios en Config."}
+        {" · se buscan solas a las 11:00 y 16:00 · ★ = organismo prioritario · criterios en Config."}
       </div>
       {avance && avance.estado === "corriendo" && (
         <div className="aviso">

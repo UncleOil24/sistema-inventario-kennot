@@ -234,10 +234,8 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
   const accion = async (fn, ok) => {
     try { await fn(); notify(ok); onCambio(); } catch (e) { notify(e.message, "danger"); }
   };
-  const anular = () => {
-    if (!confirm(`¿Anular la venta ${venta.numero}? La cotización vuelve a quedar abierta.`)) return;
-    accion(() => api(`/ventas/${venta.id}/anular`, { method: "POST" }), "Venta anulada");
-  };
+  const [anulando, setAnulando] = useState(false);
+  const anular = () => setAnulando(true);
   const guardarDatos = () => {
     // El plazo solo se manda si cambió (recalcula el vencimiento)
     const { plazo_pago_dias, base_vencimiento, ...resto } = datos;
@@ -252,9 +250,11 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
     <Modal titulo={`// Venta ${venta.numero}`} onClose={onClose} ancho={780}
       footer={<>
         {esAdmin && venta.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular venta</button>}
+        {anulando && <AnularVenta venta={venta} notify={notify} onClose={() => setAnulando(false)} onHecho={() => { setAnulando(false); onCambio(); }} />}
         {verCompras && venta.estado !== "anulada" && <button className="btn btn-primary" onClick={() => setCuadro(true)}>Cuadro de compra</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
+      {venta.estado === "anulada" && venta.motivo_anulacion && <div className="aviso">Anulada{venta.anulada_por ? ` por ${venta.anulada_por}` : ""}{venta.anulada_fecha ? ` el ${fecha(venta.anulada_fecha)}` : ""}: {venta.motivo_anulacion}</div>}
       <div className="hist-meta">
         <span>{fecha(venta.fecha)}</span>
         <span>{venta.cliente_nombre || "Sin cliente"}</span>
@@ -376,5 +376,51 @@ function GastoRapido({ ventaId, notify, onCreado }) {
       <input placeholder="Detalle (opcional)" value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} />
       <button className="btn btn-ghost btn-sm" disabled={enviando || !(Number(form.monto) > 0)} onClick={guardar}>+ Gasto</button>
     </div>
+  );
+}
+
+// Anular una venta: la misma ventana en Comercial y Operativo. Muestra lo que tiene la venta, qué impide anularla
+// y qué pasará; el motivo es obligatorio y queda registrado con quién la anuló.
+function AnularVenta({ venta, notify, onClose, onHecho }) {
+  const [r, setR] = useState(null);
+  const [motivo, setMotivo] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  useEffect(() => { api(`/ventas/${venta.id}/anulacion`).then(setR).catch((e) => { notify(e.message, "danger"); onClose(); }); }, [venta.id, notify, onClose]);
+  const confirmar = async () => {
+    setEnviando(true);
+    try {
+      await api(`/ventas/${venta.id}/anular`, { method: "POST", body: { motivo } });
+      notify(`Venta ${venta.numero} anulada`);
+      onHecho();
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setEnviando(false); }
+  };
+  return (
+    <Modal titulo={`// Anular la venta ${venta.numero}`} onClose={onClose} ancho={620}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-danger" disabled={!r?.puede || !motivo.trim() || enviando} onClick={confirmar}>{enviando ? "Anulando..." : "Anular venta"}</button>
+      </>}>
+      {!r ? <div className="cot-empty"><span className="spinner"></span>Revisando la venta...</div> : <>
+        <div className="mini" style={{ marginBottom: 8 }}>{venta.cliente_nombre || "Sin cliente"} · {fmt(venta.total)} con IVA{venta.orden_compra_cliente ? ` · OC ${venta.orden_compra_cliente}` : ""}</div>
+        {r.bloqueos.length > 0 ? (
+          <div className="aviso" style={{ color: "var(--danger)", borderColor: "rgba(184,56,44,.35)", background: "rgba(184,56,44,.06)" }}>
+            <strong>Todavía no se puede anular:</strong>
+            <ul style={{ margin: "6px 0 0 18px" }}>{r.bloqueos.map((b) => <li key={b.que} style={{ marginBottom: 4 }}>{b.que}<div className="mini">→ {b.donde}</div></li>)}</ul>
+          </div>
+        ) : <div className="aviso" style={{ color: "var(--success)", borderColor: "rgba(42,127,80,.35)", background: "rgba(42,127,80,.06)" }}>Se puede anular: no tiene facturas, cobros ni compras recibidas.</div>}
+        <div className="panel-titulo" style={{ marginTop: 10 }}>Qué pasará</div>
+        <ul style={{ margin: "0 0 10px 18px", fontSize: 13 }}>
+          {r.compras_pedidas.length > 0 && <li>Se anulan {r.compras_pedidas.length} compra(s) pedida(s) sin recibir: {r.compras_pedidas.map((o) => `${o.numero} (${o.proveedor})`).join(", ")}. Avisa al proveedor.</li>}
+          <li>La cotización vuelve a <strong>Enviadas</strong> como abierta.</li>
+          <li>Operativo deja de verla en sus tareas.</li>
+          <li>Queda registrado quién la anuló, cuándo y por qué.</li>
+        </ul>
+        <div className="field">
+          <label>Motivo (obligatorio)</label>
+          <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej: el cliente anuló la OC / error al registrar" disabled={!r.puede} />
+        </div>
+      </>}
+    </Modal>
   );
 }

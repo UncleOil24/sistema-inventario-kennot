@@ -83,6 +83,17 @@ const actualizar = handler(async (req, res) => {
   res.json({ ok: true, data: l });
 });
 
+// POST /api/mercado-publico/traer   { codigo }  -> trae un proceso por su ID y explica por qué no aparecía
+const traer = handler(async (req, res) => {
+  try {
+    const r = await mp.traerPorCodigo(req.body?.codigo);
+    res.json({ ok: true, data: { ...r, licitacion: { ...r.licitacion.get(), ficha: mp.fichaUrl(r.licitacion) } } });
+  } catch (e) {
+    if (e.status) throw new ErrorNegocio(e.message, e.status);
+    throw e;
+  }
+});
+
 // POST /api/mercado-publico/sincronizar   -> { id } (segundo plano)
 const sincronizar = handler(async (req, res) => {
   if (!mp.ticketConfigurado()) throw new ErrorNegocio("Falta configurar MERCADOPUBLICO_TICKET en Render", 503);
@@ -97,4 +108,4 @@ const trabajo = handler(async (req, res) => {
   res.json({ ok: true, data: t });
 });
 
-module.exports = { listar, detalle, actualizar, sincronizar, trabajo };
+module.exports = { listar, detalle, actualizar, sincronizar, trabajo, traer };
