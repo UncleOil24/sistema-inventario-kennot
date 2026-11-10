@@ -182,6 +182,17 @@ async function codigosClientes(q) {
       await tq(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_cliente_3385', '${new Date().toISOString()}', NOW(), NOW())`);
     });
   }
+  // Facturas ingresadas por el NETO: la venta quedaba "parcial" con lo facturado igual al neto. Se corrige la última
+  // factura al total con IVA y la venta queda facturada (idempotente).
+  const [netos] = await q(`SELECT v.id, v.total, v.monto_facturado FROM ventas v
+    WHERE v.estado <> 'anulada' AND v.estado_factura = 'parcial' AND v.total > v.subtotal + 1 AND ABS(v.monto_facturado - v.subtotal) <= 2`);
+  for (const v of netos) {
+    const dif = Math.round(Number(v.total) - Number(v.monto_facturado));
+    await q(`UPDATE facturas SET monto = monto + ${dif}, notas = TRIM(COALESCE(notas, '') || ' (se había ingresado el neto; corregido al total con IVA)')
+      WHERE id = (SELECT id FROM facturas WHERE venta_id = ${Number(v.id)} ORDER BY fecha DESC, id DESC LIMIT 1)`);
+    await q(`UPDATE ventas SET monto_facturado = total, estado_factura = 'facturada' WHERE id = ${Number(v.id)}`);
+    console.log(`✓ Venta ${v.id}: factura ingresada por el neto, corregida al total con IVA`);
+  }
   // Ventas y cotizaciones sin cliente (o con el general) cuyo ID empieza con la unidad de compra de un cliente:
   // se asocian a ese cliente (ej. V-0001 Regimiento Linares → Ejército de Chile 3385). Es idempotente.
   await q(`UPDATE ventas v SET cliente_id = c.id, cliente_nombre = c.nombre FROM clientes c

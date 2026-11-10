@@ -34,6 +34,7 @@ const Venta = sequelize.define("Venta", {
   entrega_fecha: { type: DataTypes.DATEONLY, allowNull: true },
   recibido_por: { type: DataTypes.STRING(150), allowNull: true }, // quién recibió en el cliente
   estado_factura: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "sin_factura" },
+  factura_cerrada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // Comercial dio la facturación por completa aunque el monto no calce
   monto_facturado: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
   estado: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "emitida" },
   motivo_anulacion: { type: DataTypes.STRING(255), allowNull: true },

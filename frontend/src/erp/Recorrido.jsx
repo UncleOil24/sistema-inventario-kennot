@@ -110,6 +110,12 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
     } catch (e) { notify(e.message, "danger"); }
     finally { setEnviando(false); }
   };
+  const cerrar = async (abrir) => {
+    const ok = abrir || await confirmar(`La venta tiene facturado ${fmt(venta.monto_facturado || 0)} de ${fmt(venta.total)}.\n¿La(s) factura(s) cubren toda la venta? Quedará como Facturada y saldrá de "Facturas por emitir".`, { titulo: "Dar por facturada", boton: "Sí, está facturada" });
+    if (!ok) return;
+    try { await api(`/ventas/${venta.id}/facturas/cerrar`, { method: "POST", body: { abrir } }); notify(abrir ? "Facturación reabierta" : "✓ Venta facturada"); onCambio(); }
+    catch (e) { notify(e.message, "danger"); }
+  };
   const quitar = async (f) => {
     if (!(await confirmar(`¿Quitar la factura ${f.numero}?\nSolo si se ingresó por error.`, { titulo: "Quitar factura", boton: "Quitar", peligro: true }))) return;
     try { await api(`/ventas/${venta.id}/facturas/${f.id}`, { method: "DELETE" }); notify("Factura quitada"); onCambio(); }
@@ -141,7 +147,14 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
           ))}</tbody>
         </table>
       ) : <div className="mini">Sin facturas todavía.</div>}
-      {puedeVender && venta.estado !== "anulada" && falta > 0 && (
+      {puedeVender && venta.estado !== "anulada" && falta > 0 && facturas.length > 0 && (
+        <div className="aviso" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          Falta {fmt(falta)} por facturar. Si la factura ya cubre toda la venta (por ejemplo, se anotó el neto o cambió algún precio):
+          <button className="btn btn-success btn-sm" onClick={() => cerrar(false)}>✓ Dar por facturada</button>
+        </div>
+      )}
+      {puedeVender && venta.factura_cerrada && falta > 0 && <div className="mini">Dada por facturada con {fmt(venta.monto_facturado)} de {fmt(venta.total)}. <button className="btn btn-ghost btn-sm" onClick={() => cerrar(true)}>Reabrir</button></div>}
+      {puedeVender && venta.estado !== "anulada" && falta > 0 && !venta.factura_cerrada && (
         <div className="pago-form">
           <input placeholder="N° factura" value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} />
           <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} />

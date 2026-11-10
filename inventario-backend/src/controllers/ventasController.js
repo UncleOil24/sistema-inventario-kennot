@@ -575,11 +575,30 @@ const retrocederEtapa = conVenta(async (v, req, t) => {
 });
 
 // Recalcula lo facturado de la venta y el resumen de N° de facturas
+// Monto de una factura (con IVA). Si se escribió el NETO de lo que falta, se toma como el total con IVA
+// (era la causa de ventas que quedaban "parcial" con la factura ya emitida).
+const montoConIva = (valor, falta, v) => {
+  if (valor === undefined || valor === "" || valor === null) return falta;
+  const m = Math.round(Number(valor));
+  const tasa = Number(v.subtotal) > 0 ? Number(v.total) / Number(v.subtotal) : 1.19;
+  if (tasa > 1.001 && Math.abs(m - falta / tasa) <= 2) return falta;
+  return m;
+};
+
+// POST /api/ventas/:id/facturas/cerrar  { abrir }  la factura cubre toda la venta aunque el monto no calce exacto
+const cerrarFacturacion = conVenta(async (v, req, t) => {
+  const abrir = !!req.body?.abrir;
+  if (!abrir && !Number(v.monto_facturado)) throw new ErrorNegocio("Primero registra la factura");
+  await v.update({ factura_cerrada: !abrir }, { transaction: t });
+  await recalcularFacturas(v, t);
+});
+
 const recalcularFacturas = async (v, t) => {
   const facturas = await Factura.findAll({ where: { venta_id: v.id }, order: [["fecha", "ASC"], ["id", "ASC"]], transaction: t });
   const monto = facturas.reduce((s, f) => s + Number(f.monto), 0);
-  const estado = !facturas.length ? "sin_factura" : monto >= Number(v.total) - 1 ? "facturada" : "parcial";
-  const cambios = { monto_facturado: monto, estado_factura: estado, documento: facturas.map((f) => f.numero).join(", ").slice(0, 255) || null };
+  const cerrada = !!facturas.length && !!v.factura_cerrada;
+  const estado = !facturas.length ? "sin_factura" : monto >= Number(v.total) - 1 || cerrada ? "facturada" : "parcial";
+  const cambios = { factura_cerrada: cerrada, monto_facturado: monto, estado_factura: estado, documento: facturas.map((f) => f.numero).join(", ").slice(0, 255) || null };
   // Plazo contado desde la factura: vence a los N días de la primera factura
   if (v.base_vencimiento !== "recepcion" && v.plazo_pago_dias != null && facturas.length) cambios.fecha_vencimiento = sumarDesde(facturas[0].fecha, v.plazo_pago_dias);
   await v.update(cambios, { transaction: t });
@@ -598,7 +617,7 @@ const agregarFactura = conVenta(async (v, req, t) => {
     throw new ErrorNegocio(`La factura ${numero} ya está registrada${otra ? ` en la venta ${otra.numero}` : ""}`);
   }
   const falta = Math.round(Number(v.total) - Number(v.monto_facturado));
-  const monto = req.body?.monto === undefined || req.body?.monto === "" || req.body?.monto === null ? falta : Math.round(Number(req.body.monto));
+  const monto = montoConIva(req.body?.monto, falta, v);
   if (!(monto > 0)) throw new ErrorNegocio(falta <= 0 ? "La venta ya está facturada completa" : "Monto inválido");
   if (monto > falta + 1) throw new ErrorNegocio(`El monto supera lo que falta por facturar ($${falta.toLocaleString("es-CL")})`);
   await Factura.create({ venta_id: v.id, numero, fecha: req.body?.fecha || hoy(), monto, notas: req.body?.notas || null, creado_por: firma(req) }, { transaction: t });
@@ -625,7 +644,7 @@ const listarFacturas = handler(async (req, res) => {
 
 module.exports = {
   resumenAnulacion,
-  aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas,
+  aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
   getCuadroCompra, cambiarProveedorLinea, generarOrdenes,
