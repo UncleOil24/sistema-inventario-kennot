@@ -12,8 +12,12 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   const [editando, setEditando] = useState(null); // null | "nueva" | orden
   const [detalle, setDetalle] = useState(null);
   const [documento, setDocumento] = useState(false);
-  const [agrupar, setAgrupar] = useState(() => { try { return localStorage.getItem("compras_agrupar") !== "0"; } catch { return true; } });
-  const cambiarAgrupar = (v) => { setAgrupar(v); try { localStorage.setItem("compras_agrupar", v ? "1" : "0"); } catch { /* */ } };
+  // Una sola vista: por período (semana, mes o todo) y dentro, por venta. Lo antiguo queda cerrado.
+  const [periodo, setPeriodo] = useState(() => { try { return localStorage.getItem("compras_periodo") || "mes"; } catch { return "mes"; } });
+  const cambiarPeriodo = (v) => { setPeriodo(v); setAbiertos(new Set()); try { localStorage.setItem("compras_periodo", v); } catch { /* */ } };
+  const [abiertos, setAbiertos] = useState(new Set()); // períodos abiertos a mano (además del más reciente)
+  const [ventasAbiertas, setVentasAbiertas] = useState(new Set());
+  const alternar = (set, fn, k) => { const n = new Set(set); n.has(k) ? n.delete(k) : n.add(k); fn(n); };
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -74,19 +78,30 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
       {puedeOperar && proveedores.length === 0 && <div className="aviso">Para crear órdenes de compra primero registra al menos un proveedor en la pestaña Proveedores.</div>}
 
       <div className="chips" style={{ marginBottom: 10 }}>
-        <button className={`chip ${agrupar ? "activo" : ""}`} onClick={() => cambiarAgrupar(true)}>Agrupadas por venta</button>
-        <button className={`chip ${!agrupar ? "activo" : ""}`} onClick={() => cambiarAgrupar(false)}>Lista simple</button>
+        {[["semana", "Por semana"], ["mes", "Por mes"], ["todo", "Todo junto"]].map(([v, t]) => (
+          <button key={v} className={`chip ${periodo === v ? "activo" : ""}`} onClick={() => cambiarPeriodo(v)}>{t}</button>
+        ))}
       </div>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th>{!agrupar && <th>Para</th>}<th>Factura</th><th>Total</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th>Factura</th><th>Total</th><th>Estado</th><th></th></tr></thead>
           <tbody>
-            {loading ? <tr className="empty-row"><td colSpan={8}><span className="spinner"></span>Cargando...</td></tr>
-              : ordenes.length === 0 ? <tr className="empty-row"><td colSpan={8}>// sin órdenes de compra</td></tr>
-              : agrupar ? grupos(ordenes).map((g) => (
-                <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} />
-              ))
-              : ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} conPara />)}
+            {loading ? <tr className="empty-row"><td colSpan={7}><span className="spinner"></span>Cargando...</td></tr>
+              : ordenes.length === 0 ? <tr className="empty-row"><td colSpan={7}>// sin órdenes de compra</td></tr>
+              : periodos(ordenes, periodo).map((p, i) => {
+                const buscando = !!busqueda.trim();
+                const abierto = buscando || periodo === "todo" || (i === 0) !== abiertos.has(p.clave);
+                const total = p.grupos.reduce((s, g) => s + g.ordenes.filter((o) => o.estado !== "anulada").reduce((a, o) => a + Number(o.total), 0), 0);
+                return (
+                  <PeriodoCompras key={p.clave} p={p} total={total} abierto={abierto} conTitulo={periodo !== "todo"}
+                    onToggle={() => alternar(abiertos, setAbiertos, p.clave)}>
+                    {abierto && p.grupos.map((g) => (
+                      <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} esAdmin={esAdmin} abierto={buscando || ventasAbiertas.has(`${p.clave}|${g.clave}`)}
+                        onToggle={() => alternar(ventasAbiertas, setVentasAbiertas, `${p.clave}|${g.clave}`)} />
+                    ))}
+                  </PeriodoCompras>
+                );
+              })}
           </tbody>
         </table>
       </div>
@@ -107,6 +122,53 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   );
 }
 
+const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+const dia = (f) => { const d = new Date(String(f || "").slice(0, 10) + "T12:00:00"); return isNaN(d) ? new Date() : d; };
+function clavePeriodo(f, modo) {
+  const d = dia(f);
+  if (modo === "todo") return { clave: "todo", titulo: "Todas" };
+  if (modo === "mes") return { clave: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, titulo: `${MESES[d.getMonth()]} ${d.getFullYear()}` };
+  const lunes = new Date(d); lunes.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
+  const corto = (x) => `${x.getDate()} ${MESES[x.getMonth()].slice(0, 3).toLowerCase()}`;
+  return { clave: lunes.toISOString().slice(0, 10), titulo: `Semana del ${corto(lunes)} al ${corto(domingo)} ${domingo.getFullYear()}` };
+}
+
+// Cada venta va en el período de su compra más reciente (así no se repite); las compras sueltas, por su propia fecha
+function periodos(ordenes, modo) {
+  const mapa = new Map();
+  const poner = (per, g) => { if (!mapa.has(per.clave)) mapa.set(per.clave, { ...per, grupos: [] }); mapa.get(per.clave).grupos.push(g); };
+  for (const g of grupos(ordenes)) {
+    if (g.venta) {
+      const ultima = g.ordenes.reduce((m, o) => (String(o.fecha) > String(m) ? o.fecha : m), "");
+      poner(clavePeriodo(ultima, modo), g);
+    } else {
+      const porPer = new Map();
+      for (const o of g.ordenes) { const per = clavePeriodo(o.fecha, modo); if (!porPer.has(per.clave)) porPer.set(per.clave, { per, ordenes: [] }); porPer.get(per.clave).ordenes.push(o); }
+      for (const { per, ordenes: os } of porPer.values()) poner(per, { clave: "sueltas", venta: null, ordenes: os });
+    }
+  }
+  const lista = [...mapa.values()].sort((a, b) => (a.clave < b.clave ? 1 : -1));
+  for (const p of lista) p.grupos.sort((a, b) => (a.clave === "sueltas") - (b.clave === "sueltas"));
+  return lista;
+}
+
+function PeriodoCompras({ p, total, abierto, conTitulo, onToggle, children }) {
+  if (!conTitulo) return <>{children}</>;
+  const ventas = p.grupos.filter((g) => g.venta).length;
+  const sueltas = p.grupos.find((g) => !g.venta)?.ordenes.length || 0;
+  return (
+    <>
+      <tr className="fila-periodo" onClick={onToggle} style={{ cursor: "pointer" }}>
+        <td colSpan={4}><strong>{abierto ? "▾" : "▸"} {p.titulo}</strong> <span className="mini">· {ventas} venta(s){sueltas ? ` · ${sueltas} compra(s) suelta(s)` : ""}</span></td>
+        <td className="price-cell"><strong>{fmt(total)}</strong></td>
+        <td colSpan={2}></td>
+      </tr>
+      {children}
+    </>
+  );
+}
+
 // Agrupa las órdenes por la venta para la que se compró (una OC del cliente = una venta); las demás van en "Compras sueltas"
 function grupos(ordenes) {
   const mapa = new Map();
@@ -121,7 +183,7 @@ function grupos(ordenes) {
   return lista;
 }
 
-function GrupoCompras({ g, verDetalle }) {
+function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle }) {
   const vivas = g.ordenes.filter((o) => o.estado !== "anulada");
   const total = vivas.reduce((s, o) => s + Number(o.total), 0);
   const recibidas = vivas.filter((o) => o.estado === "recibida").length;
@@ -131,23 +193,23 @@ function GrupoCompras({ g, verDetalle }) {
     : <>Compras sueltas (sin venta)</>;
   return (
     <>
-      <tr className="fila-grupo">
-        <td colSpan={4}>{titulo}</td>
+      <tr className="fila-grupo" onClick={onToggle} style={{ cursor: "pointer" }}>
+        <td colSpan={3}>{abierto ? "▾" : "▸"} {titulo}</td>
+        <td className="mini">{vivas.length} orden(es) · {recibidas} recibida(s)</td>
         <td className="price-cell">{fmt(total)}</td>
-        <td colSpan={3} className="mini">{vivas.length} orden(es) · {recibidas} recibida(s)</td>
+        <td colSpan={2} className="mini">{recibidas === vivas.length && vivas.length ? "Todo recibido" : `${vivas.length - recibidas} por recibir`}{esAdmin && saldo > 0 ? ` · por pagar ${fmt(saldo)}` : ""}</td>
       </tr>
-      {g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
+      {abierto && g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
     </>
   );
 }
 
-function FilaOrden({ o, verDetalle, conPara, sangria }) {
+function FilaOrden({ o, verDetalle, sangria }) {
   return (
     <tr className={o.estado === "anulada" ? "fila-anulada" : ""}>
       <td className="id-cell" style={sangria ? { paddingLeft: 28 } : undefined}>{sangria ? "└ " : ""}{o.numero}</td>
       <td className="mini">{fecha(o.fecha)}</td>
       <td>{o.proveedor_nombre}</td>
-      {conPara && <td className="mini">{o.venta ? `${o.venta.numero} · ${o.venta.cliente_nombre || ""}${o.venta.id_solicitud ? ` · ID ${o.venta.id_solicitud}` : ""}` : "—"}</td>}
       <td className="mini">{o.documento || "—"}</td>
       <td className="price-cell">{fmt(o.total)}</td>
       <td><Estado valor={o.estado} /></td>
