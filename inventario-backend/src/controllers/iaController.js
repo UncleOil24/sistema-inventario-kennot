@@ -81,11 +81,15 @@ const listaCliente = handler(async (req, res) => {
 const licitacion = handler(async (req, res) => {
   const l = await Licitacion.findByPk(req.params.codigo);
   if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
-  if (!l.detalle_cargado) await require("../services/mercadoPublico").cargarDetalle(l);
+  // Si Mercado Público no responde o limitó las consultas, igual se abre el cotizador para subir el anexo o las bases
+  let avisoMP = null;
+  if (!l.detalle_cargado) {
+    try { await require("../services/mercadoPublico").cargarDetalle(l); } catch (e) { avisoMP = e.message; }
+  }
   const base = { archivo: `${l.fuente === "compra_agil" ? "Compra Ágil" : "Licitación"} ${l.codigo}`, cliente: l.organismo || "", observaciones: l.nombre,
     presupuesto: l.presupuesto || l.monto_estimado || null, cierre: l.fecha_cierre, codigo: l.codigo };
   // Sin productos detallados en Mercado Público: se devuelve vacío para que suban las bases o el anexo
-  if (!l.items?.length) return res.json({ ok: true, data: { ...base, lineas: [], sin_detalle: true } });
+  if (!l.items?.length) return res.json({ ok: true, data: { ...base, lineas: [], sin_detalle: true, aviso_mp: avisoMP } });
   const lineas = l.items.map((i) => {
     const extra = i.descripcion && sinTildes(i.descripcion) !== sinTildes(i.producto) ? ` - ${String(i.descripcion).slice(0, 160)}` : "";
     return { descripcion: `${i.producto}${extra}`.trim(), cantidad: Number(i.cantidad) || 1, unidad: i.unidad || "" };

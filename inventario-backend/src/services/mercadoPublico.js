@@ -21,14 +21,34 @@ const ia = require("./ia");
 
 const BASE = "https://api.mercadopublico.cl/servicios/v1/publico";
 const BASE_CA = "https://api2.mercadopublico.cl/v2/compra-agil";
-const MAX_DETALLES = 80;      // licitaciones: detalles por revisión
-const MAX_DETALLES_CA = 40;   // Compra Ágil: detalles por revisión (cada uno tarda ~15 s)
+const MAX_DETALLES = 40;      // licitaciones: detalles por revisión
+const MAX_DETALLES_CA = 20;   // Compra Ágil: detalles por revisión (cada uno tarda ~15 s)
 const MAX_PAGINAS_CA = 60;
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 const ticketConfigurado = () => !!process.env.MERCADOPUBLICO_TICKET;
 const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const lista = (v) => String(v || "").split(",").map((p) => sinTildes(p).trim()).filter(Boolean);
 const escapar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// --- Contador de consultas del día (se muestra en Merc. Público) y último bloqueo ---------------------
+const hoyCL = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+let uso = null;
+const leerUso = async () => {
+  if (uso && uso.fecha === hoyCL()) return uso;
+  let guardado = null;
+  try { guardado = JSON.parse((await getParametros()).mp_consultas || "null"); } catch { /* */ }
+  uso = guardado && guardado.fecha === hoyCL() ? guardado : { fecha: hoyCL(), licitaciones: 0, compra_agil: 0, bloqueo: null };
+  return uso;
+};
+let guardarPendiente = null;
+const contar = async (tipo, bloqueo) => {
+  const u = await leerUso();
+  if (tipo) u[tipo] = (u[tipo] || 0) + 1;
+  if (bloqueo !== undefined) u.bloqueo = bloqueo;
+  clearTimeout(guardarPendiente);
+  guardarPendiente = setTimeout(() => setParametros({ mp_consultas: JSON.stringify(u) }).catch(() => {}), 3000);
+};
+const usoConsultas = async () => ({ ...(await leerUso()) });
 
 async function pedir(params, intento = 0) {
   if (!ticketConfigurado()) throw new ErrorNegocio("Falta configurar MERCADOPUBLICO_TICKET en Render", 503);
@@ -37,6 +57,7 @@ async function pedir(params, intento = 0) {
   const timer = setTimeout(() => ctrl.abort(), 60000);
   let res;
   try {
+    contar("licitaciones");
     res = await fetch(url, { signal: ctrl.signal, headers: { Accept: "application/json" } });
   } catch (e) {
     if (intento < 2) { await pausa(3000); return pedir(params, intento + 1); }
@@ -60,6 +81,7 @@ async function pedirCA(ruta = "", params = {}, intento = 0) {
   const url = `${BASE_CA}${ruta}${qs ? `?${qs}` : ""}`;
   let res;
   try {
+    contar("compra_agil");
     res = await fetch(url, { signal: AbortSignal.timeout(40000), headers: { Accept: "application/json", ticket: process.env.MERCADOPUBLICO_TICKET } });
   } catch (e) {
     if (intento < 1) { await pausa(5000); return pedirCA(ruta, params, intento + 1); }
@@ -73,7 +95,15 @@ async function pedirCA(ruta = "", params = {}, intento = 0) {
   if (res.status === 429) {
     const espera = Number(res.headers.get("retry-after")) || 0;
     if (intento < 2 && espera > 0 && espera <= 60) { await pausa(espera * 1000); return pedirCA(ruta, params, intento + 1); }
-    throw new ErrorNegocio("Se agotó la cuota diaria de consultas de Mercado Público: se reintenta mañana", 503);
+    const u = await leerUso();
+    const total = (u.licitaciones || 0) + (u.compra_agil || 0);
+    const texto = espera > 60
+      ? `Mercado Público pidió esperar ${Math.ceil(espera / 60)} minuto(s) antes de seguir consultando Compra Ágil`
+      : `Mercado Público limitó las consultas de Compra Ágil por ahora (puede ser por unos minutos o hasta mañana). Llevamos ${total} consultas hoy`;
+    await contar(null, { hora: new Date().toISOString(), hasta: espera > 0 ? new Date(Date.now() + espera * 1000).toISOString() : null, texto });
+    const e = new ErrorNegocio(`${texto}. Mientras tanto puedes cotizar subiendo el anexo o las bases.`, 503);
+    e.limite = true;
+    throw e;
   }
   if ([502, 503, 504].includes(res.status) && intento < 2) { await pausa(8000 * (intento + 1)); return pedirCA(ruta, params, intento + 1); }
   if (res.status === 404) return null;
@@ -360,7 +390,9 @@ async function sincronizarCompraAgil(params, avisar) {
   // Claude puntúa las nuevas con el nombre; luego se pide el detalle (productos) solo de las que calzan
   try { await puntuarPendientes(avisar, params); } catch (e) { console.error("Claude relevancia:", e.message); }
   const sinDetalle = await Licitacion.findAll({
-    where: { fuente: "compra_agil", detalle_cargado: false, estado_interno: { [Op.in]: ["nueva", "revisada"] }, fecha_cierre: { [Op.gte]: new Date() } },
+    // Solo de los que calzan con el catálogo (o de organismos prioritarios): ahorra consultas a Mercado Público
+    where: { fuente: "compra_agil", detalle_cargado: false, estado_interno: { [Op.in]: ["nueva", "revisada"] }, fecha_cierre: { [Op.gte]: new Date() },
+      [Op.or]: [{ relevancia: { [Op.gte]: relevanciaMinima(params) } }, { prioridad: true }] },
     order: [["prioridad", "DESC"], ["fecha_cierre", "ASC"]], limit: MAX_DETALLES_CA,
   });
   let detalles = 0, hechos = 0, grave = null;
@@ -382,7 +414,7 @@ async function sincronizarCompraAgil(params, avisar) {
     }
   };
   avisar(`Compra Ágil: leyendo productos de ${sinDetalle.length} procesos...`, 0, sinDetalle.length);
-  await Promise.all([0, 1, 2].map(trabajador));
+  await trabajador(0); // de uno en uno: Mercado Público limita las consultas seguidas
   if (grave) throw grave;
   await setParametros({ mp_ca_ultima: inicio.toISOString() });
   return { publicadas: items.length, cumplen: datos.length, nuevas: nuevas.length, detalles };
@@ -520,5 +552,5 @@ const fichaUrl = (l) => (l.fuente === "compra_agil"
 
 module.exports = {
   fecha, fechaCA, sincronizar, ticketConfigurado, enRegiones, visible, pedir, pedirCA, desdeDetalle, desdeDetalleCA, desdeListadoCA,
-  cargarDetalle, fichaUrl, aplicarRelevanciaMinima, traerPorCodigo, limpiarCerradas, codigosRegion, criterios, calzan,
+  cargarDetalle, fichaUrl, aplicarRelevanciaMinima, traerPorCodigo, limpiarCerradas, usoConsultas, codigosRegion, criterios, calzan,
 };

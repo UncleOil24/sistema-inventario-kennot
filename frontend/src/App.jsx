@@ -201,6 +201,10 @@ const styles = `
   .tarea-monto { font-family: var(--mono); font-weight: 700; font-size: 14px; color: var(--accent2); white-space: nowrap; text-align: right; min-width: 110px; }
   .tarea-monto.sin { font-weight: 400; font-size: 11px; color: var(--text3); }
   .tarea-acciones { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .dato-sii { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  .dato-sii .falta { color: var(--warn); font-size: 12px; }
+  .facturas-pendientes { border: 2px solid var(--warn); background: rgba(184,116,15,.07); box-shadow: 0 2px 10px rgba(184,116,15,.12); }
+  .facturas-pendientes .panel-titulo { color: var(--warn); }
   .inicio-dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; align-items: start; }
   .inicio-dos > .panel { margin: 0; }
   .aviso { background: rgba(232,163,61,0.08); border: 1px solid rgba(232,163,61,0.3); color: var(--warn); border-radius: 6px; padding: 10px 14px; font-family: var(--mono); font-size: 12px; margin-bottom: 1rem; }

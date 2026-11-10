@@ -126,7 +126,7 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
           <div className="panel-titulo" style={{ marginTop: 8 }}>Contacto</div>
           <div className="fields-row">{campo("contacto", "Contacto", "Nombre de quien compra")}{campo("telefono", "Teléfono", "+569...")}</div>
           <div className="fields-row">{campo("email", "Email", "correo@...")}{campo("comuna", "Comuna", "Talca")}</div>
-          {campo("direccion", "Dirección", "Calle, ciudad")}
+          <div className="fields-row">{campo("direccion", "Dirección", "Calle, ciudad")}{campo("giro", "Giro (para la factura)", "Ej: Municipalidad / Administración pública")}</div>
 
           <div className="panel-titulo" style={{ marginTop: 8 }}>Cobranza</div>
           <div className="fields-row">

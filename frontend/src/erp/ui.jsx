@@ -293,6 +293,8 @@ const mostrarAviso = (op) => new Promise((resolve) => {
 });
 export const confirmar = (mensaje, opciones = {}) => mostrarAviso({ mensaje, ...opciones });
 export const pedirTexto = (mensaje, opciones = {}) => mostrarAviso({ mensaje, texto: true, ...opciones });
+// Elegir entre varias opciones: [{ valor, texto }] -> el valor elegido o null
+export const elegir = (mensaje, eleccion, opciones = {}) => mostrarAviso({ mensaje, eleccion, ...opciones });
 
 export function Avisos() {
   const [op, setOp] = useState(null);
@@ -300,6 +302,17 @@ export function Avisos() {
   useEffect(() => { abrirAviso = (o) => { setValor(o.valor || ""); setOp(o); }; return () => { abrirAviso = null; }; }, []);
   if (!op) return null;
   const cerrar = (resultado) => { op.resolve(resultado); setOp(null); };
+  if (op.eleccion) {
+    return (
+      <Modal titulo={`// ${op.titulo || "Elegir"}`} onClose={() => cerrar(null)} ancho={520}
+        footer={<>
+          <button className="btn btn-ghost" onClick={() => cerrar(null)}>Cancelar</button>
+          {op.eleccion.map((o, k) => <button key={o.valor} className={`btn ${k === op.eleccion.length - 1 ? "btn-primary" : "btn-ghost"}`} onClick={() => cerrar(o.valor)}>{o.texto}</button>)}
+        </>}>
+        <div style={{ whiteSpace: "pre-line", fontSize: 14, lineHeight: 1.5 }}>{op.mensaje}</div>
+      </Modal>
+    );
+  }
   const aceptar = () => {
     if (op.texto && op.obligatorio && !valor.trim()) return;
     cerrar(op.texto ? valor.trim() : true);
@@ -319,3 +332,12 @@ export function Avisos() {
     </Modal>
   );
 }
+
+// Pedido a proveedor: qué líneas incluir (si todas tienen precio, o ninguna, no se pregunta)
+export const modoPedido = async (items) => {
+  const tot = (items || []).length;
+  const sin = (items || []).filter((i) => !(Number(i.costo) > 0)).length;
+  if (!sin || sin === tot) return "todas";
+  return elegir("¿Qué líneas van en el pedido?\nEl Excel sale sin nuestros valores, con una hoja General y una hoja por especialidad (pinturas, eléctrico, gasfitería...).",
+    [{ valor: "todas", texto: `Todas las líneas (${tot})` }, { valor: "sin_precio", texto: `Solo sin precio (${sin})` }], { titulo: "Pedido a proveedor" });
+};

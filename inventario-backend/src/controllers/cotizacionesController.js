@@ -343,30 +343,69 @@ const eliminarCotizacion = handler(async (req, res) => {
 
 // GET /api/cotizaciones/:id/pedido-proveedor
 // Excel para pedir precio a proveedores: las líneas sin costo, con lo que pidió el cliente (sin precios nuestros)
+// Especialidad de una línea para separar el pedido por rubro (pinturas, eléctrico...): la categoría del producto
+// del catálogo; si no tiene (o es genérica), se deduce de la descripción
+const ESPECIALIDADES = [
+  ["PINTURAS", /PINTURA|ESMALTE|LATEX|L[AÁ]TEX|BARNIZ|DILUYENTE|AGUARRAS|BROCHA|RODILLO|ANTICORROSIVO|SELLADOR|IMPERMEABILIZ|MASILLA|LIJA/],
+  ["ELÉCTRICO", /CABLE|ENCHUFE|INTERRUPTOR|AMPOLLETA|\bLED\b|TABLERO|AUTOM[AÁ]TICO|EL[EÉ]CTRIC|CANALETA|CONDUIT|ALARGADOR|ZAPATILLA|FOCO|PORTALAMPARA|DIFERENCIAL|EVA\b|THHN|NYA|RISER/],
+  ["GASFITERÍA", /PVC|CODO|COPLA|\bTEE\b|LLAVE DE PASO|GRIFER|FLEXIBLE|SIF[OÓ]N|GASFITER|TERMOFUSI|CA[NÑ]ER[IÍ]A|DESAG[UÜ]E|ESTANQUE|WC|LAVAMANOS|TEFL[OÓ]N/],
+  ["CONSTRUCCIÓN", /CEMENTO|FIERRO|ARENA|GRAVA|RIPIO|LADRILLO|HORMIG[OÓ]N|YESO|VOLCANITA|PLANCHA|MADERA|PINO|TERCIADO|OSB|ZINC|CER[AÁ]MIC|ADHESIVO|MORTERO|MALLA|PERFIL|CLAVO|ALAMBRE/],
+  ["HERRAMIENTAS", /BROCA|DISCO|ALICATE|MARTILLO|DESTORNILLADOR|HERRAMIENTA|SIERRA|HUINCHA|TALADRO|ESMERIL|NIVEL|LLANA|PALA|CARRETILLA|ESCALERA|SERRUCHO|FORMON|LLAVE (PUNTA|CORONA|FRANCESA|STILSON)/],
+  ["FIJACIONES", /TORNILLO|PERNO|TARUGO|ROSCALATA|FIJACI|TUERCA|GOLILLA|REMACHE|ANCLAJE|BISAGRA|CANDADO|CERRADURA|PICAPORTE/],
+  ["EPP", /GUANTE|CASCO|LENTE|ZAPATO|MASCARILLA|\bEPP\b|CHALECO|ARN[EÉ]S|PROTECTOR|OVEROL|BOTA/],
+  ["ASEO", /DETERGENTE|CLORO|ESCOBA|LIMPIA|ASEO|PAPEL|BOLSA|TRAPERO|DESINFECT|JAB[OÓ]N|PALA DE BASURA|BASURERO/],
+];
+const GENERICAS = /^(GENERAL|POR CLASIFICAR|OTROS?|VARIOS|FERRETER[IÍ]A( GENERAL)?)$/i;
+const especialidadDe = (texto, categoria) => {
+  if (categoria && !GENERICAS.test(String(categoria).trim())) return String(categoria).trim().toUpperCase();
+  const t = String(texto || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  const e = ESPECIALIDADES.find(([, re]) => re.test(t) || re.test(String(texto || "").toUpperCase()));
+  return e ? e[0] : "OTROS";
+};
+
+// GET /api/cotizaciones/:id/pedido-proveedor?modo=sin_precio|todas
+// Excel para pedir precio a proveedores, SIN nuestros valores: hoja General con todo y una hoja por especialidad
+// (pinturas, eléctrico, gasfitería...), para enviar cada parte al proveedor que corresponde.
 const descargarPedidoProveedor = async (req, res) => {
   try {
     const cot = await Cotizacion.findByPk(req.params.id);
     if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
     const ExcelJS = require("exceljs");
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Solicitud de cotización");
     const emp = datosEmpresa(cot.empresa, await getParametros());
-    const todas = req.query.todas === "1";
-    const lineas = (cot.items || []).filter((i) => todas || !(Number(i.costo) > 0));
-    ws.columns = [{ width: 6 }, { width: 62 }, { width: 11 }, { width: 12 }, { width: 18 }, { width: 18 }, { width: 30 }];
-    ws.addRow([`SOLICITUD DE COTIZACIÓN · ${emp.nombre || (cot.empresa === "tactics" ? "Tactics Inversiones" : "Inversiones Kenott")}`]).font = { bold: true, size: 13 };
-    ws.addRow([`Referencia: ${idCotizacion(cot)}${cot.lugar_entrega ? ` · Entrega en ${cot.lugar_entrega}` : ""} · Fecha ${hoyISO().split("-").reverse().join("-")}`]);
-    ws.addRow(["Por favor indicar precio unitario NETO (sin IVA), marca y plazo de entrega."]);
-    ws.addRow([]);
-    const h = ws.addRow(["N°", "Descripción", "Cantidad", "Unidad", "Precio unit. neto", "Marca", "Observación / plazo"]);
-    h.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF26747B" } }; c.border = { bottom: { style: "thin" } }; });
-    lineas.forEach((i, k) => {
-      const r = ws.addRow([k + 1, i.descripcion_cliente || i.nombre, Number(i.cantidad), i.unidad || "", null, "", ""]);
-      r.getCell(2).alignment = { wrapText: true, vertical: "top" };
-      r.getCell(5).numFmt = '"$"#,##0';
-      r.eachCell({ includeEmpty: true }, (c, n) => { if (n <= 7) c.border = { bottom: { style: "hair", color: { argb: "FFBBBBBB" } } }; });
-    });
+    const items = cot.items || [];
+    const sinPrecio = items.filter((i) => !(Number(i.costo) > 0));
+    // Nunca vacío: si todas tienen precio (o se pidió), van todas
+    const lineas = req.query.modo === "todas" || req.query.todas === "1" || !sinPrecio.length ? items : sinPrecio;
+    const ids = [...new Set(lineas.map((i) => i.producto_id).filter(Boolean))];
+    const cats = new Map((ids.length ? await Producto.findAll({ where: { id: ids }, attributes: ["id", "categoria"], raw: true }) : []).map((p) => [p.id, p.categoria]));
+    const filas = lineas.map((i, k) => ({ n: k + 1, desc: i.descripcion_cliente || i.nombre, cant: Number(i.cantidad), unidad: i.unidad || "", esp: especialidadDe(i.descripcion_cliente || i.nombre, cats.get(i.producto_id)) }));
+
+    const wb = new ExcelJS.Workbook();
+    const hoja = (nombre, lista, conEsp) => {
+      const ws = wb.addWorksheet(nombre.replace(/[\\/?*[\]:]/g, " ").slice(0, 31));
+      ws.columns = conEsp
+        ? [{ width: 6 }, { width: 18 }, { width: 60 }, { width: 11 }, { width: 12 }, { width: 18 }, { width: 18 }, { width: 28 }]
+        : [{ width: 6 }, { width: 62 }, { width: 11 }, { width: 12 }, { width: 18 }, { width: 18 }, { width: 28 }];
+      ws.addRow([`SOLICITUD DE COTIZACIÓN · ${emp.nombre || (cot.empresa === "tactics" ? "Tactics Inversiones" : "Inversiones Kenott")}${conEsp ? "" : ` · ${nombre}`}`]).font = { bold: true, size: 13 };
+      ws.addRow([`Referencia: ${idCotizacion(cot)}${cot.lugar_entrega ? ` · Entrega en ${cot.lugar_entrega}` : ""} · Fecha ${hoyISO().split("-").reverse().join("-")}`]);
+      ws.addRow(["Por favor indicar precio unitario NETO (sin IVA), marca y plazo de entrega."]);
+      ws.addRow([]);
+      const titulos = ["N°", ...(conEsp ? ["Especialidad"] : []), "Descripción", "Cantidad", "Unidad", "Precio unit. neto", "Marca", "Observación / plazo"];
+      const h = ws.addRow(titulos);
+      h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF26747B" } }; });
+      lista.forEach((f, k) => {
+        const r = ws.addRow([conEsp ? f.n : k + 1, ...(conEsp ? [f.esp] : []), f.desc, f.cant, f.unidad, null, "", ""]);
+        const cDesc = conEsp ? 3 : 2, cPrecio = conEsp ? 6 : 5;
+        r.getCell(cDesc).alignment = { wrapText: true, vertical: "top" };
+        r.getCell(cPrecio).numFmt = '"$"#,##0';
+        r.eachCell({ includeEmpty: true }, (c, n) => { if (n <= titulos.length) c.border = { bottom: { style: "hair", color: { argb: "FFBBBBBB" } } }; });
+      });
+      ws.views = [{ state: "frozen", ySplit: 5 }];
+    };
+    hoja("General", [...filas].sort((a, b) => a.esp.localeCompare(b.esp) || a.n - b.n), true);
+    const grupos = [...new Set(filas.map((f) => f.esp))].sort();
+    if (grupos.length > 1) for (const g of grupos) hoja(g, filas.filter((f) => f.esp === g), false);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="Pedido_cotizacion_${idCotizacion(cot)}.xlsx"`);
     await wb.xlsx.write(res);

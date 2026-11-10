@@ -395,6 +395,36 @@ async function extraerDocumentoProveedor(file, usuario) {
   };
 }
 
+// --- Documento emitido en el portal del SII (factura o guía de despacho) ------------------------
+const HERR_SII = {
+  name: "registrar_documento_sii",
+  description: "Registra los datos del documento tributario electrónico emitido en el SII.",
+  input_schema: {
+    type: "object",
+    properties: {
+      tipo: { type: "string", enum: ["factura", "factura_exenta", "guia", "nota_credito", "otro"] },
+      folio: { type: "string", description: "N° de folio del documento" },
+      fecha: { type: "string", description: "Fecha de emisión AAAA-MM-DD" },
+      rut_emisor: { type: "string" }, razon_social_emisor: { type: "string" },
+      rut_receptor: { type: "string" }, razon_social_receptor: { type: "string" },
+      neto: { type: "number" }, iva: { type: "number" }, exento: { type: "number" }, total: { type: "number" },
+      referencia_oc: { type: "string", description: "N° de orden de compra referenciada, si aparece" },
+    },
+    required: ["tipo", "folio", "fecha", "total"],
+  },
+};
+async function leerDocumentoSII(file, usuario) {
+  const contenido = await contenidoArchivo(file);
+  const { datos, uso } = await llamar({
+    system: "Lees documentos tributarios electrónicos chilenos emitidos en el portal del SII (factura electrónica 33, factura exenta 34, guía de despacho 52, nota de crédito 61). Extrae tipo, folio, fecha, RUT y razón social del emisor y del receptor, montos neto, IVA, exento y total, y la OC referenciada si aparece. Los montos chilenos usan punto como separador de miles ($1.392 = 1392).",
+    contenido: [...contenido, { type: "text", text: "Extrae los datos de este documento." }],
+    herramienta: HERR_SII,
+    maxTokens: 1500,
+  });
+  await auditar({ tipo: "lectura_documento_sii", archivo: file.originalname, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: datos });
+  return datos;
+}
+
 // --- Relevancia de procesos de Mercado Público ----------------------------------------
 const HERR_RELEVANCIA = {
   name: "clasificar_procesos",
@@ -477,5 +507,5 @@ async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistem
 module.exports = {
   clasificarProcesos,
   calzarLineas,
-  iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, extraerDocumentoProveedor, crearIndice, candidatos, normalizar, contenidoArchivo,
+  iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, extraerDocumentoProveedor, leerDocumentoSII, crearIndice, candidatos, normalizar, contenidoArchivo,
 };

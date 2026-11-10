@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api, fmt, fecha, hoyISO } from "./lib";
 import { Recorrido, EstadoFactura, confirmar } from "./ui";
+import { FichaSII, SubirSII, DocumentosSII } from "./SII";
 
 // Llama a la API; si el servidor pide confirmación (409), pregunta y reintenta con { forzar: true }
 export async function conConfirmacion(url, body = {}, method = "POST") {
@@ -98,6 +99,7 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
   const [form, setForm] = useState({ numero: "", fecha: hoyISO(), monto: "" });
   const [enviando, setEnviando] = useState(false);
   const facturas = venta.facturas || [];
+  const [sii, setSii] = useState(null); // "ficha" | "subir"
   const registrar = async () => {
     setEnviando(true);
     try {
@@ -119,6 +121,15 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
         Facturas <EstadoFactura valor={venta.estado_factura} />
         <span className="mini" style={{ marginLeft: "auto" }}>Facturado {fmt(venta.monto_facturado || 0)} de {fmt(venta.total)}{falta > 0 ? ` · falta ${fmt(falta)}` : ""}</span>
       </div>
+      {venta.estado !== "anulada" && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSii("ficha")}>📋 Copiar al SII</button>
+          <button className="btn btn-primary btn-sm" onClick={() => setSii("subir")}>⇪ Subir factura / guía del SII</button>
+        </div>
+      )}
+      {sii === "ficha" && <FichaSII venta={venta} notify={notify} onClose={() => setSii(null)} />}
+      {sii === "subir" && <SubirSII venta={venta} notify={notify} onClose={() => setSii(null)} onHecho={() => { setSii(null); onCambio(); }} />}
+      <DocumentosSII venta={venta} notify={notify} />
       {facturas.length > 0 ? (
         <table className="table table-compacta">
           <tbody>{facturas.map((f) => (

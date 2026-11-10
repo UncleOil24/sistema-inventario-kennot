@@ -20,7 +20,7 @@ const codigoLibre = async (codigo, id) => {
   if (otro && otro.id !== Number(id)) throw Object.assign(new Error(`El ID ${codigo} ya lo tiene ${otro.nombre}`), { status: 400 });
 };
 // Campos de la ficha que se pueden guardar
-const CAMPOS = ["nombre", "rut", "telefono", "email", "direccion", "contacto", "comuna", "organismo", "contacto_finanzas", "notas"];
+const CAMPOS = ["nombre", "rut", "telefono", "email", "direccion", "contacto", "comuna", "giro", "organismo", "contacto_finanzas", "notas"];
 const datosFicha = (b, actual = {}) => {
   const d = {};
   for (const c of CAMPOS) if (c in b) d[c] = typeof b[c] === "string" ? b[c].trim() || null : b[c] ?? null;

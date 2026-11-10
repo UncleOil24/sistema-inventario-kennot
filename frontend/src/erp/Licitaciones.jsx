@@ -69,7 +69,9 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
 
   const sincronizar = async () => {
     try {
-      const { id } = await api("/mercado-publico/sincronizar", { method: "POST" });
+      const r0 = await api("/mercado-publico/sincronizar", { method: "POST" });
+      if (r0.reciente) { notify(`Ya se revisó hace ${r0.hace_min} minuto(s): para cuidar las consultas a Mercado Público se puede volver a revisar a los 30 minutos`); return; }
+      const { id } = r0;
       setAvance({ estado: "corriendo", paso: "Conectando con Mercado Público...", segundos: 0 });
       for (;;) {
         await new Promise((r) => setTimeout(r, 2000));
@@ -152,8 +154,12 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
       <div className="mini" style={{ marginBottom: 10 }}>
         {lista.length} procesos{!todasRegiones && data.regiones ? ` · región: ${data.regiones}` : ""}{data.monto_minimo ? ` · desde ${fmt(data.monto_minimo)}` : ""}{data.relevancia_minima ? ` · calce desde ${data.relevancia_minima}%` : ""}
         {data.ultima_sincronizacion ? ` · revisado ${new Date(data.ultima_sincronizacion).toLocaleString("es-CL")}` : " · aún no se ha revisado"}
+        {data.consultas ? ` · consultas a Mercado Público hoy: ${(data.consultas.licitaciones || 0) + (data.consultas.compra_agil || 0)}` : ""}
         {" · se buscan solas a las 11:00 y 16:00 · ★ = organismo prioritario · criterios en Config."}
       </div>
+      {data.consultas?.bloqueo && new Date(data.consultas.bloqueo.hora) > new Date(Date.now() - 3 * 3600e3) && (
+        <div className="aviso">⚠ {data.consultas.bloqueo.texto} ({new Date(data.consultas.bloqueo.hora).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}). Mientras tanto puedes cotizar subiendo el anexo o las bases.</div>
+      )}
       {avance && avance.estado === "corriendo" && (
         <div className="aviso">
           <span className="spinner"></span>{avance.paso} · {Math.floor((avance.segundos || 0) / 60)} min {(avance.segundos || 0) % 60} s
@@ -328,6 +334,7 @@ function DetalleLicitacion({ codigo, ficha, tipo, notify, onClose, onCotizar }) 
       </>}>
       {!l ? <div className="cot-empty"><span className="spinner"></span>Cargando...</div> : <>
         <div className="hist-nombre">{l.nombre}</div>
+        {l.aviso_mp && <div className="aviso">⚠ {l.aviso_mp}</div>}
         {l.fecha_cierre && new Date(l.fecha_cierre) < new Date() && <div className="aviso">Este proceso ya cerró el {new Date(l.fecha_cierre).toLocaleString("es-CL")}: no se puede postular.</div>}
         {l.cotizaciones?.length > 0 && <div className="mini id-solicitud">Cotizada: {l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero} (${fmt(c.total)})${c.creado_por ? ` por ${c.creado_por}` : ""}`).join(" · ")}</div>}
         <div className="hist-meta">

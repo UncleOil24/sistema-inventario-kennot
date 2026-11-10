@@ -145,6 +145,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
             {res.presupuesto && <span className="id-solicitud">Presupuesto de la propuesta: {fmt(res.presupuesto)}</span>}
             {res.cierre && <span>Cierra {new Date(res.cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
+          {res.aviso_mp && <div className="aviso">⚠ {res.aviso_mp}</div>}
           {res.sin_detalle && <div className="aviso">Mercado Público no trae el detalle de productos de este proceso. Sube las bases o el anexo con la lista (desde el computador o con el enlace) y Claude la lee.</div>}
           {cargar && (
             <div className="panel" style={{ marginBottom: 10 }}>
