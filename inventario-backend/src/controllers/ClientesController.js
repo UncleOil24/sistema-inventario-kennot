@@ -86,6 +86,10 @@ const actualizarCliente = async (req, res) => {
     if (!cliente) return res.status(404).json({ ok: false, error: "Cliente no encontrado" });
     const cambios = datosFicha(sinCredito(req));
     if ("nombre" in cambios && !cambios.nombre) return res.status(400).json({ ok: false, error: "Nombre requerido" });
+    // El Cliente general (P-001) es para ventas al público: no se convierte en otro cliente
+    if (cliente.codigo === "P-001" && "nombre" in cambios && cambios.nombre !== cliente.nombre) {
+      return res.status(400).json({ ok: false, error: "El Cliente general (P-001) es para ventas al público y no se renombra. Para un cliente nuevo usa \"+ Nuevo cliente\"." });
+    }
     if (req.body.codigo !== undefined && cliente.codigo !== "P-001") {
       cambios.codigo = limpiarCodigo(req.body.codigo) || cliente.codigo || await siguienteCodigo();
       if (cambios.codigo === "P-001") throw Object.assign(new Error("El ID P-001 es del Cliente general"), { status: 400 });

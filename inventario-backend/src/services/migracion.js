@@ -165,6 +165,23 @@ async function codigosClientes(q) {
       console.log(`✓ Clientes reiniciados: ${r?.rowCount ?? "?"} borrados (respaldo en clientes_eliminados); queda Cliente general P-001`);
     });
   }
+  // 10-nov-2026: el Cliente general (P-001) se editó como Ejército de Chile. Ese cliente pasa a su unidad de compra
+  // 3385 (Mercado Público 3385-100-COT26) y se crea de nuevo el Cliente general P-001 para ventas al público.
+  const [[ejercito]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_cliente_3385'`);
+  if (!ejercito) {
+    await sequelize.transaction(async (t) => {
+      const tq = (s) => sequelize.query(s, { transaction: t });
+      const [filas] = await tq(`SELECT id FROM clientes WHERE codigo = 'P-001' AND nombre NOT ILIKE 'cliente general'`);
+      const [[ocupado]] = await tq(`SELECT COUNT(*)::int AS n FROM clientes WHERE codigo = '3385'`);
+      if (filas.length && !ocupado.n) {
+        const id = filas[0].id;
+        await tq(`UPDATE clientes SET codigo = '3385' WHERE id = ${Number(id)}`);
+        for (const tabla of ["cotizaciones", "ventas"]) await tq(`UPDATE ${tabla} SET id_solicitud = '3385' WHERE cliente_id = ${Number(id)} AND (id_solicitud IS NULL OR id_solicitud = 'P-001')`);
+        console.log("✓ Cliente P-001 (Ejército) pasa a ID 3385; se crea de nuevo el Cliente general P-001");
+      }
+      await tq(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_cliente_3385', '${new Date().toISOString()}', NOW(), NOW())`);
+    });
+  }
   await q(`INSERT INTO clientes (codigo, nombre, tipo, "createdAt", "updatedAt")
     SELECT 'P-001', 'Cliente general', 'particular', NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM clientes WHERE codigo = 'P-001')`);
   await q(`WITH base AS (SELECT COALESCE(MAX(SUBSTRING(codigo FROM 3)::int), 0) AS n FROM clientes WHERE codigo ~ '^P-[0-9]+$'),

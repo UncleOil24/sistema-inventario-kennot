@@ -100,7 +100,7 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
           <div className="panel-titulo">Identificación</div>
           <div className="fields-row">
             {campo("codigo", "ID del cliente", "Automático: P-001", { style: { maxWidth: 190 }, disabled: form.codigo === "P-001" && !!form.id })}
-            {campo("nombre", "Nombre o razón social", "Ej: Municipalidad de Talca – Salud")}
+            {campo("nombre", "Nombre o razón social", "Ej: Municipalidad de Talca – Salud", { disabled: form.codigo === "P-001" && !!form.id })}
           </div>
           <div className="mini" style={{ marginTop: -6, marginBottom: 10 }}>Instituciones: su unidad de compra de Mercado Público (Ej: 1422 = CONAF; 2295 = Municipalidad de Talca compras generales; 2292 = Municipalidad de Talca Salud). Vacío = se asigna P-001, P-002...</div>
           <div className="fields-row">
