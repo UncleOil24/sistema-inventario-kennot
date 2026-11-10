@@ -26,8 +26,9 @@ export default function Login({ onEntrar, aviso }) {
     <div className="login-wrap">
       <form className="login-card" onSubmit={entrar}>
         <div className="header-brand" style={{ justifyContent: "center", marginBottom: 6 }}>
-          <span>▣</span> INVENTARIO <span>/</span> KENNOT
+          <span>▣</span> SISTEMA KENTACS <span>·</span> SYNCROCOM
         </div>
+        <div className="mini" style={{ textAlign: "center", marginBottom: 4 }}>Comercialización, control y gestión automatizada</div>
         <div className="mini" style={{ textAlign: "center", marginBottom: 18 }}>Inicia sesión para continuar</div>
         <div className="field">
           <label>Email</label>
