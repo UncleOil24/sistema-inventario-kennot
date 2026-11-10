@@ -338,6 +338,22 @@ const actualizarDatos = handler(async (req, res) => {
     const desde = base === "recepcion" ? v.entrega_fecha : primera?.fecha;
     if (desde && !("fecha_vencimiento" in req.body)) cambios.fecha_vencimiento = sumarDesde(desde, plazo);
   }
+  // Cliente: se elige a mano o se asocia solo por el ID (unidad de compra = números antes del primer guion)
+  let cliente = null;
+  if ("cliente_id" in req.body && req.body.cliente_id) {
+    cliente = await Cliente.findByPk(req.body.cliente_id);
+    if (!cliente) throw new ErrorNegocio("Cliente no encontrado", 404);
+  } else if (cambios.id_solicitud && cambios.id_solicitud !== v.id_solicitud) {
+    const unidad = cambios.id_solicitud.split("-")[0].trim();
+    if (/^\d+$/.test(unidad)) cliente = await Cliente.findOne({ where: { codigo: unidad } });
+  }
+  if (cliente && cliente.id !== v.cliente_id) {
+    const general = ["P-001", "CG"].includes(cliente.codigo);
+    cambios.cliente_id = cliente.id;
+    if (!general) cambios.cliente_nombre = cliente.nombre;
+    if (!general && (!cambios.id_solicitud && (!v.id_solicitud || /^P-\d+$/.test(v.id_solicitud)))) cambios.id_solicitud = cliente.codigo;
+    if (v.cotizacion_id) await Cotizacion.update({ cliente_id: cliente.id }, { where: { id: v.cotizacion_id } });
+  }
   await v.update(cambios);
   res.json({ ok: true, data: verVenta(req, v) });
 });

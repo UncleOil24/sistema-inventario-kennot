@@ -182,6 +182,14 @@ async function codigosClientes(q) {
       await tq(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_cliente_3385', '${new Date().toISOString()}', NOW(), NOW())`);
     });
   }
+  // Ventas y cotizaciones sin cliente (o con el general) cuyo ID empieza con la unidad de compra de un cliente:
+  // se asocian a ese cliente (ej. V-0001 Regimiento Linares → Ejército de Chile 3385). Es idempotente.
+  await q(`UPDATE ventas v SET cliente_id = c.id, cliente_nombre = c.nombre FROM clientes c
+    WHERE c.codigo ~ '^[0-9]+$' AND SPLIT_PART(TRIM(v.id_solicitud), '-', 1) = c.codigo
+      AND (v.cliente_id IS NULL OR v.cliente_id IN (SELECT id FROM clientes WHERE codigo IN ('P-001','CG')) OR v.cliente_id NOT IN (SELECT id FROM clientes))`);
+  await q(`UPDATE cotizaciones z SET cliente_id = c.id FROM clientes c
+    WHERE c.codigo ~ '^[0-9]+$' AND SPLIT_PART(TRIM(z.id_solicitud), '-', 1) = c.codigo
+      AND (z.cliente_id IS NULL OR z.cliente_id IN (SELECT id FROM clientes WHERE codigo IN ('P-001','CG')) OR z.cliente_id NOT IN (SELECT id FROM clientes))`);
   await q(`INSERT INTO clientes (codigo, nombre, tipo, "createdAt", "updatedAt")
     SELECT 'P-001', 'Cliente general', 'particular', NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM clientes WHERE codigo = 'P-001')`);
   await q(`WITH base AS (SELECT COALESCE(MAX(SUBSTRING(codigo FROM 3)::int), 0) AS n FROM clientes WHERE codigo ~ '^P-[0-9]+$'),
