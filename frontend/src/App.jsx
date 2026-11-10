@@ -41,6 +41,8 @@ const styles = `
   .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 56px; position: sticky; top: 0; z-index: 100; }
   .header-brand { flex-shrink: 0; display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; }
   .header-brand span { color: var(--text3); }
+  .header-brand.marca { text-transform: none; letter-spacing: 0.04em; font-size: 13px; gap: 6px; }
+  @media (max-width: 900px) { .header-brand.marca { display: none; } }
   .header-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
   .header-nav::-webkit-scrollbar { display: none; }
   .nav-sep { width: 1px; background: var(--border); margin: 8px 6px; flex-shrink: 0; }
@@ -448,6 +450,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
     <>
       <div className="app">
         <header className="header">
+          <div className="header-brand marca" title="Sistema KenTacs · SyncroCom — Comercialización, control y gestión automatizada"><span>▣</span>Sistema KenTacs<span>·</span>SyncroCom</div>
           <nav className="header-nav deptos-nav">
             {deptos.map((d, k) => (
               <button key={d.id} className={`depto-btn ${d.id === dep.id ? "active" : ""}`} onClick={() => elegirDepto(d.id)}>
