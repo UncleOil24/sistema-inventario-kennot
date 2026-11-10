@@ -60,7 +60,9 @@ export function InicioDepto({ depto, notify, irA }) {
   // Revisar Mercado Público ahora (además de las revisiones automáticas de las 11:00 y 16:00)
   const actualizarMP = async () => {
     try {
-      const { id } = await api("/mercado-publico/sincronizar", { method: "POST" });
+      const r0 = await api("/mercado-publico/sincronizar", { method: "POST" });
+      if (r0.reciente) { notify(`Ya se revisó hace ${r0.hace_min} minuto(s): se puede volver a revisar a los 30 minutos`); return; }
+      const { id } = r0;
       setRevisando({ paso: "Conectando con Mercado Público..." });
       for (;;) {
         await new Promise((r) => setTimeout(r, 2500));
@@ -96,7 +98,9 @@ export function InicioDepto({ depto, notify, irA }) {
   };
   if (!data) return <Cargando />;
   // Una oportunidad cuyo cierre ya pasó deja de ser tarea (se informa abajo como cerrada)
-  const tareas = (data.tareas || []).filter((t) => t.depto === depto && !(t.cierre && new Date(t.cierre) < new Date()));
+  // En Comercial las facturas por emitir van en su propio recuadro destacado (arriba), no en la lista de tareas
+  const tareas = (data.tareas || []).filter((t) => t.depto === depto && !(t.cierre && new Date(t.cierre) < new Date()) && !(depto === "comercial" && t.tipo === "facturar"));
+  const porFacturar = data.por_facturar || [];
   const adj = data.adjudicado;
   const f = data.flujo || {};
   const tarjeta = (titulo, r) => (
@@ -115,6 +119,20 @@ export function InicioDepto({ depto, notify, irA }) {
           <button className="btn btn-ghost btn-sm" disabled={!!revisando} onClick={actualizarMP}>↻ Actualizar ahora</button>
         </div>
       )}
+      {depto === "comercial" && (porFacturar.length ? (
+        <div className="panel facturas-pendientes">
+          <div className="panel-titulo" style={{ fontSize: 14 }}>🧾 Facturas por emitir <span className="mini">· {porFacturar.length} venta(s) · {fmt(porFacturar.reduce((s, v) => s + v.falta, 0))} con IVA · prioridad: que no se pierdan</span></div>
+          <table className="table table-compacta">
+            <tbody>{porFacturar.map((v) => (
+              <tr key={v.id}>
+                <td><strong>{v.numero}</strong> · {v.cliente || "Sin cliente"}<div className="mini">{v.oc ? `OC ${v.oc} · ` : ""}{v.etapa === "lista" ? "productos listos" : v.etapa === "despachada" ? "ya despachada" : "ya entregada"}{v.parcial ? " · factura parcial" : ""}</div></td>
+                <td className="price-cell" style={{ fontWeight: 700, fontSize: 14 }}>{fmt(v.falta)}</td>
+                <td style={{ textAlign: "right" }}><button className="btn btn-primary btn-sm" onClick={() => irA("facturacion", v.id)}>Facturar →</button></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      ) : <div className="mini" style={{ marginBottom: 10, color: "var(--success)" }}>✓ Sin facturas pendientes</div>)}
       <QueHacer tareas={tareas} irA={irA} onDescartar={depto === "comercial" ? descartar : null} />
       {depto === "comercial" && (
         <div className="inicio-dos" style={{ marginBottom: 14 }}>

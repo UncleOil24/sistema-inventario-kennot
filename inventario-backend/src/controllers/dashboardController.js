@@ -292,6 +292,9 @@ const getDashboard = handler(async (req, res) => {
 
   const data = {
     tareas,
+    // Facturas por emitir (Inicio de Comercial, siempre arriba): todo lo que Operativo movió y falta facturar
+    por_facturar: comercial ? porFacturar.map((v) => ({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, oc: v.orden_compra_cliente, etapa: v.etapa,
+      falta: n(Number(v.total) - Number(v.monto_facturado || 0)), parcial: v.estado_factura === "parcial" })) : [],
     enviadas: enviadas.map((c) => ({ id: c.id, numero: c.numero, empresa: c.empresa, anterior: c.anterior, cliente: c.cliente, id_solicitud: c.id_solicitud, nombre: c.nombre_cotizacion, fecha: c.fecha, vence: c.fecha_validez, total: n(c.total), por: c.creado_por })),
     mp_cerradas: cerradasSinPostular.map((l) => ({ ...l, monto_estimado: l.monto_estimado ? n(l.monto_estimado) : null })),
     adjudicado,

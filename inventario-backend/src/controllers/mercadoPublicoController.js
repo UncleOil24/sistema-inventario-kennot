@@ -44,6 +44,7 @@ const listar = handler(async (req, res) => {
       relevancia_minima: Number(params.mp_relevancia_minima) || 0,
       compra_agil: params.mp_compra_agil !== "0",
       sincronizando: trabajos.ultimo("mercado_publico"),
+      consultas: await mp.usoConsultas(),
     },
   });
 });
@@ -52,11 +53,12 @@ const listar = handler(async (req, res) => {
 const detalle = handler(async (req, res) => {
   const l = await Licitacion.findByPk(req.params.codigo);
   if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
-  // Si aún no tiene detalle, se pide en el momento
-  await mp.cargarDetalle(l);
+  // Si aún no tiene detalle, se pide en el momento (si Mercado Público no responde, se muestra lo que hay y el aviso)
+  let aviso_mp = null;
+  try { await mp.cargarDetalle(l); } catch (e) { aviso_mp = e.message; }
   const [cotizaciones] = await sequelize.query(`SELECT id, numero, empresa, estado, total, creado_por, "createdAt" AS fecha FROM cotizaciones
     WHERE UPPER(id_solicitud) = UPPER(:c) AND estado NOT IN ('rechazada','vencida') ORDER BY id`, { replacements: { c: l.codigo } });
-  res.json({ ok: true, data: { ...l.get(), ficha: mp.fichaUrl(l), cotizaciones } });
+  res.json({ ok: true, data: { ...l.get(), ficha: mp.fichaUrl(l), cotizaciones, aviso_mp } });
 });
 
 // PUT /api/mercado-publico/licitaciones/:codigo   { estado_interno, nota, cotizacion_id }
@@ -97,6 +99,10 @@ const traer = handler(async (req, res) => {
 // POST /api/mercado-publico/sincronizar   -> { id } (segundo plano)
 const sincronizar = handler(async (req, res) => {
   if (!mp.ticketConfigurado()) throw new ErrorNegocio("Falta configurar MERCADOPUBLICO_TICKET en Render", 503);
+  // No se repite si se revisó hace menos de 30 minutos (ahorra consultas a Mercado Público)
+  const params = await getParametros();
+  const hace = params.mp_ultima_sincronizacion ? (Date.now() - new Date(params.mp_ultima_sincronizacion).getTime()) / 60000 : Infinity;
+  if (hace < 30 && !req.body?.forzar) return res.json({ ok: true, data: { reciente: true, hace_min: Math.round(hace) } });
   const { id } = trabajos.iniciar("mercado_publico", (avisar) => mp.sincronizar({ onProgreso: avisar }));
   res.status(202).json({ ok: true, data: { id } });
 });

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Totales, Estado, confirmar } from "./ui";
+import { Totales, Estado, confirmar, modoPedido } from "./ui";
 import ImportarLista from "./ImportarLista";
 import ControlPresupuesto from "./Presupuesto";
 import { conConfirmacion } from "./Recorrido";
@@ -110,6 +110,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   const guardar = async (estadoPedido, salida = null) => {
     if (!items.length) return;
+    let modo = null;
+    if (salida === "pedido-proveedor") { modo = await modoPedido(items); if (!modo) return; }
     // Una cotización ya enviada que se corrige sigue enviada al "Guardar"
     const estado = estadoPedido === "borrador" && borrador.estado === "cotizacion" ? "cotizacion" : estadoPedido;
     if (sinPrecio && estado === "cotizacion" && !(await confirmar(`${sinPrecio} línea(s) sin precio.`, { titulo: "Finalizar cotización", boton: "Finalizar igual" }))) return;
@@ -141,7 +143,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       const cot = borrador.id
         ? await conConfirmacion(`/cotizaciones/${borrador.id}`, body, "PUT")
         : await conConfirmacion("/cotizaciones", body);
-      if (salida === "pedido-proveedor") await descargar(`/cotizaciones/${cot.id}/pedido-proveedor`, `Pedido_cotizacion_${idCot(cot)}.xlsx`);
+      if (salida === "pedido-proveedor") await descargar(`/cotizaciones/${cot.id}/pedido-proveedor?modo=${modo}`, `Pedido_cotizacion_${idCot(cot)}.xlsx`);
       else if (salida) await descargar(`/cotizaciones/${cot.id}/${salida}`, `${idCot(cot)}${cot.anterior ? "_anterior" : ""}-${cot.cliente || "cliente"}.${salida === "excel" ? "xlsx" : "pdf"}`);
       const que = { borrador: "guardada (En ejecución)", espera_proveedor: "guardada en Esperando proveedor · Excel del pedido descargado", cotizacion: "finalizada (Enviadas)" }[estado];
       notify(`✓ ${nombreCot(cot)} ${que}${salida && salida !== "pedido-proveedor" ? ` · ${salida === "excel" ? "Excel" : "PDF"} descargado` : ""}`);
@@ -333,7 +335,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       <div className="toolbar" style={{ marginTop: "1rem", justifyContent: "flex-end" }}>
         {guardando && <span className="mini"><span className="spinner"></span>Guardando...</span>}
         <button className="btn btn-ghost" title="Queda en Cotizaciones → En ejecución para seguir después" onClick={() => guardar("borrador")} disabled={!items.length || guardando}>Guardar</button>
-        <button className="btn btn-ghost" title={`Descarga un Excel con las ${sinCostoTodas} línea(s) sin precio para enviar al proveedor. Queda en Esperando proveedor.`} onClick={() => guardar("espera_proveedor", "pedido-proveedor")} disabled={!items.length || guardando}>Pedir cotización a proveedor{sinCostoTodas ? ` (${sinCostoTodas})` : ""}</button>
+        <button className="btn btn-ghost" title="Descarga el detalle de materiales sin valores (hoja General y una por especialidad) para enviar a cotizar. Queda en Esperando proveedor." onClick={() => guardar("espera_proveedor", "pedido-proveedor")} disabled={!items.length || guardando}>Pedir cotización a proveedor{sinCostoTodas ? ` (${sinCostoTodas})` : ""}</button>
         <button className="btn btn-ghost" title="Queda en Enviadas" onClick={() => guardar("cotizacion", "excel")} disabled={!items.length || guardando}>Finalizar + Excel</button>
         <button className="btn btn-primary" title="Queda en Enviadas" onClick={() => guardar("cotizacion", "pdf")} disabled={!items.length || guardando}>Finalizar + PDF</button>
       </div>

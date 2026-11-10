@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, Totales, confirmar, pedirTexto } from "./ui";
+import { Modal, Estado, Totales, confirmar, pedirTexto, modoPedido } from "./ui";
 import { conConfirmacion } from "./Recorrido";
 import { api, fmt, fecha, descargar, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
 
@@ -42,7 +42,11 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
     if (motivo !== null) accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } }), "Cotización marcada como rechazada");
   };
   const reabrir = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "cotizacion" } }), "Cotización reabierta");
-  const pedido = (c) => descargar(`/cotizaciones/${c.id}/pedido-proveedor`, `Pedido_cotizacion_${idCot(c)}.xlsx`).catch((e) => notify(e.message, "danger"));
+  const pedido = async (c) => {
+    const modo = await modoPedido(c.items);
+    if (!modo) return;
+    descargar(`/cotizaciones/${c.id}/pedido-proveedor?modo=${modo}`, `Pedido_cotizacion_${idCot(c)}.xlsx`).catch((e) => notify(e.message, "danger"));
+  };
   const vencer = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "vencida" } }), "Cotización marcada como vencida");
   const eliminar = async (c) => (await confirmar(`¿Eliminar la ${nombreCot(c)}?\nEs mejor marcarla rechazada o vencida para no perder el historial.`, { titulo: "Eliminar cotización", boton: "Eliminar", peligro: true }))
     && accion(() => api(`/cotizaciones/${c.id}`, { method: "DELETE" }), "Cotización eliminada");
@@ -119,7 +123,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                     <button className="btn btn-ghost btn-sm" onClick={() => setAbierta(c)}>Ver</button>
                     {c.estado === "borrador" && <>
                       <button className="btn btn-primary btn-sm" onClick={() => editar(c)}>Continuar</button>
-                      <button className="btn btn-ghost btn-sm" title="Excel con las líneas sin precio, para enviar al proveedor" onClick={() => pedido(c)}>↓ Pedido a proveedor</button>
+                      <button className="btn btn-ghost btn-sm" title="Excel con el detalle de materiales sin valores (hoja General y una por especialidad), para enviar a cotizar" onClick={() => pedido(c)}>↓ Pedido a proveedor</button>
                     </>}
                     {c.estado === "espera_proveedor" && <>
                       <button className="btn btn-primary btn-sm" onClick={() => setProveedorDe(c)}>Subir cotización del proveedor</button>

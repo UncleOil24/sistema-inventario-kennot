@@ -21,7 +21,8 @@ const DEFAULTS = {
   iva_remanente_kenott: "0",
   iva_remanente_tactics: "0",
   iva_pagos: "{}",
-  catalogo_ultima_descarga: "",       // fecha de la última descarga del consolidado (para marcar los cambios)                    // {"kenott:2026-10": {fecha, monto, folio, por}} — F29 pagados
+  catalogo_ultima_descarga: "",
+  mp_consultas: "",                   // consultas a Mercado Público del día y último bloqueo (lo escribe el sistema)       // fecha de la última descarga del consolidado (para marcar los cambios)                    // {"kenott:2026-10": {fecha, monto, folio, por}} — F29 pagados
   // Plazo de entrega que se imprime en las condiciones comerciales (se puede cambiar en cada cotización)
   plazo_entrega: "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra",
   meses_precio_antiguo: "6",        // un precio más viejo que esto se marca para volver a cotizar
