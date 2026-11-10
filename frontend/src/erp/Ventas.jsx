@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura } from "./ui";
+import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar } from "./ui";
 import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
 import { AccionesVenta, PanelFacturas, conConfirmacion } from "./Recorrido";
@@ -346,7 +346,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         doc={venta}
         tipo="cobro"
         onRegistrar={(body) => accion(() => api(`/ventas/${venta.id}/cobros`, { method: "POST", body }), "✓ Cobro registrado")}
-        onEliminar={esAdmin ? (p) => confirm("¿Eliminar este cobro?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado") : null}
+        onEliminar={esAdmin ? async (p) => (await confirmar("¿Eliminar este cobro?", { titulo: "Eliminar cobro", boton: "Eliminar", peligro: true })) && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado") : null}
       />}
       {cuadro && <CuadroCompra ventaId={venta.id} notify={notify} irACompra={irACompra} onClose={() => { setCuadro(false); onCambio(); }} />}
     </Modal>

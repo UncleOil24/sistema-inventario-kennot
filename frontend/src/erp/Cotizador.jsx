@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Totales, Estado } from "./ui";
+import { Totales, Estado, confirmar } from "./ui";
 import ImportarLista from "./ImportarLista";
 import ControlPresupuesto from "./Presupuesto";
 import { conConfirmacion } from "./Recorrido";
@@ -112,8 +112,8 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
     if (!items.length) return;
     // Una cotización ya enviada que se corrige sigue enviada al "Guardar"
     const estado = estadoPedido === "borrador" && borrador.estado === "cotizacion" ? "cotizacion" : estadoPedido;
-    if (sinPrecio && estado === "cotizacion" && !confirm(`${sinPrecio} línea(s) sin precio. ¿Guardar igual?`)) return;
-    if (estado === "cotizacion" && !String(borrador.id_solicitud || "").trim() && !confirm("La cotización va sin ID (del cliente o de la solicitud). ¿Guardar igual?")) return;
+    if (sinPrecio && estado === "cotizacion" && !(await confirmar(`${sinPrecio} línea(s) sin precio.`, { titulo: "Finalizar cotización", boton: "Finalizar igual" }))) return;
+    if (estado === "cotizacion" && !String(borrador.id_solicitud || "").trim() && !(await confirmar("La cotización va sin ID (del cliente o de la solicitud).", { titulo: "Finalizar cotización", boton: "Finalizar igual" }))) return;
     if (esGeneral && !String(borrador.cliente_nombre_doc || "").trim()) { notify("Cliente general: escribe el nombre que va en esta cotización", "danger"); return; }
     setGuardando(true);
     try {
@@ -162,7 +162,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
           {borrador.id_solicitud && <span>· ID {borrador.id_solicitud}</span>}
           {borrador.creado_por && <span>· por {borrador.creado_por}</span>}
           <span>· {items.length} línea(s)</span>
-          <button className="link" onClick={() => { if (confirm(borrador.id ? "¿Salir sin guardar los cambios? La cotización guardada no se pierde." : "¿Descartar esta cotización nueva? Se pierden las líneas.")) limpiar(); }}>{borrador.id ? "Salir sin guardar" : "Descartar"}</button>
+          <button className="link" onClick={async () => { if (await confirmar(borrador.id ? "Se pierden los cambios no guardados. La cotización guardada no se pierde." : "Se pierden las líneas de esta cotización nueva.", { titulo: borrador.id ? "Salir sin guardar" : "Descartar cotización", boton: borrador.id ? "Salir sin guardar" : "Descartar", peligro: true })) limpiar(); }}>{borrador.id ? "Salir sin guardar" : "Descartar"}</button>
         </div>
       )}
       <div className={`panel ${borrador.id || items.length ? "panel-cotizando" : ""}`}>

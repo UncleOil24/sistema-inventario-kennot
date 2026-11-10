@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado } from "./ui";
+import { Modal, Estado, confirmar } from "./ui";
 import { api } from "./lib";
 
 const VACIO = { nombre: "", email: "", password: "", rol: "comercial", activo: true };
@@ -69,7 +69,7 @@ export default function Usuarios({ notify, yo }) {
                     <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...u, password: "" })}>Editar</button>
                     {u.id !== yo.id && <button className="btn btn-ghost btn-sm" title="Genera una clave temporal nueva (y quita el bloqueo por intentos fallidos)"
                       onClick={async () => {
-                        if (!confirm(`¿Dar una clave temporal nueva a ${u.nombre}? La anterior deja de servir.`)) return;
+                        if (!(await confirmar(`¿Dar una clave temporal nueva a ${u.nombre}?\nLa anterior deja de servir.`, { titulo: "Nueva clave temporal", boton: "Generar clave" }))) return;
                         try { const r = await api(`/usuarios/${u.id}/clave-temporal`, { method: "POST" }); setClaves([{ ...r, estado: "nueva clave" }]); cargar(); }
                         catch (e) { notify(e.message, "danger"); }
                       }}>Nueva clave temporal</button>}

@@ -18,6 +18,7 @@ import Iva from "./erp/Iva";
 import Produccion from "./erp/Produccion";
 import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
+import { Avisos } from "./erp/ui";
 import Usuarios from "./erp/Usuarios";
 import CambiarPassword from "./erp/CambiarPassword";
 
@@ -549,6 +550,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
         <CambiarPassword obligatorio notify={showNotif} onClose={() => setUsuario((u) => ({ ...u, debe_cambiar_clave: false }))} onSalir={onLogout} />
       )}
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
+      <Avisos />
     </>
   );
 }

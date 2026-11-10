@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, Totales } from "./ui";
+import { Modal, Estado, Totales, confirmar, pedirTexto } from "./ui";
 import { conConfirmacion } from "./Recorrido";
 import { api, fmt, fecha, descargar, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
 
@@ -37,14 +37,14 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
   const nombreArchivo = (c, ext) => `${idCot(c)}${c.anterior ? "_anterior" : ""}-${c.cliente || "cliente"}.${ext}`;
   const excel = (c) => descargar(`/cotizaciones/${c.id}/excel`, nombreArchivo(c, "xlsx")).catch((e) => notify(e.message, "danger"));
   const pdf = (c) => descargar(`/cotizaciones/${c.id}/pdf`, nombreArchivo(c, "pdf")).catch((e) => notify(e.message, "danger"));
-  const rechazar = (c) => {
-    const motivo = prompt(`¿Por qué se rechazó la ${nombreCot(c)}? (precio, plazo, se compró a otro...)`, "");
+  const rechazar = async (c) => {
+    const motivo = await pedirTexto(`¿Por qué se rechazó la ${nombreCot(c)}?`, { titulo: "Cotización rechazada", placeholder: "precio, plazo, se compró a otro...", boton: "Marcar rechazada" });
     if (motivo !== null) accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } }), "Cotización marcada como rechazada");
   };
   const reabrir = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "cotizacion" } }), "Cotización reabierta");
   const pedido = (c) => descargar(`/cotizaciones/${c.id}/pedido-proveedor`, `Pedido_cotizacion_${idCot(c)}.xlsx`).catch((e) => notify(e.message, "danger"));
   const vencer = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "vencida" } }), "Cotización marcada como vencida");
-  const eliminar = (c) => confirm(`¿Eliminar la ${nombreCot(c)}? Es mejor marcarla rechazada o vencida para no perder el historial.`)
+  const eliminar = async (c) => (await confirmar(`¿Eliminar la ${nombreCot(c)}?\nEs mejor marcarla rechazada o vencida para no perder el historial.`, { titulo: "Eliminar cotización", boton: "Eliminar", peligro: true }))
     && accion(() => api(`/cotizaciones/${c.id}`, { method: "DELETE" }), "Cotización eliminada");
 
   // Carga la cotización en el cotizador (conserva precios cotizados)

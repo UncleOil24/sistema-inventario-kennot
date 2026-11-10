@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Modal, Estado, SelectorProducto, SelectorCategoria } from "./ui";
+import { Modal, Estado, SelectorProducto, SelectorCategoria, confirmar } from "./ui";
 import { api, fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses, invalidarProductos, sinTildes } from "./lib";
 
 // Unidades de Mercado Público y listas de clientes -> las del catálogo
@@ -78,7 +78,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
 
   // Crea en el catálogo todas las líneas sin producto (sin precio: se cotizan después en Catálogo → Precios)
   const crearTodas = async () => {
-    if (!confirm(`¿Agregar al catálogo los ${sinProducto.length} productos que no existen? Quedan sin precio de compra hasta que los cotices (Catálogo → Precios) y en la categoría POR CLASIFICAR si no se reconoce la suya.`)) return;
+    if (!(await confirmar(`¿Agregar al catálogo los ${sinProducto.length} productos que no existen?\nQuedan sin precio de compra hasta que los cotices (Catálogo → Precios) y en la categoría POR CLASIFICAR si no se reconoce la suya.`, { titulo: "Agregar al catálogo", boton: "Agregar" }))) return;
     setCreandoTodas(true);
     let n = 0;
     try {

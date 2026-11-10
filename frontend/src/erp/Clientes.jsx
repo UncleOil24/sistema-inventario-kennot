@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Modal, Estado, Etapa, EstadoFactura } from "./ui";
+import { Modal, Estado, Etapa, EstadoFactura, confirmar } from "./ui";
 import { api, fmt, fecha, nombreCot, sinTildes } from "./lib";
 
 const VACIO = {
@@ -36,7 +36,7 @@ export default function Clientes({ esAdmin, clientes, loading, recargar, notify 
     finally { setGuardando(false); }
   };
   const eliminar = async (c) => {
-    if (!confirm(`¿Eliminar a ${c.nombre}? Sus cotizaciones y ventas se conservan.`)) return;
+    if (!(await confirmar(`¿Eliminar a ${c.nombre}?\nSus cotizaciones y ventas se conservan.`, { titulo: "Eliminar cliente", boton: "Eliminar", peligro: true }))) return;
     try { await api(`/clientes/${c.id}`, { method: "DELETE" }); notify("Cliente eliminado", "danger"); recargar(); }
     catch (e) { notify(e.message, "danger"); }
   };
