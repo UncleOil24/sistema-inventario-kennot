@@ -21,6 +21,7 @@ router.post("/:id/generar-ordenes", operativo, c.generarOrdenes);
 router.post("/:id/aceptar", operativo, c.aceptarVenta);
 router.post("/:id/confirmar", operativo, c.confirmarVenta);
 router.post("/:id/facturas", comercial, c.agregarFactura);
+router.post("/:id/facturas/cerrar", comercial, c.cerrarFacturacion);
 const sii = require("../controllers/siiController");
 const subirSII = require("multer")({ storage: require("multer").memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 router.get("/:id/sii", sii.ficha);

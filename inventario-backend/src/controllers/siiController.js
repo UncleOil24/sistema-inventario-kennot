@@ -95,7 +95,7 @@ const registrar = handler(async (req, res) => {
     if (tipo === "factura" || tipo === "factura_exenta") {
       if (await Factura.findOne({ where: { numero: folio }, transaction: t })) throw new ErrorNegocio(`La factura ${folio} ya está registrada`);
       const falta = Math.round(Number(v.total) - Number(v.monto_facturado || 0));
-      const monto = Math.round(Number(b.monto) || falta);
+      const monto = require("./ventasController").montoConIva(Number(b.monto) || "", falta, v);
       if (!(monto > 0)) throw new ErrorNegocio(falta <= 0 ? "La venta ya está facturada completa" : "Monto inválido");
       if (monto > falta + 2) throw new ErrorNegocio(`El monto supera lo que falta por facturar ($${falta.toLocaleString("es-CL")})`);
       await Factura.create({ venta_id: v.id, numero: folio, fecha, monto, notas: "Emitida en el portal del SII", creado_por: firma(req) }, { transaction: t });
