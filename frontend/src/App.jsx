@@ -284,6 +284,7 @@ const styles = `
   .subpestanas { margin-bottom: 16px; }
   .subpestanas .chip { font-size: 12.5px; padding: 8px 16px; }
   .header-nav { overflow: visible; }
+  .fila-periodo td { background: var(--surface); font-size: 14px; border-top: 3px solid var(--accent); padding-top: 10px; }
   .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
   .fila-alerta td { background: rgba(240,190,40,0.16); }
   .link { background: none; border: none; color: var(--info); cursor: pointer; font-family: var(--mono); font-size: 11px; padding: 2px 4px; text-align: left; }
