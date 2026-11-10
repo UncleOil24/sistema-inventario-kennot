@@ -6,6 +6,7 @@ router.get("/licitaciones", c.listar);
 router.get("/licitaciones/:codigo", c.detalle);
 router.put("/licitaciones/:codigo", c.actualizar);
 router.post("/sincronizar", permite("comercial"), c.sincronizar);
+router.post("/traer", permite("comercial"), c.traer);
 router.get("/trabajo/:id", c.trabajo);
 
 module.exports = router;

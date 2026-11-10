@@ -56,9 +56,26 @@ const compacto = (n) => {
 export function InicioDepto({ depto, notify, irA }) {
   const [data, setData] = useState(null);
   const [aceptar, setAceptar] = useState(null);
+  const [revisando, setRevisando] = useState(null); // avance de la revisión de Mercado Público
+  // Revisar Mercado Público ahora (además de las revisiones automáticas de las 11:00 y 16:00)
+  const actualizarMP = async () => {
+    try {
+      const { id } = await api("/mercado-publico/sincronizar", { method: "POST" });
+      setRevisando({ paso: "Conectando con Mercado Público..." });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const t = await api(`/mercado-publico/trabajo/${id}`);
+        if (t.estado === "listo") { notify(`✓ Mercado Público revisado: ${t.resumen?.nuevas || 0} proceso(s) nuevo(s)`); break; }
+        if (t.estado === "error") { notify(t.error, "danger"); break; }
+        setRevisando(t);
+      }
+      setRevisando(null);
+      setData(await api(`/dashboard?meses=3&area=${depto}&fresco=1`));
+    } catch (e) { notify(e.message, "danger"); setRevisando(null); }
+  };
   const cargar = useCallback(async () => {
-    try { setData(await api("/dashboard?meses=3")); } catch (e) { notify(e.message, "danger"); }
-  }, [notify]);
+    try { setData(await api(`/dashboard?meses=3&area=${depto}`)); } catch (e) { notify(e.message, "danger"); }
+  }, [notify, depto]);
   useEffect(() => { cargar(); const t = setInterval(cargar, 5 * 60 * 1000); return () => clearInterval(t); }, [cargar]); // se actualiza cada 5 minutos
   const descartar = async (t) => {
     try {
@@ -92,6 +109,12 @@ export function InicioDepto({ depto, notify, irA }) {
   );
   return (
     <>
+      {depto === "comercial" && (
+        <div className="toolbar" style={{ marginBottom: 8, justifyContent: "flex-end" }}>
+          <span className="mini">{revisando ? <><span className="spinner"></span>{revisando.paso}</> : `Mercado Público: ${data.licitaciones?.ultima_revision ? `revisado ${new Date(data.licitaciones.ultima_revision).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "aún sin revisar"} · se revisa solo a las 11:00 y 16:00`}</span>
+          <button className="btn btn-ghost btn-sm" disabled={!!revisando} onClick={actualizarMP}>↻ Actualizar ahora</button>
+        </div>
+      )}
       <QueHacer tareas={tareas} irA={irA} onDescartar={depto === "comercial" ? descartar : null} />
       {depto === "comercial" && (
         <div className="inicio-dos" style={{ marginBottom: 14 }}>

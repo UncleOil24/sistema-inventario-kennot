@@ -74,7 +74,7 @@ export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify
       {despacho && (
         <div className="pago-form">
           <input type="date" value={despacho.fecha} onChange={(e) => setDespacho({ ...despacho, fecha: e.target.value })} />
-          <input placeholder="N° guía de despacho (opcional)" value={despacho.guia} onChange={(e) => setDespacho({ ...despacho, guia: e.target.value })} />
+          <input placeholder={(venta.facturas || []).length ? "N° guía de despacho (opcional, ya tiene factura)" : "N° guía de despacho (obligatoria: aún sin factura)"} value={despacho.guia} onChange={(e) => setDespacho({ ...despacho, guia: e.target.value })} />
           <button className="btn btn-primary btn-sm" disabled={enviando} onClick={() => hacer(() => api(`/ventas/${venta.id}/despachar`, { method: "POST", body: despacho }), `✓ ${venta.numero} despachada`)}>Confirmar despacho</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setDespacho(null)}>Cancelar</button>
         </div>
@@ -83,6 +83,7 @@ export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify
         <div className="pago-form">
           <input type="date" value={entrega.fecha} onChange={(e) => setEntrega({ ...entrega, fecha: e.target.value })} />
           <input placeholder="Quién recibió (opcional)" value={entrega.recibido_por} onChange={(e) => setEntrega({ ...entrega, recibido_por: e.target.value })} />
+          {venta.etapa === "lista" && !(venta.facturas || []).length && <input placeholder="N° guía (obligatoria: aún sin factura)" value={entrega.guia || ""} onChange={(e) => setEntrega({ ...entrega, guia: e.target.value })} />}
           <button className="btn btn-success btn-sm" disabled={enviando} onClick={() => hacer(() => api(`/ventas/${venta.id}/entregar`, { method: "POST", body: entrega }), `✓ ${venta.numero} entregada`)}>Confirmar entrega</button>
           <button className="btn btn-ghost btn-sm" onClick={() => setEntrega(null)}>Cancelar</button>
         </div>

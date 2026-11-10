@@ -54,6 +54,13 @@ router.get("/produccion", handler(async (req, res) => {
       COUNT(*) FILTER (WHERE fuente = 'compra_agil')::int AS compra_agil,
       COUNT(*) FILTER (WHERE fuente <> 'compra_agil')::int AS licitaciones
     FROM licitaciones l WHERE ${enRango("l.fecha_cierre")} AND l.fecha_cierre < NOW()`);
+  // Más los procesos ya borrados (cerrados hace más de 3 días sin cotizar): solo quedó su conteo por día
+  try {
+    const [arch] = await q(`SELECT COALESCE(SUM(cerrados),0)::int AS cerrados, COALESCE(SUM(descartados),0)::int AS descartados, COALESCE(SUM(sin_postular),0)::int AS sin_postular,
+      COALESCE(SUM(compra_agil),0)::int AS compra_agil, COALESCE(SUM(licitaciones),0)::int AS licitaciones FROM mp_conteo_cerradas WHERE fecha BETWEEN :desde AND :hasta`);
+    for (const k of Object.keys(arch)) mp[k] = (mp[k] || 0) + arch[k];
+    mp.archivados = arch.cerrados;
+  } catch { /* la tabla se crea con la primera limpieza */ }
   r.mercado_publico = mp;
   r.sin_postular = await q(`SELECT codigo, nombre, organismo, fecha_cierre, monto_estimado::float AS monto, fuente FROM licitaciones l
     WHERE ${enRango("l.fecha_cierre")} AND l.fecha_cierre < NOW() AND estado_interno <> 'descartada'

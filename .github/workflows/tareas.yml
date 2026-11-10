@@ -1,14 +1,16 @@
 # Tareas programadas: despierta el servidor y le pide hacer lo que corresponda según la hora de Chile.
-#  - Tarde (18:00 Chile): revisa licitaciones nuevas en Mercado Público.
+#  - 11:00 y 16:00 Chile: revisa licitaciones y Compra Ágil nuevas en Mercado Público.
 #  - Mañana (~08:00 Chile): envía por correo el resumen de licitaciones nuevas y el respaldo semanal.
-# GitHub usa hora UTC: se programa a las 21:00 y 22:00 UTC (18:00 en verano / 18:00 en invierno; la otra
-# llamada no hace nada porque el servidor revisa la hora de Chile) y a las 11:00 UTC (08:00 verano / 07:00 invierno).
+# GitHub usa hora UTC: 14:00 y 15:00 UTC (11:00 en verano / 11:00 en invierno), 19:00 y 20:00 UTC (16:00 verano / invierno);
+# la llamada que sobra no hace nada porque el servidor revisa la hora de Chile. 11:00 UTC = correo de la mañana.
 # Ver inventario-backend/src/routes/tareas.js.
 name: Tareas diarias
 on:
   schedule:
-    - cron: "3 21 * * *"
-    - cron: "3 22 * * *"
+    - cron: "3 14 * * *"
+    - cron: "3 15 * * *"
+    - cron: "3 19 * * *"
+    - cron: "3 20 * * *"
     - cron: "3 11 * * *"
   workflow_dispatch: {}
 jobs:

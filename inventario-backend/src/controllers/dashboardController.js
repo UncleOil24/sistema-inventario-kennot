@@ -4,6 +4,7 @@ const Venta = require("../models/Venta");
 const OrdenCompra = require("../models/OrdenCompra");
 const Producto = require("../models/Producto");
 const Cotizacion = require("../models/Cotizacion");
+const cacheInicio = require("../services/cacheInicio");
 const Pago = require("../models/Pago");
 const Gasto = require("../models/Gasto");
 const { handler } = require("../services/erp");
@@ -29,6 +30,15 @@ const primerDiaMes = (delta = 0) => {
 
 // GET /api/dashboard?meses=6
 const getDashboard = handler(async (req, res) => {
+  // Inicio de un área (comercial u operativo): solo se calcula lo de esa área (sin series, cobranza de
+  // Finanzas, IVA ni pagos a proveedores), que es lo pesado. El Resumen de Finanzas pide todo (sin "area").
+  const area = ["comercial", "operativo"].includes(req.query.area) ? req.query.area : null;
+  const ligero = !!area;
+  const claveCache = `${req.usuario?.rol}|${area || "todo"}|${req.query.meses || 6}`;
+  if (req.query.fresco !== "1") {
+    const enCache = cacheInicio.leer(claveCache);
+    if (enCache) return res.json({ ok: true, data: enCache });
+  }
   const meses = Math.min(Math.max(Number(req.query.meses) || 6, 1), 24);
   const hoy = new Date();
   const inicioMes = primerDiaMes(0);
@@ -48,23 +58,24 @@ const getDashboard = handler(async (req, res) => {
     attributes: ["id", "numero", "cliente", "nombre_cotizacion", "fecha", "fecha_validez", "ultimo_contacto", "proximo_contacto", "subtotal"] });
 
   const [ventasPeriodo, comprasPeriodo, gastosPeriodo, cotizaciones, pagosMes, porCobrar, porPagar, ventasActivas, ocsVenta, catalogo] = await Promise.all([
-    Venta.findAll({ where: { estado: "emitida", fecha: { [Op.gte]: inicioSerie } }, order: [["fecha", "DESC"], ["id", "DESC"]] }),
-    OrdenCompra.findAll({ where: { estado: "recibida", fecha_recepcion: { [Op.gte]: inicioSerie } }, attributes: ["fecha_recepcion", "subtotal"] }),
-    Gasto.findAll({ where: { fecha: { [Op.gte]: inicioSerie } }, attributes: ["fecha", "monto", "tipo"] }),
-    Cotizacion.findAll({ attributes: ["estado", "total", "subtotal", "createdAt"] }),
-    Pago.findAll({ where: { fecha: { [Op.gte]: inicioMes } }, attributes: ["tipo", [fn("SUM", col("monto")), "total"]], group: ["tipo"], raw: true }),
-    Venta.findAll({
+    ligero ? [] : Venta.findAll({ where: { estado: "emitida", fecha: { [Op.gte]: inicioSerie } }, order: [["fecha", "DESC"], ["id", "DESC"]] }),
+    ligero ? [] : OrdenCompra.findAll({ where: { estado: "recibida", fecha_recepcion: { [Op.gte]: inicioSerie } }, attributes: ["fecha_recepcion", "subtotal"] }),
+    ligero ? [] : Gasto.findAll({ where: { fecha: { [Op.gte]: inicioSerie } }, attributes: ["fecha", "monto", "tipo"] }),
+    ligero ? [] : Cotizacion.findAll({ attributes: ["estado", "total", "subtotal", "createdAt"] }),
+    ligero ? [] : Pago.findAll({ where: { fecha: { [Op.gte]: inicioMes } }, attributes: ["tipo", [fn("SUM", col("monto")), "total"]], group: ["tipo"], raw: true }),
+    ligero ? [] : Venta.findAll({
       where: { estado: "emitida", estado_pago: { [Op.ne]: "pagada" } },
       attributes: ["id", "numero", "cliente_nombre", "fecha", "fecha_vencimiento", "total", "monto_pagado"],
       order: [[literal("fecha_vencimiento IS NULL"), "ASC"], ["fecha_vencimiento", "ASC"]],
     }),
-    OrdenCompra.findAll({
+    ligero ? [] : OrdenCompra.findAll({
       where: { estado: "recibida", estado_pago: { [Op.ne]: "pagada" } },
       attributes: ["id", "numero", "proveedor_nombre", "fecha_vencimiento", "total", "monto_pagado"],
     }),
-    Venta.findAll({ where: { estado: "emitida", etapa: { [Op.ne]: "entregada" } }, attributes: ["id", "numero", "cliente_nombre", "fecha", "subtotal", "total", "etapa", "estado_factura", "monto_facturado", "orden_compra_cliente", "despacho_fecha", "lista_fecha"], order: [["id", "ASC"]], limit: 500 }),
+    // En curso: todo lo no entregado, más lo entregado que aún no tiene factura completa (para "Por facturar")
+    Venta.findAll({ where: { estado: "emitida", [Op.or]: [{ etapa: { [Op.ne]: "entregada" } }, { estado_factura: { [Op.ne]: "facturada" } }] }, attributes: ["id", "numero", "cliente_nombre", "fecha", "subtotal", "total", "etapa", "estado_factura", "monto_facturado", "orden_compra_cliente", "despacho_fecha", "lista_fecha"], order: [["id", "ASC"]], limit: 500 }),
     OrdenCompra.findAll({ where: { venta_id: { [Op.ne]: null }, estado: { [Op.ne]: "anulada" } }, attributes: ["venta_id", "estado"], raw: true }),
-    sequelize.query(`SELECT COUNT(*)::int AS productos,
+    ligero ? {} : sequelize.query(`SELECT COUNT(*)::int AS productos,
         COUNT(*) FILTER (WHERE precio_compra IS NULL OR precio_compra <= 0)::int AS sin_precio,
         COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
         COUNT(*) FILTER (WHERE confirmado)::int AS confirmados,
@@ -138,7 +149,8 @@ const getDashboard = handler(async (req, res) => {
   const porAceptar = ventasActivas.filter((v) => v.etapa === "registrada");
   const porComprar = ventasActivas.filter((v) => ["registrada", "aceptada"].includes(v.etapa) && !conOC.has(v.id));
   const porConfirmar = ventasActivas.filter((v) => v.etapa === "aceptada" && conOC.has(v.id) && !sinRecibir.has(v.id));
-  const porFacturar = ventasActivas.filter((v) => ["lista", "despachada"].includes(v.etapa) && v.estado_factura !== "facturada");
+  // Todo lo que Operativo ya movió (productos listos, despachada o entregada) y aún no tiene factura completa
+  const porFacturar = ventasActivas.filter((v) => ["lista", "despachada", "entregada"].includes(v.etapa) && v.estado_factura !== "facturada");
   const porDespachar = ventasActivas.filter((v) => v.etapa === "lista");
   const porEntregar = ventasActivas.filter((v) => v.etapa === "despachada");
 
@@ -166,9 +178,9 @@ const getDashboard = handler(async (req, res) => {
 
   // --- Qué hacer hoy: acciones concretas, lo más urgente primero ---
   // urgencia: 0 = hoy/vencido, 1 = pronto, 2 = cuando se pueda
-  const admin = esAdmin(req);
-  const operativo = tieneRol(req, "operativo");
-  const comercial = tieneRol(req, "comercial") || req.usuario?.rol === "usuario";
+  const admin = esAdmin(req) && !ligero;
+  const operativo = tieneRol(req, "operativo") && (!area || area === "operativo");
+  const comercial = (tieneRol(req, "comercial") || req.usuario?.rol === "usuario") && (!area || area === "comercial");
   const dias = (d) => (d ? Math.round((new Date(`${String(d).slice(0, 10)}T12:00:00`) - new Date(`${hoyStr}T12:00:00`)) / 864e5) : null);
   const cuando = (dd) => (dd === 0 ? "hoy" : dd === 1 ? "mañana" : dd < 0 ? `hace ${-dd} día(s)` : `en ${dd} días`);
   const tareas = [];
@@ -237,7 +249,7 @@ const getDashboard = handler(async (req, res) => {
   // Comprar a proveedores
   const oc = (v) => (v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : "");
   if (comercial) {
-    for (const v of porFacturar.slice(0, 8)) tareas.push({ tipo: "facturar", urgencia: 0, texto: `Facturar ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `${v.estado_factura === "parcial" ? `Falta facturar $${n(Number(v.total) - Number(v.monto_facturado)).toLocaleString("es-CL")}` : `Total $${n(v.total).toLocaleString("es-CL")}`}${oc(v)} · productos listos`, vista: "facturacion", id: v.id, boton: "Facturar" });
+    for (const v of porFacturar.slice(0, 8)) tareas.push({ tipo: "facturar", urgencia: 0, texto: `Facturar ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `${v.estado_factura === "parcial" ? `Falta facturar $${n(Number(v.total) - Number(v.monto_facturado)).toLocaleString("es-CL")}` : `Total $${n(v.total).toLocaleString("es-CL")}`}${oc(v)} · ${v.etapa === "lista" ? "productos listos" : v.etapa === "despachada" ? "ya despachada" : "ya entregada"}`, vista: "facturacion", id: v.id, boton: "Facturar" });
   }
   if (operativo) {
     for (const v of porAceptar.slice(0, 8)) tareas.push({ tipo: "aceptar", urgencia: 0, texto: `Aceptar la venta ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `Registrada el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")}${oc(v)}: revísala y compra`, vista: "ventas", id: v.id, boton: "Ver venta" });
@@ -325,6 +337,7 @@ const getDashboard = handler(async (req, res) => {
     delete data.por_comprar;
     data.limitado = true;
   }
+  cacheInicio.guardar(claveCache, data);
   res.json({ ok: true, data });
 });
 

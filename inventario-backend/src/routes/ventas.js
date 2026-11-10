@@ -10,6 +10,7 @@ router.get("/:id", c.getVenta);
 router.post("/", comercial, c.crearVenta);
 router.post("/desde-cotizacion/:id", comercial, c.ventaDesdeCotizacion);
 router.put("/:id/datos", comercial, c.actualizarDatos);
+router.get("/:id/anulacion", c.resumenAnulacion);
 router.post("/:id/anular", soloAdmin, c.anularVenta);
 router.post("/:id/cobros", soloAdmin, c.registrarCobro); // cobros: Finanzas
 // Qué comprar y a quién: lo gestiona Operativo

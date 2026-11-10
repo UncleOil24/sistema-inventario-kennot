@@ -241,18 +241,47 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
   res.status(201).json({ ok: true, data: verVenta(req, venta) });
 });
 
-// POST /api/ventas/:id/anular   -> la cotización vuelve a quedar abierta
+// Qué tiene la venta y qué impide anularla (la misma revisión en Comercial y en Operativo)
+const revisarAnulacion = async (v, t) => {
+  const [ocs, facturas] = await Promise.all([
+    OrdenCompra.findAll({ where: { venta_id: v.id, estado: { [Op.ne]: "anulada" } }, attributes: ["id", "numero", "proveedor_nombre", "estado", "total"], transaction: t }),
+    Factura.findAll({ where: { venta_id: v.id }, attributes: ["id", "numero", "monto", "fecha"], transaction: t }),
+  ]);
+  const pedidas = ocs.filter((o) => o.estado === "borrador");
+  const recibidas = ocs.filter((o) => o.estado === "recibida");
+  const bloqueos = [];
+  if (Number(v.monto_pagado) > 0) bloqueos.push({ que: `Tiene cobros registrados por $${Math.round(Number(v.monto_pagado)).toLocaleString("es-CL")}`, donde: "Finanzas → Ventas y cobros: elimina los cobros (o devuelve el pago) antes de anular" });
+  if (facturas.length) bloqueos.push({ que: `Tiene ${facturas.length} factura(s) emitida(s): ${facturas.map((f) => `N° ${f.numero}`).join(", ")}`, donde: "Emite la nota de crédito y quita la factura en la venta (Comercial → Facturación)" });
+  if (recibidas.length) bloqueos.push({ que: `Tiene ${recibidas.length} compra(s) ya recibida(s): ${recibidas.map((o) => `${o.numero} de ${o.proveedor_nombre}`).join(", ")}`, donde: "Operativo → Compras: decide qué hacer con esos productos (devolución al proveedor o guardarlos para otra venta) y anula o suelta la compra" });
+  return {
+    estado: v.estado, etapa: v.etapa, numero: v.numero,
+    compras_pedidas: pedidas.map((o) => ({ numero: o.numero, proveedor: o.proveedor_nombre, total: Math.round(Number(o.total)) })),
+    compras_recibidas: recibidas.map((o) => ({ numero: o.numero, proveedor: o.proveedor_nombre, total: Math.round(Number(o.total)) })),
+    facturas: facturas.map((f) => ({ numero: f.numero, monto: Math.round(Number(f.monto)) })),
+    cobrado: Math.round(Number(v.monto_pagado) || 0),
+    bloqueos, puede: v.estado !== "anulada" && !bloqueos.length,
+  };
+};
+
+// GET /api/ventas/:id/anulacion   -> resumen para la ventana de anulación
+const resumenAnulacion = handler(async (req, res) => {
+  const v = await Venta.findByPk(req.params.id);
+  if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  res.json({ ok: true, data: await revisarAnulacion(v) });
+});
+
+// POST /api/ventas/:id/anular   { motivo }  -> la cotización vuelve a quedar abierta
 const anularVenta = handler(async (req, res) => {
+  const motivo = String(req.body?.motivo || "").trim();
+  if (!motivo) throw new ErrorNegocio("Indica el motivo de la anulación");
   const venta = await sequelize.transaction(async (t) => {
     const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
     if (v.estado === "anulada") throw new ErrorNegocio("La venta ya está anulada");
-    if (Number(v.monto_pagado) > 0) throw new ErrorNegocio("La venta tiene cobros registrados. Elimínalos antes de anular.");
-    if (await Factura.count({ where: { venta_id: v.id }, transaction: t })) throw new ErrorNegocio("La venta tiene facturas registradas. Quítalas (o emite la nota de crédito) antes de anular.");
-    const ocs = await OrdenCompra.count({ where: { venta_id: v.id, estado: "recibida" }, transaction: t });
-    if (ocs > 0) throw new ErrorNegocio("La venta tiene compras recibidas. Anúlalas primero en Compras.");
+    const r = await revisarAnulacion(v, t);
+    if (r.bloqueos.length) throw new ErrorNegocio(`No se puede anular todavía: ${r.bloqueos.map((b) => b.que).join(" · ")}`);
     await OrdenCompra.update({ estado: "anulada" }, { where: { venta_id: v.id, estado: "borrador" }, transaction: t });
-    await v.update({ estado: "anulada" }, { transaction: t });
+    await v.update({ estado: "anulada", motivo_anulacion: motivo.slice(0, 255), anulada_por: firma(req), anulada_fecha: new Date() }, { transaction: t });
     if (v.cotizacion_id) {
       await Cotizacion.update({ estado: "cotizacion", venta_id: null }, { where: { id: v.cotizacion_id }, transaction: t });
     }
@@ -488,17 +517,28 @@ const confirmarVenta = conVenta(async (v, req, t) => {
   }, { transaction: t });
 });
 
+// Para despachar (o entregar sin despacho, retiro en local) debe haber guía de despacho o al menos una factura:
+// así no se salta la facturación (decisión de gerencia, 10-nov-2026)
+const exigirDocumentoDespacho = async (v, guia, t) => {
+  if (String(guia || v.guia_despacho || "").trim()) return;
+  if (await Factura.count({ where: { venta_id: v.id }, transaction: t })) return;
+  throw new ErrorNegocio("Para despachar se necesita el N° de guía de despacho o una factura registrada. Pide a Comercial que facture o anota la guía.");
+};
+
 // POST /api/ventas/:id/despachar   { fecha, guia }
 const despacharVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "lista");
+  await exigirDocumentoDespacho(v, req.body?.guia, t);
   await v.update({ etapa: "despachada", despacho_fecha: req.body?.fecha || hoy(), guia_despacho: String(req.body?.guia || "").trim() || null, despacho_por: firma(req) }, { transaction: t });
 });
 
 // POST /api/ventas/:id/entregar   { fecha, recibido_por }
 const entregarVenta = conVenta(async (v, req, t) => {
   exigirEtapa(v, "despachada", "lista");
+  if (v.etapa === "lista") await exigirDocumentoDespacho(v, req.body?.guia, t);
   await v.update({
     etapa: "entregada", entrega_fecha: req.body?.fecha || hoy(), recibido_por: String(req.body?.recibido_por || "").trim() || null,
+    ...(String(req.body?.guia || "").trim() ? { guia_despacho: String(req.body.guia).trim() } : {}),
     // Plazo contado desde la recepción conforme
     ...(v.base_vencimiento === "recepcion" && v.plazo_pago_dias != null ? { fecha_vencimiento: sumarDesde(req.body?.fecha || hoy(), v.plazo_pago_dias) } : {}),
     ...(v.despacho_fecha ? {} : { despacho_fecha: req.body?.fecha || hoy(), despacho_por: firma(req) }),
@@ -568,6 +608,7 @@ const listarFacturas = handler(async (req, res) => {
 });
 
 module.exports = {
+  resumenAnulacion,
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,

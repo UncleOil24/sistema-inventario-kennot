@@ -36,6 +36,9 @@ const Venta = sequelize.define("Venta", {
   estado_factura: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "sin_factura" },
   monto_facturado: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
   estado: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "emitida" },
+  motivo_anulacion: { type: DataTypes.STRING(255), allowNull: true },
+  anulada_por: { type: DataTypes.STRING(100), allowNull: true }, // "Nombre (Área)"
+  anulada_fecha: { type: DataTypes.DATE, allowNull: true },
   // items: [{ producto_id, nombre, unidad, cantidad, precio, costo, proveedor }]
   // "costo" y "proveedor" se copian de la cotización (o del catálogo si es venta directa)
   items: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },

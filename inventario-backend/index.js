@@ -67,6 +67,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/tareas", tareasRoutes); // tareas programadas (públicas, sin efecto si no corresponde)
 app.use("/api", requiereAuth);
+app.use("/api", require("./src/services/cacheInicio").invalidarAlEscribir);
 app.use("/api/usuarios", usuariosRoutes);
 app.use("/api/productos", productosRoutes);
 app.use("/api/cotizaciones", cotizacionesRoutes);
