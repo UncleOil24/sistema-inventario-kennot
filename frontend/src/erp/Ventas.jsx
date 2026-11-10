@@ -228,8 +228,10 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
 function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar, puedeVender, notify, onClose, onCambio, irACompra }) {
   const [cuadro, setCuadro] = useState(false);
   const editaDatos = puedeVender && modo === "comercial";
-  const [datos, setDatos] = useState({ plazo_pago_dias: venta.plazo_pago_dias ?? "", base_vencimiento: venta.base_vencimiento || "factura", orden_compra_cliente: venta.orden_compra_cliente || "", id_solicitud: venta.id_solicitud || "" });
+  const [datos, setDatos] = useState({ plazo_pago_dias: venta.plazo_pago_dias ?? "", base_vencimiento: venta.base_vencimiento || "factura", orden_compra_cliente: venta.orden_compra_cliente || "", id_solicitud: venta.id_solicitud || "", cliente_id: venta.cliente_id || "" });
   const r = venta.resumen;
+  const [clientes, setClientes] = useState([]);
+  useEffect(() => { if (editaDatos) api("/clientes").then((l) => setClientes(Array.isArray(l) ? l : l?.clientes || [])).catch(() => {}); }, [editaDatos]);
 
   const accion = async (fn, ok) => {
     try { await fn(); notify(ok); onCambio(); } catch (e) { notify(e.message, "danger"); }
@@ -240,11 +242,12 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
     // El plazo solo se manda si cambió (recalcula el vencimiento)
     const { plazo_pago_dias, base_vencimiento, ...resto } = datos;
     const body = { ...resto };
+    if (String(body.cliente_id || "") === String(venta.cliente_id || "")) delete body.cliente_id;
     if (String(plazo_pago_dias) !== String(venta.plazo_pago_dias ?? "") && plazo_pago_dias !== "") body.plazo_pago_dias = Number(plazo_pago_dias);
     if (base_vencimiento !== (venta.base_vencimiento || "factura")) body.base_vencimiento = base_vencimiento;
     accion(() => api(`/ventas/${venta.id}/datos`, { method: "PUT", body }), "✓ Datos guardados");
   };
-  const cambioDatos = String(datos.plazo_pago_dias) !== String(venta.plazo_pago_dias ?? "") || datos.base_vencimiento !== (venta.base_vencimiento || "factura") || datos.orden_compra_cliente !== (venta.orden_compra_cliente || "") || datos.id_solicitud !== (venta.id_solicitud || "");
+  const cambioDatos = String(datos.plazo_pago_dias) !== String(venta.plazo_pago_dias ?? "") || datos.base_vencimiento !== (venta.base_vencimiento || "factura") || datos.orden_compra_cliente !== (venta.orden_compra_cliente || "") || datos.id_solicitud !== (venta.id_solicitud || "") || String(datos.cliente_id || "") !== String(venta.cliente_id || "");
 
   return (
     <Modal titulo={`// Venta ${venta.numero}`} onClose={onClose} ancho={780}
@@ -282,6 +285,13 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
             <label>Desde</label>
             <select value={datos.base_vencimiento} onChange={(e) => setDatos({ ...datos, base_vencimiento: e.target.value })}>
               <option value="factura">la factura</option><option value="recepcion">la recepción</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Cliente</label>
+            <select value={datos.cliente_id} onChange={(e) => { const c = clientes.find((x) => String(x.id) === e.target.value); setDatos({ ...datos, cliente_id: e.target.value, id_solicitud: c && /^\d+$/.test(c.codigo || "") && !(datos.id_solicitud || "").startsWith(c.codigo) ? c.codigo : datos.id_solicitud }); }}>
+              <option value="">{venta.cliente_id ? "—" : `Sin asociar (${venta.cliente_nombre || "sin nombre"})`}</option>
+              {clientes.map((c) => <option key={c.id} value={c.id}>{c.codigo ? `${c.codigo} · ` : ""}{c.nombre}</option>)}
             </select>
           </div>
           <div className="field">
