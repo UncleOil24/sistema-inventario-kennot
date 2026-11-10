@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Cargando, Estado } from "./ui";
+import { Modal, Cargando, Estado, confirmar } from "./ui";
 import { api, fmt } from "./lib";
 
 // Cuadro de compra de una venta confirmada: qué comprar, a qué proveedor, a qué precio
@@ -15,7 +15,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   const usarAlternativa = async (linea, alt) => {
-    if (!confirm(`¿Comprar "${linea.nombre}" a ${alt.proveedor} a ${fmt(alt.precio)}? Cambia el costo y el margen de la venta.`)) return;
+    if (!(await confirmar(`¿Comprar "${linea.nombre}" a ${alt.proveedor} a ${fmt(alt.precio)}?\nCambia el costo y el margen de la venta.`, { titulo: "Cambiar proveedor", boton: "Cambiar" }))) return;
     try {
       await api(`/ventas/${ventaId}/cambiar-proveedor`, { method: "POST", body: { indice: linea.indice, proveedor: alt.proveedor, costo: alt.precio } });
       notify(`✓ Línea asignada a ${alt.proveedor}`);

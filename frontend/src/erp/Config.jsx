@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { confirmar } from "./ui";
 import { api, authFetch, API_URL, invalidarProductos, descargar } from "./lib";
 
 export default function Config({ notify }) {
@@ -59,7 +60,7 @@ export default function Config({ notify }) {
 
   const importar = async () => {
     if (!archivo) return;
-    if (!confirm("La importación reemplaza el precio vigente, opciones y REVISAR de cada producto de la planilla. El historial de precios no se duplica. ¿Continuar?")) return;
+    if (!(await confirmar("La importación reemplaza el precio vigente, las opciones y el REVISAR de cada producto de la planilla. El historial de precios no se duplica.", { titulo: "Importar planilla", boton: "Importar" }))) return;
     setImportando(true);
     setResultado(null);
     setAvance({ estado: "corriendo", paso: "Subiendo el archivo...", segundos: 0 });

@@ -1,5 +1,5 @@
 // Piezas compartidas por las vistas del ERP
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { fmt, fecha, hoyISO, sinTildes } from "./lib";
 
 export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
@@ -279,5 +279,43 @@ export function SelectorCategoria({ value, onChange, categorias }) {
       {lista.map((c) => <option key={c} value={c}>{c}</option>)}
       <option value="__nueva">+ Nueva categoría…</option>
     </select>
+  );
+}
+
+// --- Avisos del sistema (reemplazan confirm() y prompt() del navegador) -----------------------------
+// Uso: if (!(await confirmar("¿Eliminar X?", { peligro: true, boton: "Eliminar" }))) return;
+//      const motivo = await pedirTexto("¿Por qué se rechazó?", { placeholder: "precio, plazo..." }); // null = canceló
+// Una sola ventana para todo el sistema; <Avisos /> se monta una vez en App.
+let abrirAviso = null;
+const mostrarAviso = (op) => new Promise((resolve) => {
+  if (!abrirAviso) { resolve(op.texto ? window.prompt(op.mensaje, op.valor || "") : window.confirm(op.mensaje)); return; }
+  abrirAviso({ ...op, resolve });
+});
+export const confirmar = (mensaje, opciones = {}) => mostrarAviso({ mensaje, ...opciones });
+export const pedirTexto = (mensaje, opciones = {}) => mostrarAviso({ mensaje, texto: true, ...opciones });
+
+export function Avisos() {
+  const [op, setOp] = useState(null);
+  const [valor, setValor] = useState("");
+  useEffect(() => { abrirAviso = (o) => { setValor(o.valor || ""); setOp(o); }; return () => { abrirAviso = null; }; }, []);
+  if (!op) return null;
+  const cerrar = (resultado) => { op.resolve(resultado); setOp(null); };
+  const aceptar = () => {
+    if (op.texto && op.obligatorio && !valor.trim()) return;
+    cerrar(op.texto ? valor.trim() : true);
+  };
+  return (
+    <Modal titulo={`// ${op.titulo || (op.texto ? "Indica el detalle" : "Confirmar")}`} onClose={() => cerrar(op.texto ? null : false)} ancho={520}
+      footer={<>
+        <button className="btn btn-ghost" onClick={() => cerrar(op.texto ? null : false)}>Cancelar</button>
+        <button className={`btn ${op.peligro ? "btn-danger" : "btn-primary"}`} autoFocus={!op.texto} disabled={op.texto && op.obligatorio && !valor.trim()} onClick={aceptar}>{op.boton || "Aceptar"}</button>
+      </>}>
+      <div style={{ whiteSpace: "pre-line", fontSize: 14, lineHeight: 1.5 }}>{op.mensaje}</div>
+      {op.texto && (
+        <div className="field" style={{ marginTop: 12 }}>
+          <input autoFocus value={valor} placeholder={op.placeholder || ""} onChange={(e) => setValor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && aceptar()} />
+        </div>
+      )}
+    </Modal>
   );
 }

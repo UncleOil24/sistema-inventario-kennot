@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado } from "./ui";
+import { Modal, Estado, confirmar } from "./ui";
 import { api } from "./lib";
 
 const VACIO = { nombre: "", razon_social: "", rut: "", contacto: "", telefono: "", email: "", direccion: "", comuna: "", rubro: "", tipo: "proveedor", notas: "", excluido: false, motivo_exclusion: "" };
@@ -28,7 +28,7 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
   };
 
   const eliminar = async (p) => {
-    if (!confirm(`¿Eliminar a ${p.nombre}? Sus órdenes de compra se conservan.`)) return;
+    if (!(await confirmar(`¿Eliminar a ${p.nombre}?\nSus órdenes de compra se conservan.`, { titulo: "Eliminar proveedor", boton: "Eliminar", peligro: true }))) return;
     try { await api(`/proveedores/${p.id}`, { method: "DELETE" }); notify("Proveedor eliminado", "danger"); recargar(); }
     catch (e) { notify(e.message, "danger"); }
   };

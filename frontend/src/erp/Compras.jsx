@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel } from "./ui";
+import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar } from "./ui";
 import { api, fmt, fecha, useProductos } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 
@@ -266,11 +266,11 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
     () => api(`/ordenes-compra/${orden.id}/recibir`, { method: "POST", body: { registrar_precios: registrarPrecios, documento: factura || undefined } }),
     registrarPrecios ? "✓ Compra recibida — precios registrados" : "✓ Compra recibida", registrarPrecios
   );
-  const anular = () => {
-    if (confirm(`¿Anular ${orden.numero}?`)) accion(() => api(`/ordenes-compra/${orden.id}/anular`, { method: "POST" }), "Orden anulada");
+  const anular = async () => {
+    if (await confirmar(`¿Anular la orden ${orden.numero}?`, { titulo: "Anular orden de compra", boton: "Anular", peligro: true })) accion(() => api(`/ordenes-compra/${orden.id}/anular`, { method: "POST" }), "Orden anulada");
   };
   const eliminar = async () => {
-    if (!confirm(`¿Eliminar el borrador ${orden.numero}?`)) return;
+    if (!(await confirmar(`¿Eliminar el borrador ${orden.numero}?`, { titulo: "Eliminar orden", boton: "Eliminar", peligro: true }))) return;
     try { await api(`/ordenes-compra/${orden.id}`, { method: "DELETE" }); notify("Borrador eliminado", "danger"); onEliminada(); }
     catch (e) { notify(e.message, "danger"); }
   };
@@ -351,7 +351,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
           doc={orden}
           tipo="pago"
           onRegistrar={(body) => accion(() => api(`/ordenes-compra/${orden.id}/pagos`, { method: "POST", body }), "✓ Pago registrado")}
-          onEliminar={esAdmin ? (p) => confirm("¿Eliminar este pago?") && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Pago eliminado") : null}
+          onEliminar={esAdmin ? async (p) => (await confirmar("¿Eliminar este pago?", { titulo: "Eliminar pago", boton: "Eliminar", peligro: true })) && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Pago eliminado") : null}
         />
       )}
     </Modal>

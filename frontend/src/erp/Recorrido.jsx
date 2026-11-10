@@ -2,14 +2,14 @@
 // Operativo acepta y confirma (productos listos) → Comercial factura (una o varias facturas) → Operativo despacha → entregada.
 import { useState } from "react";
 import { api, fmt, fecha, hoyISO } from "./lib";
-import { Recorrido, EstadoFactura } from "./ui";
+import { Recorrido, EstadoFactura, confirmar } from "./ui";
 
 // Llama a la API; si el servidor pide confirmación (409), pregunta y reintenta con { forzar: true }
 export async function conConfirmacion(url, body = {}, method = "POST") {
   try {
     return await api(url, { method, body });
   } catch (e) {
-    if (e.status === 409 && confirm(`${e.message}\n\n¿Seguir de todas formas?`)) return api(url, { method, body: { ...body, forzar: true } });
+    if (e.status === 409 && (await confirmar(`${e.message}`, { titulo: "Atención", boton: "Seguir de todas formas" }))) return api(url, { method, body: { ...body, forzar: true } });
     if (e.status === 409) e.cancelado = true;
     throw e;
   }
@@ -69,7 +69,7 @@ export function AccionesVenta({ venta, puedeOperar, puedeVender, esAdmin, notify
       <div className="accion-etapa">
         {contenido}
         {esAdmin && venta.etapa !== "registrada" && <button className="link" style={{ marginLeft: "auto" }} disabled={enviando}
-          onClick={() => confirm("¿Deshacer el último paso de esta venta?") && hacer(() => api(`/ventas/${venta.id}/retroceder`, { method: "POST" }), "Paso deshecho")}>↺ deshacer último paso</button>}
+          onClick={async () => (await confirmar("¿Deshacer el último paso de esta venta?", { titulo: "Deshacer paso", boton: "Deshacer" })) && hacer(() => api(`/ventas/${venta.id}/retroceder`, { method: "POST" }), "Paso deshecho")}>↺ deshacer último paso</button>}
       </div>
       {despacho && (
         <div className="pago-form">
@@ -109,7 +109,7 @@ export function PanelFacturas({ venta, puedeVender, notify, onCambio }) {
     finally { setEnviando(false); }
   };
   const quitar = async (f) => {
-    if (!confirm(`¿Quitar la factura ${f.numero}? (solo si se ingresó por error)`)) return;
+    if (!(await confirmar(`¿Quitar la factura ${f.numero}?\nSolo si se ingresó por error.`, { titulo: "Quitar factura", boton: "Quitar", peligro: true }))) return;
     try { await api(`/ventas/${venta.id}/facturas/${f.id}`, { method: "DELETE" }); notify("Factura quitada"); onCambio(); }
     catch (e) { notify(e.message, "danger"); }
   };

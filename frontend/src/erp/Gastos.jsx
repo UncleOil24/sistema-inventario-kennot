@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal } from "./ui";
+import { Modal, confirmar } from "./ui";
 import { api, fmt, fecha, hoyISO, TIPOS_GASTO } from "./lib";
 
 const mesActual = () => hoyISO().slice(0, 7);
@@ -30,7 +30,7 @@ export default function Gastos({ notify }) {
     } catch (e) { notify(e.message, "danger"); }
   };
   const eliminar = async (g) => {
-    if (!confirm("¿Eliminar este gasto?")) return;
+    if (!(await confirmar("¿Eliminar este gasto?", { titulo: "Eliminar gasto", boton: "Eliminar", peligro: true }))) return;
     try { await api(`/gastos/${g.id}`, { method: "DELETE" }); notify("Gasto eliminado", "danger"); cargar(); }
     catch (e) { notify(e.message, "danger"); }
   };

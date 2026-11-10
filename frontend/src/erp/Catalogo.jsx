@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, SelectorCategoria } from "./ui";
+import { Modal, SelectorCategoria, confirmar, pedirTexto } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
 import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar } from "./lib";
 
@@ -207,7 +207,7 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
   };
 
   const desactivar = async () => {
-    if (!confirm(`¿Eliminar "${producto.nombre}"? Si tiene historial de precios solo se desactiva.`)) return;
+    if (!(await confirmar(`¿Eliminar "${producto.nombre}"?\nSi tiene historial de precios solo se desactiva.`, { titulo: "Eliminar producto", boton: "Eliminar", peligro: true }))) return;
     try { const r = await api(`/productos/${producto.id}`, { method: "DELETE" }); notify(r.message || "Producto eliminado", "danger"); onGuardado(); }
     catch (e) { notify(e.message, "danger"); }
   };
@@ -264,7 +264,7 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
                 <div key={x.id} className="pago-form" style={{ marginTop: 6 }}>
                   <span style={{ flex: 1 }}>N° {x.codigo ?? x.id} · {x.nombre} <span className="mini">({x.parecido}%)</span></span>
                   <button className="btn btn-danger btn-sm" onClick={async () => {
-                    if (!confirm(`¿Fusionar "${x.nombre}" dentro de "${producto.nombre}"? El repetido queda inactivo.`)) return;
+                    if (!(await confirmar(`¿Fusionar "${x.nombre}" dentro de "${producto.nombre}"?\nEl repetido queda inactivo.`, { titulo: "Fusionar productos", boton: "Fusionar", peligro: true }))) return;
                     try { await api(`/productos/${producto.id}/fusionar`, { method: "POST", body: { duplicado_id: x.id } }); notify("✓ Productos fusionados"); onGuardado(); }
                     catch (e) { notify(e.message, "danger"); }
                   }}>Fusionar aquí</button>
@@ -323,8 +323,8 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
     } catch (e) { notify(e.message, "danger"); }
     finally { setEnviando(false); }
   };
-  const descartar = (pr) => {
-    const motivo = prompt(`Motivo para descartar ${pr.proveedor} ${fmt(pr.precio)} (otra medida, otra calidad, precio antiguo...):`);
+  const descartar = async (pr) => {
+    const motivo = await pedirTexto(`Motivo para descartar el precio de ${pr.proveedor} ${fmt(pr.precio)}:`, { titulo: "Descartar precio", placeholder: "otra medida, otra calidad, precio antiguo...", boton: "Descartar", obligatorio: true });
     if (motivo) accion(() => api(`/precios/${pr.id}/descartar`, { method: "POST", body: { motivo } }), "Precio descartado");
   };
 
