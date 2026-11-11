@@ -240,6 +240,12 @@ const getDashboard = handler(async (req, res) => {
       for (const d of pp.documentos.filter((x) => x.dias_vencida <= 0 && x.dias_vencida >= -avisoProv).slice(0, 8)) {
         tareas.push({ tipo: "pagar", urgencia: 1, texto: `Vence el pago a ${d.proveedor}${d.factura ? ` (factura ${d.factura})` : ""}`, detalle: `${pesosTxt(d.saldo)} · vence ${cuando(-d.dias_vencida)}${d.pronto_pago ? ` · pagando antes del ${new Date(`${d.pronto_pago.hasta}T12:00:00`).toLocaleDateString("es-CL")} ahorras ${pesosTxt(d.pronto_pago.ahorro)}` : ""}`, vista: "por-pagar", boton: "Ver" });
       }
+      // Alzas de precio (> 10%) en facturas de compra de los últimos 7 días: volver a cotizar o cambiar de proveedor
+      const [alzas] = await sequelize.query(`SELECT r.registro_id, r.antes, r.despues, r.motivo, r."createdAt", p.codigo, p.nombre FROM registro_cambios r
+        JOIN productos p ON p.id = r.registro_id WHERE r.tabla = 'productos' AND r.campo = 'alza' AND r."createdAt" >= NOW() - INTERVAL '7 days' ORDER BY r."createdAt" DESC LIMIT 10`);
+      for (const a of alzas) {
+        tareas.push({ tipo: "alza", urgencia: 2, texto: `Alza de precio: ${a.nombre}`, detalle: `${a.motivo} · antes $${Math.round(a.antes).toLocaleString("es-CL")}, ahora $${Math.round(a.despues).toLocaleString("es-CL")}`, vista: "catalogo", boton: "Ver catálogo" });
+      }
       // Control: pasos deshechos y facturas quitadas en los últimos 7 días
       const [correcciones] = await sequelize.query(`SELECT h.venta_id, h.tipo, h.texto, h.motivo, h.por, h."createdAt", v.numero FROM historial_venta h
         JOIN ventas v ON v.id = h.venta_id WHERE h.tipo IN ('retroceso', 'factura_quitada') AND h."createdAt" >= NOW() - INTERVAL '7 days' ORDER BY h."createdAt" DESC LIMIT 8`);
@@ -268,7 +274,7 @@ const getDashboard = handler(async (req, res) => {
   // Llamar a clientes
   // Las llamadas por cotizaciones enviadas ya no van como tarea: las enviadas se revisan en su propio recuadro (Aceptada / Rechazada)
   // Departamento de cada tarea (cada pestaña muestra las suyas)
-  const DEPTO = { avisar_cobro: "comercial", recordar_cobro: "comercial", moroso: "finanzas", iva: "finanzas", margen: "finanzas", oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas", correccion: "finanzas" };
+  const DEPTO = { avisar_cobro: "comercial", recordar_cobro: "comercial", moroso: "finanzas", iva: "finanzas", margen: "finanzas", oportunidad: "comercial", llamar: "comercial", facturar: "comercial", aceptar: "operativo", confirmar: "operativo", despachar: "operativo", entregar: "operativo", comprar: "operativo", recibir: "operativo", cobrar: "finanzas", pagar: "finanzas", correccion: "finanzas", alza: "finanzas" };
   tareas.forEach((t) => { t.depto = DEPTO[t.tipo] || "comercial"; });
   tareas.sort((a, b) => a.urgencia - b.urgencia);
 

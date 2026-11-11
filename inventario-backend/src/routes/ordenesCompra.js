@@ -4,6 +4,11 @@ const { soloAdmin, permite } = require("../middlewares/auth");
 const operativo = permite("operativo");
 const c = require("../controllers/ordenesCompraController");
 
+const fc = require("../controllers/facturaCompraController");
+const subirFactura = require("multer")({ storage: require("multer").memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+router.post("/factura/leer", operativo, subirFactura.single("archivo"), fc.leer);
+router.post("/factura/registrar", operativo, fc.registrarFactura);
+router.get("/:id/documentos/:docId", fc.descargar);
 router.get("/", c.getOrdenes);
 router.get("/:id", c.getOrden);
 router.post("/", operativo, c.crearOrden);

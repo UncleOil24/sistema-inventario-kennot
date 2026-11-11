@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, Totales, confirmar, pedirTexto, modoPedido } from "./ui";
+import { Modal, Estado, Totales, confirmar, modoPedido, motivoRechazo } from "./ui";
 import { conConfirmacion } from "./Recorrido";
 import { api, fmt, fecha, descargar, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
 
@@ -38,7 +38,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
   const excel = (c) => descargar(`/cotizaciones/${c.id}/excel`, nombreArchivo(c, "xlsx")).catch((e) => notify(e.message, "danger"));
   const pdf = (c) => descargar(`/cotizaciones/${c.id}/pdf`, nombreArchivo(c, "pdf")).catch((e) => notify(e.message, "danger"));
   const rechazar = async (c) => {
-    const motivo = await pedirTexto(`¿Por qué se rechazó la ${nombreCot(c)}?`, { titulo: "Cotización rechazada", placeholder: "precio, plazo, se compró a otro...", boton: "Marcar rechazada" });
+    const motivo = await motivoRechazo(nombreCot(c));
     if (motivo !== null) accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } }), "Cotización marcada como rechazada");
   };
   const reabrir = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "cotizacion" } }), "Cotización reabierta");

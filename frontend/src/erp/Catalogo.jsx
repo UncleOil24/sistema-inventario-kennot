@@ -27,6 +27,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
   const [revision, setRevision] = useState("");
   const [categorias, setCategorias] = useState([]);
   const [resumen, setResumen] = useState(null);
+  const [llenados, setLlenados] = useState(null);
   const [mostrar, setMostrar] = useState(POR_PAGINA);
   const [editar, setEditar] = useState(null);
   const [precios, setPrecios] = useState(null);
@@ -50,6 +51,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
   const cargarCategorias = useCallback(() => {
     api("/productos/categorias").then(setCategorias).catch(() => {});
     api("/productos/resumen").then(setResumen).catch(() => {});
+    api("/productos/llenados").then(setLlenados).catch(() => {});
   }, []);
   useEffect(() => { cargarCategorias(); }, [cargarCategorias]);
 
@@ -93,6 +95,11 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
       {(revision === "sin_precio" || revision === "aviso" || revision === "antiguo") && resumen && (
         <div className="panel">
           <div className="panel-titulo">{revision === "sin_precio" ? "Productos sin precio por categoría (para pedir cotización)" : revision === "antiguo" ? "Precios antiguos por categoría (pedir cotización nueva)" : "Avisos por categoría"}</div>
+          {revision === "sin_precio" && llenados && (
+            <div className="mini" style={{ marginBottom: 8 }}>
+              Este mes se llenaron <strong>{llenados.total_mes}</strong> precios que faltaban ({llenados.con_facturas} con facturas de compra) · faltan <strong>{llenados.faltan}</strong> sin precio: descárgalos con "↓ Para cotizar".
+            </div>
+          )}
           <div className="chips">
             {resumen.filter((r) => (revision === "sin_precio" ? r.sin_precio : revision === "antiguo" ? r.antiguos : r.con_aviso) > 0).map((r) => (
               <button key={r.categoria} className={`chip ${categoria === r.categoria ? "activo" : ""}`} onClick={() => setCategoria(categoria === r.categoria ? "Todas" : r.categoria)}>
@@ -144,7 +151,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
                           ? esGerencia && <button className="btn btn-success btn-sm" onClick={async () => {
                             try { await api(`/productos/${p.id}?activar=1`, { method: "DELETE" }); notify("✓ Producto reactivado"); invalidarProductos(); cargar(); } catch (e) { notify(e.message, "danger"); }
                           }}>↺ Reactivar</button>
-                          : <button className="btn btn-ghost btn-sm" onClick={() => setEditar(p)}>Editar</button>}
+                          : esGerencia && <button className="btn btn-ghost btn-sm" onClick={() => setEditar(p)}>Editar</button>}
                         {onCotizar && <button className={`btn btn-sm ${enCotizacion(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => onCotizar(p)}>
                           {enCotizacion(p.id) ? "✓ En cot." : "+ Cotizar"}
                         </button>}
@@ -237,7 +244,8 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
       <div className="fields-row">
         <div className="field">
           <label>Categoría</label>
-          <SelectorCategoria value={form.categoria || ""} onChange={(v) => set("categoria", v)} categorias={categorias} />
+          {esGerencia ? <SelectorCategoria value={form.categoria || ""} onChange={(v) => set("categoria", v)} categorias={categorias} />
+            : <div className="mini" style={{ paddingTop: 8 }}>Queda en <strong>POR CLASIFICAR</strong> para que gerencia lo revise.</div>}
         </div>
         <div className="field">
           <label>Unidad</label>
@@ -361,7 +369,8 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
         <span className="mini" style={{ alignSelf: "center" }}>Un precio confirmado solo lo reemplaza una cotización nueva más barata.</span>
       </div>
 
-      <div className="panel">
+      {!puedeConfirmar && <div className="mini">Los precios los carga gerencia, o entran solos al subir cotizaciones y facturas de proveedores.</div>}
+      {puedeConfirmar && <div className="panel">
         <div className="panel-titulo">Cargar precio de proveedor</div>
         <div className="fields-row tres">
           <div className="field">
@@ -411,7 +420,7 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
           <button className="btn btn-primary btn-sm" disabled={enviando || !form.proveedor || !neto} onClick={agregar}>{enviando ? "Guardando..." : "+ Registrar precio"}</button>
         </div>
         {form.calce === "parecido" && <div className="mini" style={{ color: "var(--warn)" }}>Si es otra calidad, marca o medida, conviene crear un producto aparte en vez de cargarlo aquí.</div>}
-      </div>
+      </div>}
 
       <div className="panel">
         <div className="panel-titulo">

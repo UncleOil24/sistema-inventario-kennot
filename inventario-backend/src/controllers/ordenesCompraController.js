@@ -6,13 +6,12 @@ const Proveedor = require("../models/Proveedor");
 const Producto = require("../models/Producto");
 const Pago = require("../models/Pago");
 const Venta = require("../models/Venta");
-const PrecioProveedor = require("../models/PrecioProveedor");
 const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago,
 } = require("../services/erp");
-const { recalcular, origenDe, normProv } = require("../services/precios");
+const { origenDe, normProv } = require("../services/precios");
 
-const numeroOC = (id) => `OC-${String(id).padStart(4, "0")}`;
+const numeroOC = (id) => `C-${String(id).padStart(4, "0")}`; // nuestra compra al proveedor (la OC es la del cliente)
 const hoyISO = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const sumarDias = (f, n) => { const d = new Date(`${String(f).slice(0, 10)}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + (Number(n) || 0)); return d.toISOString().slice(0, 10); };
 const empresaValida = (e) => (["kenott", "tactics"].includes(e) ? e : null);
@@ -66,7 +65,8 @@ const getOrden = handler(async (req, res) => {
   const oc = await OrdenCompra.findByPk(req.params.id);
   if (!oc) throw new ErrorNegocio("Orden no encontrada", 404);
   const pagos = await Pago.findAll({ where: { orden_compra_id: oc.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
-  res.json({ ok: true, data: { ...oc.toJSON(), pagos } });
+  const documentos = await require("../models/DocumentoCompra").findAll({ where: { orden_id: oc.id }, attributes: ["id", "tipo", "folio", "fecha", "monto", "nombre_archivo", "creado_por", "createdAt"], order: [["id", "ASC"]] });
+  res.json({ ok: true, data: { ...oc.toJSON(), pagos, documentos } });
 });
 
 // PUT /api/ordenes-compra/:id/venta   { venta_id | null }   -> para qué venta se compró (sirve en cualquier estado)
@@ -147,15 +147,15 @@ const recibirOrden = handler(async (req, res) => {
     if (registrar) {
       const origen = await origenDe(orden.proveedor_nombre, t);
       const doc = orden.documento ? `FACT. ${orden.documento}` : orden.numero;
+      const { precioDesdeFactura } = require("./facturaCompraController");
       for (const item of orden.items) {
         const p = await Producto.findByPk(item.producto_id, { transaction: t, lock: t.LOCK.UPDATE });
         if (!p || !(Number(item.precio) > 0)) continue;
-        await PrecioProveedor.create({
-          producto_id: p.id, proveedor: normProv(orden.proveedor_nombre), precio: Math.round(Number(item.precio)),
-          fecha: new Date(), documento: doc, cantidad: item.cantidad, unidad: item.unidad,
-          origen, creado_por: firma(req),
-        }, { transaction: t });
-        await recalcular(p, { t, usuario: firma(req), motivo: `Compra ${orden.numero}` });
+        // Con la fecha de la factura (no la de hoy), para comparar bien por fecha
+        await precioDesdeFactura(p, {
+          proveedor: normProv(orden.proveedor_nombre), precio: Number(item.precio), fecha: fechaFactura || hoyISO(), documento: doc,
+          cantidad: item.cantidad, unidad: item.unidad, origen, usuario: firma(req), motivo: `Compra ${orden.numero}`,
+        }, t);
       }
     }
     return orden;

@@ -10,7 +10,8 @@ const ia = require("../services/ia");
 const { getParametros } = require("../services/parametros");
 const { recalcular, normProv, origenDe, registrar } = require("../services/precios");
 const { vista } = require("./productosController");
-const { esAdmin } = require("../middlewares/auth");
+const { esAdmin, esGerencia } = require("../middlewares/auth");
+const { unidadDeProducto } = require("../services/unidades");
 
 // Índice de búsqueda: descripción estándar + descripciones con que los proveedores cotizaron cada producto
 async function indiceCatalogo() {
@@ -162,7 +163,8 @@ const aprobarDocumento = handler(async (req, res) => {
       } else if (l.nuevo?.nombre) {
         p = await Producto.create({
           codigo: siguienteCodigo++, nombre: String(l.nuevo.nombre).trim().toUpperCase(),
-          categoria: String(l.nuevo.categoria || "General").toUpperCase(), unidad: String(l.nuevo.unidad || "UNIDAD").toUpperCase(),
+          categoria: esGerencia(req) ? String(l.nuevo.categoria || "POR CLASIFICAR").toUpperCase() : "POR CLASIFICAR",
+          unidad: unidadDeProducto(l.nuevo.nombre, l.nuevo.unidad),
         }, { transaction: t });
         await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "creado", despues: p.nombre, motivo: `Desde documento ${proveedor} ${b.documento || ""}`.trim() }, t);
         out.productos_nuevos++;
@@ -189,4 +191,4 @@ const auditoria = handler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, auditoria };
+module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, auditoria, indiceCatalogo };
