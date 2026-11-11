@@ -3,10 +3,10 @@ import { Modal, Estado, SelectorProducto, SelectorCategoria, confirmar } from ".
 import { api, fmt, subirArchivo, useProductos, precioSegun, lineaDesdeProducto, haceMeses, invalidarProductos, sinTildes } from "./lib";
 
 // Unidades de Mercado Público y listas de clientes -> las del catálogo
-const UNIDADES = { EA: "UNIDAD", UN: "UNIDAD", UND: "UNIDAD", UNIDAD: "UNIDAD", U: "UNIDAD", JGO: "UNIDAD", SET: "UNIDAD", KIT: "UNIDAD",
+const UNIDADES = { EA: "UNIDAD", UN: "UNIDAD", UND: "UNIDAD", UNIDAD: "UNIDAD", U: "UNIDAD", JGO: "JUEGO", JUEGO: "JUEGO", SET: "JUEGO", KIT: "JUEGO", PACK: "PACK", PAQUETE: "PACK", PQT: "PACK", M2: "M2", MT2: "M2", MTK: "M2",
   GL: "GALÓN", GAL: "GALÓN", GALON: "GALÓN", KG: "KILO", KGM: "KILO", KILO: "KILO", MT: "METRO", MTR: "METRO", M: "METRO", METRO: "METRO", ML: "METRO",
-  M3: "M3", MTQ: "M3", CJ: "CAJA", CAJA: "CAJA", BX: "CAJA", RO: "ROLLO", ROLLO: "ROLLO", SAC: "SACO", SACO: "SACO", BG: "SACO", BOLSA: "SACO",
-  PAR: "PAR", PR: "PAR", TIN: "TINETA", TINETA: "TINETA", PLIEGO: "PLIEGO", PLANCHA: "PLIEGO", TIRA: "TIRA", BARRA: "TIRA" };
+  M3: "M3", MTQ: "M3", CJ: "CAJA", CAJA: "CAJA", BX: "CAJA", RO: "ROLLO", ROLLO: "ROLLO", SAC: "SACO", SACO: "SACO", BG: "BOLSA", BOLSA: "BOLSA",
+  PAR: "PAR", PR: "PAR", TIN: "TINETA", TINETA: "TINETA", PLIEGO: "PLIEGO", PLANCHA: "PLANCHA", TIRA: "TIRA", BARRA: "TIRA" };
 const unidadCatalogo = (u) => UNIDADES[sinTildes(u || "").replace(/[^A-Z0-9]/g, "")] || "UNIDAD";
 // "Pinturas al esmalte - Pintura piscina ... similar o equivalente a Sipa" -> "PINTURA PISCINA ..."
 const nombreSugerido = (desc) => {
@@ -237,7 +237,7 @@ function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado 
         </div>
       )}
       <div className="fields-row">
-        <div className="field"><label>Unidad</label><select value={form.unidad} onChange={(e) => set("unidad", e.target.value)}>{["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLIEGO", "TIRA", "M3"].map((u) => <option key={u}>{u}</option>)}</select></div>
+        <div className="field"><label>Unidad</label><select value={form.unidad} onChange={(e) => set("unidad", e.target.value)}>{["UNIDAD", "METRO", "M2", "M3", "KILO", "SACO", "BOLSA", "PACK", "JUEGO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLANCHA", "PLIEGO", "TIRA"].map((u) => <option key={u}>{u}</option>)}</select></div>
         <div className="field">
           <label>Categoría</label>
           <SelectorCategoria value={form.categoria} onChange={(v) => set("categoria", v)} categorias={categorias} />
