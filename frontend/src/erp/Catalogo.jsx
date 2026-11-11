@@ -16,10 +16,10 @@ const FILTROS = [
   ["confirmados", "Confirmados"],
   ["antiguo", "Precio antiguo (volver a cotizar)"],
   ["sin_medida", "Sin medida (candados, cables...)"],
+  ["inactivos", "Desactivados (para reactivar)"],
 ];
 
 export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, onCotizar, proveedores }) {
-  const [consolidado, setConsolidado] = useState(false);
   const [productos, setProductos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
@@ -86,7 +86,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
         </select>
         {esAdmin && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura de proveedor (PDF o foto)">⇪ Documento proveedor</button>}
         {esAdmin && <button className="btn btn-ghost" title="Excel con los productos agregados en el sistema que aún no tienen precio, para cotizarlos" onClick={() => descargar("/productos/exportar/para-cotizar", `Productos_nuevos_para_cotizar_${hoyISO()}.xlsx`).catch((e) => notify(e.message, "danger"))}>↓ Para cotizar</button>}
-        {esAdmin && <button className="btn btn-ghost" onClick={() => setConsolidado(true)} title="Catálogo completo en el formato del LISTADO CONSOLIDADO, con los cambios marcados">↓ Consolidado</button>}
+        {esGerencia && <button className="btn btn-ghost" title="Catálogo completo en el formato LISTADO_CONSOLIDADO_FERRETERIA (siguiente versión), con hojas por categoría, resumen, registro de cambios, extras y cotizaciones" onClick={() => descargar("/productos/exportar/planilla").then(() => notify("✓ Planilla descargada")).catch((e) => notify(e.message, "danger"))}>↓ Planilla actualizada</button>}
         <button className="btn btn-primary" onClick={() => setEditar({ nombre: "", categoria: categoria !== "Todas" ? categoria : (categorias[0]?.categoria || ""), unidad: "UNIDAD" })}>+ Nuevo producto</button>
       </div>
 
@@ -140,7 +140,11 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
                     <td>
                       <div className="actions">
                         {esAdmin && <button className="btn btn-ghost btn-sm" onClick={() => setPrecios(p)}>Precios</button>}
-                        <button className="btn btn-ghost btn-sm" onClick={() => setEditar(p)}>Editar</button>
+                        {p.activo === false
+                          ? esGerencia && <button className="btn btn-success btn-sm" onClick={async () => {
+                            try { await api(`/productos/${p.id}?activar=1`, { method: "DELETE" }); notify("✓ Producto reactivado"); invalidarProductos(); cargar(); } catch (e) { notify(e.message, "danger"); }
+                          }}>↺ Reactivar</button>
+                          : <button className="btn btn-ghost btn-sm" onClick={() => setEditar(p)}>Editar</button>}
                         {onCotizar && <button className={`btn btn-sm ${enCotizacion(p.id) ? "btn-success" : "btn-ghost"}`} onClick={() => onCotizar(p)}>
                           {enCotizacion(p.id) ? "✓ En cot." : "+ Cotizar"}
                         </button>}
@@ -162,7 +166,6 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} onClose={() => { setDocumento(false); refrescar(); }} />}
       {precios && <PreciosProducto producto={precios} puedeConfirmar={esGerencia} proveedores={proveedores} notify={notify}
         onClose={() => setPrecios(null)} onCambio={refrescar} />}
-      {consolidado && <DescargarConsolidado notify={notify} onClose={() => setConsolidado(false)} />}
     </>
   );
 }
@@ -207,15 +210,15 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
   };
 
   const desactivar = async () => {
-    if (!(await confirmar(`¿Eliminar "${producto.nombre}"?\nSi tiene historial de precios solo se desactiva.`, { titulo: "Eliminar producto", boton: "Eliminar", peligro: true }))) return;
-    try { const r = await api(`/productos/${producto.id}`, { method: "DELETE" }); notify(r.message || "Producto eliminado", "danger"); onGuardado(); }
+    if (!(await confirmar(`¿Desactivar "${producto.nombre}"?\nNo se borra: deja de aparecer en el catálogo y en las búsquedas, y se puede reactivar desde el filtro "Desactivados".`, { titulo: "Desactivar producto", boton: "Desactivar", peligro: true }))) return;
+    try { const r = await api(`/productos/${producto.id}`, { method: "DELETE" }); notify(r.message || "Producto desactivado", "danger"); onGuardado(); }
     catch (e) { notify(e.message, "danger"); }
   };
 
   return (
     <Modal titulo={nuevo ? "// Nuevo producto" : `// Editar N° ${producto.codigo ?? ""}`} onClose={onClose}
       footer={<>
-        {!nuevo && esGerencia && <button className="btn btn-danger" onClick={desactivar}>Eliminar</button>}
+        {!nuevo && esGerencia && <button className="btn btn-danger" onClick={desactivar}>Desactivar</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" onClick={guardar} disabled={guardando}>{guardando ? "Guardando..." : "Guardar"}</button>
       </>}>
@@ -455,30 +458,3 @@ function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notif
 }
 
 
-// Descargar el catálogo completo en el formato del LISTADO CONSOLIDADO, con la columna CAMBIO
-function DescargarConsolidado({ notify, onClose }) {
-  const [desde, setDesde] = useState("");
-  const [solo, setSolo] = useState(false);
-  const [bajando, setBajando] = useState(false);
-  const bajar = async () => {
-    setBajando(true);
-    try {
-      const q = new URLSearchParams();
-      if (desde) q.append("desde", desde);
-      if (solo) q.append("solo_cambios", "1");
-      await descargar(`/productos/exportar/consolidado?${q}`, `LISTADO_CONSOLIDADO_sistema_${hoyISO()}.xlsx`);
-      notify("✓ Consolidado descargado");
-      onClose();
-    } catch (e) { notify(e.message, "danger"); }
-    finally { setBajando(false); }
-  };
-  return (
-    <Modal titulo="// Descargar consolidado" onClose={onClose}
-      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button><button className="btn btn-primary" disabled={bajando} onClick={bajar}>{bajando ? "Generando..." : "Descargar"}</button></>}>
-      <div className="mini" style={{ marginBottom: 10 }}>Baja el catálogo en el mismo formato del LISTADO CONSOLIDADO. La columna CAMBIO marca los productos <strong>Nuevo sin precio</strong>, <strong>Nuevo con precio</strong> y <strong>Precio actualizado</strong>. Después de actualizarlo, se vuelve a subir con Importar planilla.</div>
-      <div className="field"><label>Marcar cambios desde</label><input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
-        <div className="mini">Vacío = desde la última descarga del consolidado.</div></div>
-      <label className="check"><input type="checkbox" checked={solo} onChange={(e) => setSolo(e.target.checked)} /> Solo los productos con cambios</label>
-    </Modal>
-  );
-}
