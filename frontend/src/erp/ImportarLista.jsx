@@ -237,7 +237,7 @@ function NuevoDesdeLinea({ linea, esAdmin, notify, productos, onClose, onCreado 
         </div>
       )}
       <div className="fields-row">
-        <div className="field"><label>Unidad</label><select value={form.unidad} onChange={(e) => set("unidad", e.target.value)}>{["UNIDAD", "METRO", "M2", "M3", "KILO", "SACO", "BOLSA", "PACK", "JUEGO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLANCHA", "PLIEGO", "TIRA"].map((u) => <option key={u}>{u}</option>)}</select></div>
+        <div className="field"><label>Unidad</label><select value={form.unidad} onChange={(e) => set("unidad", e.target.value)}>{["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "BOLSA", "PACK", "PAR", "JUEGO", "PLIEGO", "PLANCHA", "TIRA", "M2", "M3"].map((u) => <option key={u}>{u}</option>)}</select></div>
         <div className="field">
           <label>Categoría</label>
           <SelectorCategoria value={form.categoria} onChange={(v) => set("categoria", v)} categorias={categorias} />

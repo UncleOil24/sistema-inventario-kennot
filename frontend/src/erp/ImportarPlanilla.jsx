@@ -107,6 +107,7 @@ export default function ImportarPlanilla({ notify }) {
             })}
             <span className="mini" style={{ alignSelf: "center" }}>· Solo en el sistema (quedan igual): {vista.resumen.solo_en_sistema} · Cotizaciones {vista.resumen.cotizaciones} · Extras {vista.resumen.extras}</span>
           </div>
+          {vista.resumen.unidades_por_revisar?.length > 0 && <div className="aviso">Unidades que no están en la lista (se guardan tal cual y quedan en el filtro "Unidad por revisar"): {vista.resumen.unidades_por_revisar.join(", ")}</div>}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <input className="search-input" placeholder="Buscar en la lista..." value={filtro} onChange={(e) => setFiltro(e.target.value)} style={{ maxWidth: 320 }} />
             {tab === "revisar" && <>

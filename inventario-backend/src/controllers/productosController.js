@@ -63,6 +63,7 @@ const getProductos = handler(async (req, res) => {
   if (categoria && categoria !== "Todas") where.categoria = categoria;
   if (revision === "inactivos") where.activo = false;
   else if (req.query.inactivos !== "1") where.activo = true;
+  if (revision === "unidad") y.push({ unidad: { [Op.notIn]: UNIDADES } });
   if (revision === "sin_precio") y.push({ [Op.or]: [{ precio_compra: null }, { precio_compra: { [Op.lte]: 0 } }] });
   if (revision === "aviso") y.push(literal(SQL_AVISO));
   if (revision === "confirmados") where.confirmado = true;
@@ -112,8 +113,9 @@ const getResumen = handler(async (req, res) => {
       COUNT(*) FILTER (WHERE ${SQL_AVISO})::int AS con_aviso,
       COUNT(*) FILTER (WHERE NOT confirmado AND precio_compra > 0)::int AS sin_confirmar,
       COUNT(*) FILTER (WHERE precio_compra > 0 AND fecha_precio < :lim)::int AS antiguos,
-      COUNT(*) FILTER (WHERE ${SQL_SIN_MEDIDA})::int AS sin_medida
-    FROM productos WHERE activo GROUP BY categoria ORDER BY categoria`, { replacements: { lim } });
+      COUNT(*) FILTER (WHERE ${SQL_SIN_MEDIDA})::int AS sin_medida,
+      COUNT(*) FILTER (WHERE unidad NOT IN (:unidades))::int AS unidad_por_revisar
+    FROM productos WHERE activo GROUP BY categoria ORDER BY categoria`, { replacements: { lim, unidades: UNIDADES } });
   res.json({ ok: true, data: filas });
 });
 
@@ -258,7 +260,7 @@ const actualizarProducto = handler(async (req, res) => {
       if (!(c in req.body)) continue;
       let v = req.body[c];
       if (c === "nombre") v = String(v).trim().toUpperCase();
-      if (c === "unidad") v = unidadValida(v);
+      if (c === "unidad") v = String(v || "") === String(p.unidad || "") ? p.unidad : unidadValida(v); // una unidad por revisar se puede dejar igual
       if (["certificacion", "ficha_tecnica", "modelo_equivalente"].includes(c)) v = String(v || "").trim() || null;
       if (String(v) !== String(p[c])) cambios[c] = v;
     }

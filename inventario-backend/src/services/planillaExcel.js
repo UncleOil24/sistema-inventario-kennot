@@ -7,18 +7,20 @@ const Producto = require("../models/Producto");
 
 const fechaCL = (d) => (d ? String(d instanceof Date ? d.toISOString() : d).slice(0, 10).split("-").reverse().join("-") : "");
 const VERDE = "FF26747B";
-const encabezado = (ws, titulos, anchos) => {
+const encabezado = (ws, titulos, anchos, titulo) => {
   ws.columns = anchos.map((width) => ({ width }));
+  if (titulo) { const t = ws.addRow([titulo]); t.font = { bold: true, size: 13 }; }
   const h = ws.addRow(titulos);
   h.font = { bold: true, color: { argb: "FFFFFFFF" } };
   h.alignment = { vertical: "middle", wrapText: true };
   h.height = 30;
   h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE } }; });
-  ws.views = [{ state: "frozen", ySplit: 1 }];
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: titulos.length } };
+  ws.views = [{ state: "frozen", ySplit: h.number }];
+  ws.autoFilter = { from: { row: h.number, column: 1 }, to: { row: h.number, column: titulos.length } };
 };
 const PESOS = '"$"#,##0';
-const COLS = ["N°", "CATEGORÍA", "DESCRIPCIÓN", "UNIDAD", "PRECIO REAL COMPRA", "PRECIO CONVENIO (x1,3)", "PRECIO PARTICULAR (x1,5)",
+// Mismas columnas y orden que la LISTADO_CONSOLIDADO_FERRETERIA (v73)
+const COLS = ["N°", "CATEGORÍA", "DESCRIPCIÓN", "UNIDAD", "PRECIO REAL COMPRA", "PRECIO PARTICULAR (+50%)", "PRECIO CONVENIOS (+30%)",
   "PROVEEDOR", "CONTACTO", "FECHA ACT.", "REVISAR", "PROVEEDOR OPCIÓN 2", "PRECIO OPCIÓN 2", "FECHA OPCIÓN 2",
   "PROVEEDOR OPCIÓN 3", "PRECIO OPCIÓN 3", "FECHA OPCIÓN 3", "CAMBIO"];
 const ANCHOS = [8, 20, 60, 11, 15, 15, 15, 22, 22, 12, 30, 20, 13, 12, 20, 13, 12, 18];
@@ -47,8 +49,8 @@ async function generarPlanilla({ version, desde } = {}) {
     const c = cambio(p);
     const r = ws.addRow([
       p.codigo, p.categoria, p.nombre, p.unidad, compra,
-      compra ? { formula: `ROUND(E${n}*1.3,0)`, result: Math.round(compra * 1.3) } : null,
-      compra ? { formula: `ROUND(E${n}*1.5,0)`, result: Math.round(compra * 1.5) } : null,
+      { formula: `IF(E${n}="","",ROUND(E${n}*1.5,0))`, result: compra ? Math.round(compra * 1.5) : "" },
+      { formula: `IF(E${n}="","",ROUND(E${n}*1.3,0))`, result: compra ? Math.round(compra * 1.3) : "" },
       p.proveedor || "", p.contacto || "", fechaCL(p.fecha_precio), p.confirmado ? "OK CONFIRMADO" : (p.revisar || ""),
       p.opcion2_proveedor || "", p.opcion2_precio ? Math.round(Number(p.opcion2_precio)) : null, fechaCL(p.opcion2_fecha),
       p.opcion3_proveedor || "", p.opcion3_precio ? Math.round(Number(p.opcion3_precio)) : null, fechaCL(p.opcion3_fecha), c,
@@ -60,7 +62,7 @@ async function generarPlanilla({ version, desde } = {}) {
 
   // 1) Listado completo
   const wsL = wb.addWorksheet("LISTADO CONSOLIDADO");
-  encabezado(wsL, COLS, ANCHOS);
+  encabezado(wsL, COLS, ANCHOS, "LISTADO CONSOLIDADO DE MATERIALES — SUMINISTRO FERRETERÍA");
   productos.forEach((p) => fila(wsL, p));
 
   // 2) Una hoja por categoría
@@ -70,7 +72,7 @@ async function generarPlanilla({ version, desde } = {}) {
   const hojasCat = [];
   for (const [cat, lista] of porCat) {
     const ws = wb.addWorksheet(nombreHoja(cat, usados));
-    encabezado(ws, COLS, ANCHOS);
+    encabezado(ws, COLS, ANCHOS, `${cat} — LISTADO CONSOLIDADO FERRETERÍA`);
     lista.forEach((p) => fila(ws, p));
     hojasCat.push([cat, lista]);
   }
@@ -80,8 +82,8 @@ async function generarPlanilla({ version, desde } = {}) {
   res.columns = [{ width: 32 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
   const t = res.addRow([`LISTADO CONSOLIDADO FERRETERÍA v${version || ""}`]); t.font = { bold: true, size: 14 };
   res.addRow(["Generado", new Date().toLocaleString("es-CL", { timeZone: "America/Santiago" })]);
-  res.addRow(["Precio convenio", "compra × 1,3"]);
-  res.addRow(["Precio particular", "compra × 1,5"]);
+  res.addRow(["Precio particular", "compra × 1,5 (+50%)"]);
+  res.addRow(["Precio convenios", "compra × 1,3 (+30%)"]);
   res.addRow([]);
   const h = res.addRow(["CATEGORÍA", "PRODUCTOS", "CON PRECIO", "SIN PRECIO", "CONFIRMADOS"]);
   h.font = { bold: true, color: { argb: "FFFFFFFF" } }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: VERDE } }; });

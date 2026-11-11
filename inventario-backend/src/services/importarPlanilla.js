@@ -1,4 +1,4 @@
-const { unidadDeProducto } = require("./unidades");
+const { unidadDeProducto, unidadPorRevisar } = require("./unidades");
 // Importa la planilla LISTADO_CONSOLIDADO_FERRETERIA (v61 o posterior) a la base:
 //   LISTADO CONSOLIDADO  -> productos (precio vigente, opciones 2 y 3, REVISAR, confirmados)
 //   COTIZACIONES         -> precios_proveedor (historia con fecha y documento)
@@ -128,11 +128,15 @@ async function leerPlanilla(buffer) {
         fecha: col(m, "FECHA"), empresa: col(m, "EMPRESA"), contacto: col(m, "CONTACTO"), doc: col(m, "N° COTIZACION", "N COTIZACION"),
         desc: col(m, "DESCRIPCION EN COTIZACION"), unidad: col(m, "UNIDAD"), cant: col(m, "CANTIDAD"),
         precio: col(m, "PRECIO UNITARIO"), n: col(m, "N° PRODUCTO", "N PRODUCTO"),
+        descNuestra: col(m, "DESCRIPCION PLANILLA", "DESCRIPCION NUESTRA"),
       };
+      // Si el N° de producto es una fórmula sin valor calculado, se busca por la descripción de la planilla
+      const codigoPorDesc = new Map(filas.map((f) => [sinTildes(f.nombre).replace(/\s+/g, " ").trim(), f.codigo]));
       for (let r = enc.fila + 1; r <= wsC.rowCount; r++) {
         const row = wsC.getRow(r);
         const g = (k) => (cc[k] ? valor(row.getCell(cc[k])) : null);
-        const n = numero(g("n")); const precio = numero(g("precio")); const empresa = texto(g("empresa"));
+        const precio = numero(g("precio")); const empresa = texto(g("empresa"));
+        const n = numero(g("n")) || codigoPorDesc.get(sinTildes(texto(g("descNuestra")) || "").replace(/\s+/g, " ").trim()) || null;
         if (!n || !(precio > 0) || !empresa) continue;
         cotizaciones.push({
           codigo: n, proveedor: normProv(empresa), contacto: texto(g("contacto")), precio: Math.round(precio),
@@ -366,6 +370,7 @@ async function planificar(datos, { onProgreso } = {}) {
       filas: datos.filas.length, nuevos: cuenta("nuevo"), actualizados: cuenta("actualizado"), sin_cambios: cuenta("sin_cambios"), revisar: cuenta("revisar"),
       solo_en_sistema: productos.filter((p) => p.activo && !items.some((x) => x.producto_id === p.id && x.tipo !== "revisar")).length,
       cotizaciones: datos.cotizaciones.length, extras: datos.extras.length,
+      unidades_por_revisar: [...new Set(datos.filas.filter((f) => unidadPorRevisar(f.unidad)).map((f) => f.unidad))],
     },
   };
 }

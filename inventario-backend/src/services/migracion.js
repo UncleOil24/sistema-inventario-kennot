@@ -52,11 +52,7 @@ async function migrar() {
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)
 async function catalogoPaso7() {
-  const { unidadDeProducto } = require("./unidades");
-  const [productos] = await sequelize.query(`SELECT id, nombre, unidad FROM productos`);
-  const cambios = productos.map((p) => ({ id: p.id, nueva: unidadDeProducto(p.nombre, p.unidad) })).filter((x, k) => x.nueva !== productos[k].unidad);
-  for (const c of cambios) await sequelize.query(`UPDATE productos SET unidad = :u WHERE id = :id`, { replacements: { u: c.nueva, id: c.id } });
-  if (cambios.length) console.log(`✓ Unidades normalizadas en ${cambios.length} producto(s)`);
+  // (Ya no se normalizan las unidades al iniciar: cambiaba BOLSA, PACK o PLANCHA por SACO o PLIEGO. La unidad se guarda tal cual.)
   const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_catalogo_paso7'`);
   if (hecho) return;
   const [brizz] = await sequelize.query(`UPDATE proveedores SET excluido = true, motivo_exclusion = 'Es de Santiago: el flete sale más caro' WHERE nombre ILIKE 'BRIZZ%' RETURNING nombre`);
@@ -207,6 +203,31 @@ async function codigosClientes(q) {
       }
     }
     await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_unidades_bolsa', '${new Date().toISOString()}', NOW(), NOW())`);
+  }
+  // Gerencia (11-nov-2026): eliminar el registro cargado por error (no es un producto). Si estuviera usado en algún
+  // documento, solo se desactiva para no dejar líneas rotas. Queda en el registro de cambios.
+  const [[elimHecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'eliminar_producto_liceo'`);
+  if (!elimHecho) {
+    const [malos] = await q(`SELECT id, codigo, nombre, categoria, precio_compra, proveedor FROM productos
+      WHERE UPPER(TRIM(nombre)) LIKE 'MATERIALES DE FERRETER%PARA EL ESTABLECIMIENTO EDUCACIONAL LICEO BICENTENARIO POLIT%'`);
+    for (const p of malos) {
+      const [[uso]] = await q(`SELECT
+        (SELECT COUNT(*) FROM cotizaciones WHERE jsonb_path_exists(items, '$[*] ? (@.producto_id == ${Number(p.id)})'))
+        + (SELECT COUNT(*) FROM ventas WHERE jsonb_path_exists(items, '$[*] ? (@.producto_id == ${Number(p.id)})'))
+        + (SELECT COUNT(*) FROM ordenes_compra WHERE jsonb_path_exists(items, '$[*] ? (@.producto_id == ${Number(p.id)})')) AS n`);
+      const detalle = `${p.nombre} · ${p.categoria} · $${Math.round(Number(p.precio_compra) || 0)} · ${p.proveedor || ""}`.slice(0, 250);
+      if (Number(uso.n) > 0) {
+        await q(`UPDATE productos SET activo = false WHERE id = ${Number(p.id)}`);
+        await q(`INSERT INTO registro_cambios (usuario, tabla, registro_id, campo, antes, despues, motivo, "createdAt") VALUES ('Gerencia', 'productos', ${Number(p.id)}, 'activo', 'true', 'false', 'Cargado por error (no es un producto). Usado en ${Number(uso.n)} documento(s): se desactiva en vez de eliminar', NOW())`);
+        console.log(`✓ Producto ${p.id} desactivado (usado en ${uso.n} documentos)`);
+      } else {
+        await q(`DELETE FROM precios_proveedor WHERE producto_id = ${Number(p.id)}`);
+        await q(`DELETE FROM productos WHERE id = ${Number(p.id)}`);
+        await sequelize.query(`INSERT INTO registro_cambios (usuario, tabla, registro_id, campo, antes, despues, motivo, "createdAt") VALUES ('Gerencia', 'productos', :id, 'eliminado', :antes, 'eliminado', 'Cargado por error (no es un producto). Eliminación autorizada por gerencia', NOW())`, { replacements: { id: p.id, antes: detalle } });
+        console.log(`✓ Producto ${p.id} eliminado (cargado por error)`);
+      }
+    }
+    await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('eliminar_producto_liceo', '${new Date().toISOString()}', NOW(), NOW())`);
   }
   // Nuestras compras a proveedores se numeran C-0001 (la OC es la del cliente)
   await q(`UPDATE ordenes_compra SET numero = 'C-' || SUBSTRING(numero FROM 4) WHERE numero LIKE 'OC-%'`);
