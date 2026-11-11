@@ -193,6 +193,18 @@ export default function Config({ notify }) {
       </div>
 
       <ImportarPlanilla notify={notify} />
+      <div className="panel" style={{ gridColumn: "1 / -1" }}>
+        <div className="panel-titulo">Respaldo de datos del sistema</div>
+        <div className="mini">
+          Descarga todos los datos (clientes, catálogo con su historial de precios, cotizaciones, ventas, facturas, compras, pagos, gastos, usuarios y configuración)
+          para guardarlos fuera del sistema. Las claves de los usuarios van cifradas. Conviene hacerlo una vez por semana y guardarlo en un lugar seguro.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <button className="btn btn-primary" onClick={() => { notify("Preparando respaldo..."); descargar("/respaldo/datos?formato=json").then(() => notify("✓ Respaldo descargado")).catch((e) => notify(e.message, "danger")); }}>↓ Respaldo completo (para restaurar)</button>
+          <button className="btn btn-ghost" onClick={() => { notify("Preparando Excel..."); descargar("/respaldo/datos?formato=excel").then(() => notify("✓ Excel descargado")).catch((e) => notify(e.message, "danger")); }}>↓ Excel (para revisar)</button>
+        </div>
+        <div className="mini" style={{ marginTop: 6 }}>El respaldo completo (.json.gz) incluye los PDF guardados y se restaura en otra instalación con <code>node scripts/restaurar-datos.js archivo --confirmar</code>. El Excel es para mirar los datos.</div>
+      </div>
     </div>
   );
 }
