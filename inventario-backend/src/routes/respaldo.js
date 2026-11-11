@@ -1,31 +1,22 @@
 const router = require("express").Router();
 const { soloAdmin } = require("../middlewares/auth");
 const { handler } = require("../services/erp");
-const { generarRespaldo, enviarRespaldo, correoConfigurado } = require("../services/respaldo");
-const { getParametros } = require("../services/parametros");
+const { generarJSON, generarExcel } = require("../services/respaldoDatos");
+const RegistroCambio = require("../models/RegistroCambio");
+const { firma } = require("../middlewares/auth");
 
-router.use(soloAdmin);
+const fecha = () => new Date().toLocaleString("sv-SE", { timeZone: "America/Santiago" }).slice(0, 16).replace(" ", "_").replace(":", "-");
 
-// GET /api/respaldo/estado
-router.get("/estado", handler(async (req, res) => {
-  const p = await getParametros();
-  res.json({ ok: true, data: { correo: correoConfigurado(), para: p.respaldo_email || process.env.SMTP_USER || "", ultimo: p.ultimo_respaldo || null } });
+// GET /api/respaldo/datos?formato=json|excel&archivos=0|1   (solo gerencia)
+router.get("/datos", soloAdmin, handler(async (req, res) => {
+  const excel = req.query.formato === "excel";
+  const buf = excel ? await generarExcel() : await generarJSON({ conArchivos: req.query.archivos !== "0" });
+  await RegistroCambio.create({ usuario: firma(req), tabla: "sistema", campo: "respaldo", despues: excel ? "Excel" : "JSON", motivo: "Descarga de respaldo de datos" });
+  const nombre = `Respaldo_datos_SyncroGes_${fecha()}.${excel ? "xlsx" : "json.gz"}`;
+  res.setHeader("Content-Type", excel ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/gzip");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);
+  res.end(buf);
 }));
-
-// GET /api/respaldo/excel   -> descarga el respaldo completo
-router.get("/excel", async (req, res) => {
-  try {
-    const r = await generarRespaldo();
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="${r.nombre}"`);
-    res.end(r.buffer);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-// POST /api/respaldo/enviar   -> lo envía por correo ahora
-router.post("/enviar", handler(async (req, res) => res.json({ ok: true, data: await enviarRespaldo() })));
 
 module.exports = router;

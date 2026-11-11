@@ -83,6 +83,7 @@ app.use("/api/pagos", pagosRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/finanzas", finanzasRoutes);
 app.use("/api/precios", preciosRoutes);
+app.use("/api/respaldo", require("./src/routes/respaldo"));
 app.use("/api/gastos", gastosRoutes);
 app.use("/api/parametros", parametrosRoutes);
 app.use("/api/ia", iaRoutes);
