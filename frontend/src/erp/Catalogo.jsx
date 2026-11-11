@@ -4,7 +4,7 @@ import DocumentoProveedor from "./DocumentoProveedor";
 import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar } from "./lib";
 
 // Unidad de medida: lista cerrada (M11)
-const UNIDADES = ["UNIDAD", "METRO", "M2", "M3", "KILO", "SACO", "BOLSA", "PACK", "JUEGO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLANCHA", "PLIEGO", "TIRA"];
+const UNIDADES = ["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "BOLSA", "PACK", "PAR", "JUEGO", "PLIEGO", "PLANCHA", "TIRA", "M2", "M3"];
 const ORIGENES = [["", "Cotización de proveedor"], ["web", "Tienda / web (con IVA)"], ["oc_cliente", "Referencia: OC de cliente"], ["factura_sin_proveedor", "Referencia: factura sin proveedor"]];
 const POR_PAGINA = 150;
 const FILTROS = [
@@ -16,6 +16,7 @@ const FILTROS = [
   ["confirmados", "Confirmados"],
   ["antiguo", "Precio antiguo (volver a cotizar)"],
   ["sin_medida", "Sin medida (candados, cables...)"],
+  ["unidad", "Unidad por revisar (no está en la lista)"],
   ["inactivos", "Desactivados (para reactivar)"],
 ];
 
@@ -136,7 +137,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
                       {p.nombre}
                       <div className="mini">{p.categoria}{p.certificacion ? ` · ${p.certificacion}` : ""}{p.modelo_equivalente ? ` · ${p.modelo_equivalente}` : ""}{esAdmin && p.fecha_precio ? ` · act. ${fecha(p.fecha_precio)}` : ""}{p.precio_antiguo && <span className="antiguo" title="Precio antiguo: conviene pedir cotización nueva"> · ⏱ precio {haceMeses(p.fecha_precio)}</span>}</div>
                     </td>
-                    <td className="mini">{p.unidad}</td>
+                    <td className="mini">{p.unidad}{!UNIDADES.includes(p.unidad) && <span title="Unidad que no está en la lista: revisar" style={{ color: "var(--warn)" }}> ⚠</span>}</td>
                     {esAdmin && <td className="price-cell compra">{sinPrecio ? "—" : fmt(p.precio_compra)}{p.confirmado && <span className="ok-confirm" title="Precio confirmado">✓</span>}</td>}
                     {esAdmin && <td className="mini">{p.proveedor || "—"}</td>}
                     <td className="price-cell">{sinPrecio ? <span className="mini">sin precio</span> : fmt(p.precio_convenio)}</td>
@@ -249,7 +250,8 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
         </div>
         <div className="field">
           <label>Unidad</label>
-          <select value={UNIDADES.includes(form.unidad) ? form.unidad : "UNIDAD"} onChange={(e) => set("unidad", e.target.value)}>
+          <select value={form.unidad || "UNIDAD"} onChange={(e) => set("unidad", e.target.value)}>
+            {form.unidad && !UNIDADES.includes(form.unidad) && <option value={form.unidad}>{form.unidad} (por revisar: elige una de la lista)</option>}
             {UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
