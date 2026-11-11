@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Modal, Estado, confirmar } from "./ui";
 import { api } from "./lib";
 
+// Si el teléfono o el correo están escritos dentro del contacto, se muestran en su columna (solo en pantalla)
+const fonoDe = (t) => { const m = String(t || "").match(/\+?56[\s.-]?\d(?:[\s.-]?\d){8}|\b[29](?:[\s.-]?\d){8}\b/); return m ? m[0].trim() : ""; };
+const correoDe = (t) => (String(t || "").match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/) || [""])[0];
 const VACIO = { nombre: "", razon_social: "", rut: "", contacto: "", telefono: "", email: "", direccion: "", comuna: "", rubro: "", tipo: "proveedor", notas: "", excluido: false, motivo_exclusion: "" };
 
 export default function Proveedores({ esAdmin, proveedores, loading, recargar, notify }) {
@@ -62,9 +65,9 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
                     {p.excluido && <div><span className="estado estado-warn" title={p.motivo_exclusion || ""}>Excluido del precio vigente</span></div>}</td>
                   <td className="mini">{p.razon_social || "—"}{p.rut ? ` · ${p.rut}` : ""}</td>
                   <td><Estado valor={p.tipo || "proveedor"} /></td>
-                  <td className="mini" style={{ maxWidth: 280 }}>{p.contacto || "—"}</td>
-                  <td className="mini">{p.telefono || "No disponible"}</td>
-                  <td className="mini">{p.email || "—"}{p.comuna && <div>{p.comuna}</div>}</td>
+                  <td className="mini" style={{ maxWidth: 300, minWidth: 180, whiteSpace: "normal", wordBreak: "break-word" }}>{p.contacto || "—"}</td>
+                  <td className="mini" style={{ whiteSpace: "nowrap" }}>{p.telefono || fonoDe(p.contacto) || "—"}</td>
+                  <td className="mini" style={{ whiteSpace: "normal", overflowWrap: "anywhere", maxWidth: 260 }}>{p.email || correoDe(p.contacto) || "—"}{p.comuna && <div>{p.comuna}</div>}</td>
                   <td>
                     <div className="actions">
                       <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...p })}>Editar</button>
