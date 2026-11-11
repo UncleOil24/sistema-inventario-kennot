@@ -4,7 +4,7 @@ import DocumentoProveedor from "./DocumentoProveedor";
 import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar } from "./lib";
 
 // Unidad de medida: lista cerrada (M11)
-const UNIDADES = ["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLIEGO", "TIRA", "M3"];
+const UNIDADES = ["UNIDAD", "METRO", "M2", "M3", "KILO", "SACO", "BOLSA", "PACK", "JUEGO", "TINETA", "GALÓN", "ROLLO", "CAJA", "PAR", "PLANCHA", "PLIEGO", "TIRA"];
 const ORIGENES = [["", "Cotización de proveedor"], ["web", "Tienda / web (con IVA)"], ["oc_cliente", "Referencia: OC de cliente"], ["factura_sin_proveedor", "Referencia: factura sin proveedor"]];
 const POR_PAGINA = 150;
 const FILTROS = [

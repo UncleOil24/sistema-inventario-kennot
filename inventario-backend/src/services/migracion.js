@@ -193,6 +193,21 @@ async function codigosClientes(q) {
     await q(`UPDATE ventas SET monto_facturado = total, estado_factura = 'facturada' WHERE id = ${Number(v.id)}`);
     console.log(`✓ Venta ${v.id}: factura ingresada por el neto, corregida al total con IVA`);
   }
+  // Unidades que antes se cambiaban mal (BOLSA→SACO, PLANCHA→PLIEGO): se corrigen una vez según la descripción.
+  // Las demás las corrige la próxima planilla que se importe (la unidad de la planilla manda).
+  const [[uniHecha]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_unidades_bolsa'`);
+  if (!uniHecha) {
+    const reglas = [["BOLSA", "SACO", "\\mBOLSAS?\\M"], ["PLANCHA", "PLIEGO", "\\mPLANCHAS?\\M"], ["PACK", "UNIDAD", "\\m(PACK|PAQUETE)S?\\M"]];
+    for (const [nueva, vieja, patron] of reglas) {
+      const [filas] = await q(`UPDATE productos SET unidad = '${nueva}' WHERE unidad = '${vieja}' AND nombre ~* '${patron}' RETURNING id`);
+      if (filas.length) {
+        await q(`INSERT INTO registro_cambios (usuario, tabla, registro_id, campo, antes, despues, motivo, "createdAt")
+          SELECT 'sistema', 'productos', id, 'unidad', '${vieja}', '${nueva}', 'Corrección de unidad (antes se cambiaba al importar)', NOW() FROM productos WHERE id IN (${filas.map((f) => Number(f.id)).join(",")})`);
+        console.log(`✓ Unidad ${vieja} → ${nueva}: ${filas.length} productos`);
+      }
+    }
+    await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_unidades_bolsa', '${new Date().toISOString()}', NOW(), NOW())`);
+  }
   // Ventas y cotizaciones sin cliente (o con el general) cuyo ID empieza con la unidad de compra de un cliente:
   // se asocian a ese cliente (ej. V-0001 Regimiento Linares → Ejército de Chile 3385). Es idempotente.
   await q(`UPDATE ventas v SET cliente_id = c.id, cliente_nombre = c.nombre FROM clientes c
