@@ -48,6 +48,7 @@ async function migrar() {
   await q(`UPDATE gastos g SET empresa = v.empresa FROM ventas v WHERE g.venta_id = v.id AND g.empresa IS NULL`);
   // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
+  await protegerTablas(q);
 }
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)
@@ -249,6 +250,20 @@ async function codigosClientes(q) {
   await q(`WITH base AS (SELECT COALESCE(MAX(SUBSTRING(codigo FROM 3)::int), 0) AS n FROM clientes WHERE codigo ~ '^P-[0-9]+$'),
     nuevos AS (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS k FROM clientes WHERE codigo IS NULL OR TRIM(codigo) = '')
     UPDATE clientes c SET codigo = 'P-' || LPAD((base.n + nuevos.k)::text, 3, '0') FROM nuevos, base WHERE c.id = nuevos.id`);
+}
+
+// Seguridad de Supabase: activa RLS (seguridad por fila) en todas las tablas, también en las que se creen después.
+// Cierra el acceso público por la API de Supabase. El sistema se conecta como dueño de las tablas, al que RLS no se aplica,
+// así que nada cambia para el sistema. No se crean reglas (policies) ni se usa FORCE.
+async function protegerTablas(q) {
+  try {
+    const [sinRls] = await q(`SELECT c.relname::text AS tabla FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity AND pg_get_userbyid(c.relowner) = current_user`);
+    for (const { tabla } of sinRls) await q(`ALTER TABLE public."${tabla.replace(/"/g, '""')}" ENABLE ROW LEVEL SECURITY`);
+    if (sinRls.length) console.log(`✓ Seguridad por fila (RLS) activada en ${sinRls.length} tabla(s)`);
+  } catch (e) {
+    console.warn("⚠ No se pudo activar RLS:", e.message);
+  }
 }
 
 module.exports = { migrar };
