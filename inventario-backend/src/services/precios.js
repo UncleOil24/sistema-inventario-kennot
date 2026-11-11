@@ -45,15 +45,14 @@ const registrar = (datos, t) => RegistroCambio.create(datos, { transaction: t })
 // Devuelve los cambios aplicados.
 const REFERENCIA = ["oc_cliente", "factura_sin_proveedor"];
 const ETIQUETA_REF = { oc_cliente: "OC CLIENTE", factura_sin_proveedor: "FACTURA SIN PROVEEDOR" };
-const recalcular = async (producto, { t, usuario, motivo } = {}) => {
-  const precios = await PrecioProveedor.findAll({ where: { producto_id: producto.id }, transaction: t });
-  // M7: los proveedores excluidos quedan como historial, pero no compiten
-  const excluidos = new Set((await Proveedor.findAll({ where: { excluido: true }, attributes: ["nombre"], transaction: t })).map((p) => normProv(p.nombre)));
+// Cálculo puro (sin base de datos): qué precio, proveedor, opciones y avisos le tocan a un producto
+// con su historial. Lo usan el recálculo normal y la vista previa de la importación (mismas reglas).
+const calcularPrecio = (producto, precios, excluidos = new Set()) => {
   const todos = vigentesPorProveedor(precios.filter((p) => !excluidos.has(normProv(p.proveedor))));
   // M8: precios de referencia (OC de cliente, factura sin proveedor) solo valen si no hay ninguna cotización real
   const reales = todos.filter((p) => !REFERENCIA.includes(p.origen));
   const vigentes = reales.length ? reales : todos;
-  if (vigentes.length === 0) return {}; // sin historial: no se toca lo que tenga
+  if (vigentes.length === 0) return null; // sin historial: no se toca lo que tenga
 
   const avisos = [];
   let principal; // { proveedor, precio, fecha }
@@ -86,17 +85,9 @@ const recalcular = async (producto, { t, usuario, motivo } = {}) => {
 
   const otros = vigentes.filter((p) => normProv(p.proveedor) !== normProv(principal.proveedor));
   const [op2, op3] = otros;
-
-  let contacto = producto.contacto;
-  if (normProv(principal.proveedor) !== normProv(producto.proveedor)) {
-    const prov = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: String(principal.proveedor).trim() } }, transaction: t });
-    contacto = prov ? (prov.contacto || prov.telefono || prov.email || null) : null;
-  }
-
   const cambios = {
     precio_compra: Number(principal.precio),
     proveedor: principal.proveedor,
-    contacto,
     fecha_precio: principal.fecha,
     opcion2_proveedor: op2?.proveedor || null,
     opcion2_precio: op2 ? Number(op2.precio) : null,
@@ -112,6 +103,21 @@ const recalcular = async (producto, { t, usuario, motivo } = {}) => {
   else if (confirmado) cambios.revisar = null;
   else if (principal.origen === "web") cambios.revisar = `WEB ${principal.proveedor}`;
   else cambios.revisar = principal.proveedor ? `${principal.proveedor}` : null;
+  return cambios;
+};
+
+const recalcular = async (producto, { t, usuario, motivo } = {}) => {
+  const precios = await PrecioProveedor.findAll({ where: { producto_id: producto.id }, transaction: t });
+  // M7: los proveedores excluidos quedan como historial, pero no compiten
+  const excluidos = new Set((await Proveedor.findAll({ where: { excluido: true }, attributes: ["nombre"], transaction: t })).map((p) => normProv(p.nombre)));
+  const cambios = calcularPrecio(producto, precios, excluidos);
+  if (!cambios) return {};
+  let contacto = producto.contacto;
+  if (normProv(cambios.proveedor) !== normProv(producto.proveedor)) {
+    const prov = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: String(cambios.proveedor).trim() } }, transaction: t });
+    contacto = prov ? (prov.contacto || prov.telefono || prov.email || null) : null;
+  }
+  cambios.contacto = contacto;
 
   for (const campo of ["precio_compra", "proveedor"]) {
     const antes = producto[campo];
@@ -132,4 +138,4 @@ const origenDe = async (nombreProveedor, t) => {
 // Qué cuenta como aviso real en REVISAR (el resto del texto es solo el origen del precio, ej. "WEB SODIMAC")
 const SQL_AVISO = `(NOT confirmado AND precio_compra > 0 AND revisar ~* '(revis|verific|m[aá]s barat|m[aá]s car|antes \\$|pendiente)')`;
 
-module.exports = { REFERENCIA, SQL_AVISO, recalcular, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
+module.exports = { REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };

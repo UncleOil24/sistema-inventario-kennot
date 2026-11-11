@@ -61,7 +61,8 @@ const getProductos = handler(async (req, res) => {
   const y = [];
   if (busqueda) y.push(...filtroPalabras(busqueda));
   if (categoria && categoria !== "Todas") where.categoria = categoria;
-  if (req.query.inactivos !== "1") where.activo = true;
+  if (revision === "inactivos") where.activo = false;
+  else if (req.query.inactivos !== "1") where.activo = true;
   if (revision === "sin_precio") y.push({ [Op.or]: [{ precio_compra: null }, { precio_compra: { [Op.lte]: 0 } }] });
   if (revision === "aviso") y.push(literal(SQL_AVISO));
   if (revision === "confirmados") where.confirmado = true;
@@ -251,14 +252,11 @@ const actualizarProducto = handler(async (req, res) => {
 const eliminarProducto = handler(async (req, res) => {
   const producto = await Producto.findByPk(req.params.id);
   if (!producto) throw new ErrorNegocio("Producto no encontrado", 404);
-  const precios = await PrecioProveedor.count({ where: { producto_id: producto.id } });
-  if (precios > 0) {
-    await producto.update({ activo: false });
-    await registrar({ usuario: firma(req), tabla: "productos", registro_id: producto.id, campo: "activo", antes: "true", despues: "false", motivo: "Eliminado (tenía historial de precios)" });
-    return res.json({ ok: true, message: "Producto desactivado (se conserva su historial de precios)" });
-  }
-  await producto.destroy();
-  res.json({ ok: true, message: "Producto eliminado" });
+  // M37: nunca se borra; se desactiva a mano (gerencia) y se puede reactivar
+  const activar = req.query.activar === "1";
+  await producto.update({ activo: activar });
+  await registrar({ usuario: firma(req), tabla: "productos", registro_id: producto.id, campo: "activo", antes: String(!activar), despues: String(activar), motivo: activar ? "Reactivado a mano" : "Desactivado a mano" });
+  res.json({ ok: true, message: activar ? "Producto reactivado" : "Producto desactivado (se puede reactivar desde el filtro Inactivos)" });
 });
 
 // GET /api/productos/:id/precios   (historial de precios por proveedor + cambios)
@@ -449,3 +447,17 @@ const exportarConsolidado = async (req, res) => {
 };
 module.exports.exportarParaCotizar = exportarParaCotizar;
 module.exports.exportarConsolidado = exportarConsolidado;
+
+// GET /api/productos/exportar/planilla   planilla actualizada completa (M37), con la versión siguiente (v72, v73...)
+const exportarPlanilla = async (req, res) => {
+  try {
+    const params = await getParametros();
+    const version = (Number(params.planilla_version) || 71) + 1;
+    const desde = (params.catalogo_ultima_descarga || "").slice(0, 10) || null;
+    const wb = await require("../services/planillaExcel").generarPlanilla({ version, desde });
+    await setParametros({ planilla_version: String(version), catalogo_ultima_descarga: new Date().toISOString() });
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+    await enviarExcel(res, wb, `LISTADO_CONSOLIDADO_FERRETERIA_v${version}.xlsx`);
+  } catch (e) { console.error(e); if (!res.headersSent) res.status(500).json({ ok: false, error: "No se pudo generar la planilla" }); }
+};
+module.exports.exportarPlanilla = exportarPlanilla;

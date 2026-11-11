@@ -15,6 +15,7 @@ require("./src/models/OrdenCompra");
 require("./src/models/Venta");
 require("./src/models/DocumentoVenta");
 require("./src/models/HistorialVenta");
+require("./src/models/RespaldoCatalogo");
 require("./src/models/Pago");
 require("./src/models/Usuario");
 require("./src/models/PrecioProveedor");

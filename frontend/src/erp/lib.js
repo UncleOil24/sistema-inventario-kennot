@@ -76,7 +76,8 @@ export async function descargar(path, nombre) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = nombre;
+  // Sin nombre: el que manda el servidor (ej. LISTADO_CONSOLIDADO_FERRETERIA_v72.xlsx)
+  a.download = nombre || (res.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/)?.[1] || "archivo.xlsx";
   a.click();
   URL.revokeObjectURL(url);
 }

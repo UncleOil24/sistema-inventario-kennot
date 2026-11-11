@@ -1,14 +1,10 @@
 import { useState, useEffect } from "react";
-import { confirmar } from "./ui";
-import { api, authFetch, API_URL, invalidarProductos, descargar } from "./lib";
+import { api, invalidarProductos, descargar } from "./lib";
+import ImportarPlanilla from "./ImportarPlanilla";
 
 export default function Config({ notify }) {
   const [params, setParams] = useState(null);
   const [guardando, setGuardando] = useState(false);
-  const [archivo, setArchivo] = useState(null);
-  const [desactivar, setDesactivar] = useState(false);
-  const [importando, setImportando] = useState(false);
-  const [resultado, setResultado] = useState(null);
 
   const [ia, setIa] = useState(null);
   const [resp, setResp] = useState(null);
@@ -40,41 +36,6 @@ export default function Config({ notify }) {
     try { setParams(await api("/parametros", { method: "PUT", body: params })); invalidarProductos(); notify("✓ Parámetros guardados"); }
     catch (e) { notify(e.message, "danger"); }
     finally { setGuardando(false); }
-  };
-
-  const [avance, setAvance] = useState(null);
-
-  // Consulta el avance de una importación en segundo plano hasta que termine
-  const seguir = async (id) => {
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1500));
-      let t;
-      try { t = await api(`/precios/importar-planilla/${id}`); }
-      catch (e) { notify(e.message, "danger"); setImportando(false); setAvance(null); return; }
-      setAvance(t);
-      if (t.estado === "listo") { setResultado(t.resumen); invalidarProductos(); notify("✓ Planilla importada"); break; }
-      if (t.estado === "error") { notify(`Error al importar: ${t.error}`, "danger"); break; }
-    }
-    setImportando(false);
-  };
-
-  const importar = async () => {
-    if (!archivo) return;
-    if (!(await confirmar("La importación reemplaza el precio vigente, las opciones y el REVISAR de cada producto de la planilla. El historial de precios no se duplica.", { titulo: "Importar planilla", boton: "Importar" }))) return;
-    setImportando(true);
-    setResultado(null);
-    setAvance({ estado: "corriendo", paso: "Subiendo el archivo...", segundos: 0 });
-    try {
-      const fd = new FormData();
-      fd.append("archivo", archivo);
-      if (desactivar) fd.append("desactivar_otros", "1");
-      const res = await authFetch(`${API_URL}/api/precios/importar-planilla`, { method: "POST", body: fd });
-      const data = await res.json();
-      // Si ya había una importación corriendo, se sigue esa
-      if (res.status === 409 && data.data?.id) { notify(data.error, "danger"); return seguir(data.data.id); }
-      if (!data.ok) throw new Error(data.error || "Error al importar");
-      await seguir(data.data.id);
-    } catch (e) { notify(e.message, "danger"); setImportando(false); setAvance(null); }
   };
 
   const campo = (k, label, ayuda, tipo = "number") => (
@@ -231,42 +192,7 @@ export default function Config({ notify }) {
           : <div className="aviso" style={{ marginBottom: 0 }}>Falta la clave de la API de Anthropic. En Render → servicio del backend → Environment, agrega <strong>ANTHROPIC_API_KEY</strong> con la clave de la empresa (console.anthropic.com) y reinicia el servicio.</div>}
       </div>
 
-      <div className="panel">
-        <div className="panel-titulo">Importar planilla LISTADO_CONSOLIDADO</div>
-        <div className="mini">
-          Carga el .xlsx (v61 o posterior). Lee las hojas LISTADO CONSOLIDADO (productos, precio vigente, opciones 2 y 3, REVISAR, confirmados),
-          COTIZACIONES y EXTRAS PROVEEDORES (historial de precios), los contactos de proveedores y el REGISTRO DE CAMBIOS.
-          Se puede volver a importar: no duplica precios.
-        </div>
-        <input type="file" accept=".xlsx" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
-        <label className="check">
-          <input type="checkbox" checked={desactivar} onChange={(e) => setDesactivar(e.target.checked)} />
-          Desactivar los productos que no están en la planilla (no se borran)
-        </label>
-        <div><button className="btn btn-primary" disabled={!archivo || importando} onClick={importar}>{importando ? <><span className="spinner"></span>Importando...</> : "Importar"}</button></div>
-        {avance && avance.estado !== "listo" && (
-          <div className={avance.estado === "error" ? "login-error" : "aviso"} style={{ marginBottom: 0 }}>
-            {avance.estado === "error" ? `Error: ${avance.error}` : <><span className="spinner"></span>{avance.paso} ({avance.segundos || 0} s)</>}
-          </div>
-        )}
-        {resultado && avance?.segundos != null && <div className="mini">Terminó en {avance.segundos} segundos.</div>}
-        {resultado && (
-          <table className="table table-compacta">
-            <tbody>
-              {[
-                ["Productos en la planilla", resultado.productos_en_planilla],
-                ["Nuevos / actualizados", `${resultado.productos_nuevos} / ${resultado.productos_actualizados}`],
-                ["Con precio / confirmados", `${resultado.con_precio} / ${resultado.confirmados}`],
-                ["Precios agregados al historial", resultado.precios_agregados],
-                ["Precios descartados (más baratos no aplicados en la planilla)", resultado.precios_descartados],
-                ["Proveedores nuevos", resultado.proveedores_nuevos],
-                ["Registro de cambios importado", resultado.registro_cambios],
-                resultado.desactivados ? ["Productos desactivados", resultado.desactivados] : ["Productos fuera de la planilla", resultado.fuera_de_planilla],
-              ].map(([k, v]) => <tr key={k}><td className="mini">{k}</td><td className="price-cell">{v}</td></tr>)}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <ImportarPlanilla notify={notify} />
     </div>
   );
 }
