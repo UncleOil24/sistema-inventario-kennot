@@ -7,7 +7,7 @@ const RegistroCambio = require("../models/RegistroCambio");
 const { handler, ErrorNegocio } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { recalcular, precioNetoUnitario, origenDe, registrar, normProv, SQL_AVISO } = require("../services/precios");
-const { esAdmin, veCostos } = require("../middlewares/auth");
+const { esAdmin, veCostos, esGerencia } = require("../middlewares/auth");
 const { UNIDADES, normalizarUnidad } = require("../services/unidades");
 
 // Campos de costo que el rol "usuario" no ve
@@ -117,6 +117,22 @@ const getResumen = handler(async (req, res) => {
   res.json({ ok: true, data: filas });
 });
 
+// GET /api/productos/llenados   precios que se llenaron este mes con facturas de compra (productos que no tenían precio)
+const getLlenados = handler(async (req, res) => {
+  const [[r]] = await sequelize.query(`
+    WITH primero AS (
+      SELECT DISTINCT ON (h.producto_id) h.producto_id, h.documento, h."createdAt"
+      FROM precios_proveedor h JOIN productos p ON p.id = h.producto_id AND p.activo
+      WHERE NOT h.descartado AND COALESCE(h.documento, '') <> 'SISTEMA (precio manual)'
+      ORDER BY h.producto_id, h."createdAt", h.id)
+    SELECT
+      COUNT(*) FILTER (WHERE "createdAt" >= date_trunc('month', NOW() AT TIME ZONE 'America/Santiago') AND documento ILIKE 'FACT.%')::int AS con_facturas,
+      COUNT(*) FILTER (WHERE "createdAt" >= date_trunc('month', NOW() AT TIME ZONE 'America/Santiago'))::int AS total_mes,
+      (SELECT COUNT(*)::int FROM productos WHERE activo AND (precio_compra IS NULL OR precio_compra <= 0)) AS faltan
+    FROM primero`);
+  res.json({ ok: true, data: r });
+});
+
 // GET /api/productos/:id
 const getProducto = handler(async (req, res) => {
   const producto = await Producto.findByPk(req.params.id);
@@ -196,6 +212,13 @@ const crearProducto = handler(async (req, res) => {
   if (!datos.nombre) throw new ErrorNegocio("La descripción es obligatoria");
   datos.nombre = String(datos.nombre).trim().toUpperCase();
   datos.unidad = unidadValida(datos.unidad || "UNIDAD");
+  // Comercial y Operativo agregan productos para cotizar; quedan POR CLASIFICAR para que gerencia los revise
+  if (!esGerencia(req)) {
+    const sugerida = datos.categoria && !/^POR CLASIFICAR$/i.test(datos.categoria) ? datos.categoria : null;
+    datos.categoria = "POR CLASIFICAR";
+    datos.revisar = `Agregado por ${firma(req)}${sugerida ? ` · categoría sugerida ${sugerida}` : ""}`.slice(0, 250);
+    delete datos.activo;
+  }
   // M9: antes de crear, avisa si hay descripciones parecidas (salvo que el usuario confirme que es otro producto, M10)
   if (!req.body.forzar) {
     const similares = await buscarSimilares(datos.nombre, datos.categoria);
@@ -360,6 +383,7 @@ const desconfirmarPrecio = handler(async (req, res) => {
 const getUnidades = (req, res) => res.json({ ok: true, data: UNIDADES });
 
 module.exports = {
+  getLlenados,
   getSimilares, fusionar, getUnidades,
   limiteAntiguo,
   getProductos, getCategorias, getResumen, getProducto, crearProducto, actualizarProducto, eliminarProducto,

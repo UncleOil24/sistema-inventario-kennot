@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar } from "./ui";
-import { api, fmt, fecha, useProductos } from "./lib";
+import { api, fmt, fecha, useProductos, descargar } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
+import FacturaCompra from "./FacturaCompra";
 
 // Compras: las gestiona Operativo; Comercial solo consulta el avance. Los pagos a proveedores son de Finanzas (gerencia).
 export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
@@ -12,6 +13,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   const [editando, setEditando] = useState(null); // null | "nueva" | orden
   const [detalle, setDetalle] = useState(null);
   const [documento, setDocumento] = useState(false);
+  const [facturaNueva, setFacturaNueva] = useState(false);
   // Una sola vista: por período (semana, mes o todo) y dentro, por venta. Lo antiguo queda cerrado.
   const [periodo, setPeriodo] = useState(() => { try { return localStorage.getItem("compras_periodo") || "mes"; } catch { return "mes"; } });
   const cambiarPeriodo = (v) => { setPeriodo(v); setAbiertos(new Set()); try { localStorage.setItem("compras_periodo", v); } catch { /* */ } };
@@ -70,8 +72,9 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
           {esAdmin && <option value="porpagar">Recibidas sin pagar</option>}
           <option value="anulada">Anuladas</option>
         </select>
-        {puedeOperar && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura del proveedor: actualiza el historial de precios">⇪ Documento proveedor</button>}
-        {puedeOperar && <button className="btn btn-primary" onClick={() => setEditando("nueva")} disabled={proveedores.length === 0}
+        {puedeOperar && <button className="btn btn-primary" onClick={() => setFacturaNueva(true)} title="Factura de un proveedor: se asocia a una compra pendiente o crea una nueva, y los precios pasan al catálogo">⇪ Subir factura de compra</button>}
+        {puedeOperar && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización del proveedor: actualiza el historial de precios">⇪ Cotización proveedor</button>}
+        {puedeOperar && <button className="btn btn-ghost" onClick={() => setEditando("nueva")} disabled={proveedores.length === 0}
           title={proveedores.length === 0 ? "Primero crea un proveedor" : ""}>+ Nueva orden</button>}
       </div>
       {!puedeOperar && <div className="mini" style={{ marginBottom: 10 }}>Vista de consulta: las compras las gestiona el departamento Operativo.</div>}
@@ -106,6 +109,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
         </table>
       </div>
 
+      {facturaNueva && <FacturaCompra notify={notify} proveedores={proveedores} onClose={() => setFacturaNueva(false)} onListo={(o) => { onPreciosCambio?.(); refrescar(o?.id); }} />}
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} onClose={() => { setDocumento(false); onPreciosCambio?.(); }} />}
       {editando && (
         <FormOrden orden={editando === "nueva" ? null : editando} proveedores={proveedores} notify={notify}
@@ -313,6 +317,7 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
 }
 
 export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada }) {
+  const [subir, setSubir] = useState(false);
   const [registrarPrecios, setRegistrarPrecios] = useState(true);
   const [factura, setFactura] = useState(orden.documento || "");
   const [fact, setFact] = useState({ fecha_factura: orden.fecha_factura || "", fecha_vencimiento: orden.fecha_vencimiento || "", empresa: orden.empresa || "" });
@@ -338,8 +343,9 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
   };
 
   return (
-    <Modal titulo={`// Orden ${orden.numero}`} onClose={onClose} ancho={720}
+    <Modal titulo={`// Compra ${orden.numero}`} onClose={onClose} ancho={720}
       footer={<>
+        {orden.estado !== "anulada" && puedeOperar && !(orden.documentos || []).length && <button className="btn btn-primary" onClick={() => setSubir(true)}>⇪ Subir factura</button>}
         {orden.estado === "borrador" && puedeOperar && <>
           {esAdmin && <button className="btn btn-danger" onClick={eliminar}>Eliminar</button>}
           <button className="btn btn-ghost" onClick={onEditar}>Editar</button>
@@ -381,6 +387,12 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
         </table>
       </div>
       <Totales subtotal={orden.subtotal} iva={orden.iva} total={orden.total} />
+      {(orden.documentos || []).length > 0 && (
+        <div className="mini" style={{ margin: "6px 0" }}>
+          {orden.documentos.map((d) => <button key={d.id} className="btn btn-ghost btn-sm" onClick={() => descargar(`/ordenes-compra/${orden.id}/documentos/${d.id}`, d.nombre_archivo).catch((e) => notify(e.message, "danger"))}>📄 Factura {d.folio} ({d.nombre_archivo})</button>)}
+        </div>
+      )}
+      {subir && <FacturaCompra orden={orden} notify={notify} onClose={() => setSubir(false)} onListo={() => onCambio(true)} />}
       {orden.estado !== "anulada" && puedeOperar && (
         <div className="panel" style={{ marginTop: 10 }}>
           <div className="panel-titulo">Factura del proveedor</div>

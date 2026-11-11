@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Estado, Cargando, pedirTexto } from "./ui";
+import { Estado, Cargando, motivoRechazo } from "./ui";
 import { api, fmt, fecha, nombreCot } from "./lib";
 import { AceptarCotizacion } from "./Cotizaciones";
 
@@ -88,7 +88,7 @@ export function InicioDepto({ depto, notify, irA }) {
   };
   const abrirAceptar = async (c) => { try { setAceptar(await api(`/cotizaciones/${c.id}`)); } catch (e) { notify(e.message, "danger"); } };
   const rechazar = async (c) => {
-    const motivo = await pedirTexto(`¿Por qué se rechazó la ${nombreCot(c)}?`, { titulo: "Cotización rechazada", placeholder: "precio, plazo, se compró a otro...", boton: "Marcar rechazada" });
+    const motivo = await motivoRechazo(nombreCot(c));
     if (motivo === null) return;
     try {
       await api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "rechazada", motivo } });

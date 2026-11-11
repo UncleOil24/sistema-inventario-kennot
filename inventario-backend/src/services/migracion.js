@@ -208,6 +208,8 @@ async function codigosClientes(q) {
     }
     await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_unidades_bolsa', '${new Date().toISOString()}', NOW(), NOW())`);
   }
+  // Nuestras compras a proveedores se numeran C-0001 (la OC es la del cliente)
+  await q(`UPDATE ordenes_compra SET numero = 'C-' || SUBSTRING(numero FROM 4) WHERE numero LIKE 'OC-%'`);
   // Ventas y cotizaciones sin cliente (o con el general) cuyo ID empieza con la unidad de compra de un cliente:
   // se asocian a ese cliente (ej. V-0001 Regimiento Linares → Ejército de Chile 3385). Es idempotente.
   await q(`UPDATE ventas v SET cliente_id = c.id, cliente_nombre = c.nombre FROM clientes c

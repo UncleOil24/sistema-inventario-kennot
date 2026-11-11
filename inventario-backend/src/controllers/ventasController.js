@@ -486,7 +486,7 @@ const generarOrdenes = handler(async (req, res) => {
         notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`,
         creado_por: firma(req),
       }, { transaction: t });
-      await oc.update({ numero: `OC-${String(oc.id).padStart(4, "0")}` }, { transaction: t });
+      await oc.update({ numero: `C-${String(oc.id).padStart(4, "0")}` }, { transaction: t });
       creadas.push(oc);
     }
     // Generar las compras significa que Operativo tomó la venta

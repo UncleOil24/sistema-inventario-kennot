@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, confirmar } from "./ui";
 import { api, fmt, fecha, hoyISO, TIPOS_GASTO } from "./lib";
+import FacturaCompra from "./FacturaCompra";
 
 const mesActual = () => hoyISO().slice(0, 7);
 
@@ -10,6 +11,7 @@ export default function Gastos({ notify }) {
   const [ventas, setVentas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
+  const [materiales, setMateriales] = useState(null); // gasto que en realidad es compra de materiales (o "nuevo")
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -53,6 +55,7 @@ export default function Gastos({ notify }) {
           <input type="month" className="filter-select" value={mes} onChange={(e) => setMes(e.target.value || mesActual())} />
         </div>
         <div style={{ flex: 1 }} />
+        <button className="btn btn-ghost" title="Factura de materiales a un proveedor: se registra como compra y sus precios pasan al catálogo" onClick={() => setMateriales("nuevo")}>⇪ Factura de materiales</button>
         <button className="btn btn-primary" onClick={() => setForm({ fecha: hoyISO(), tipo: "flete", monto: "", descripcion: "", venta_id: "", comprobante: "", empresa: "", iva: "" })}>+ Nuevo gasto</button>
       </div>
       <div className="table-wrap">
@@ -73,6 +76,7 @@ export default function Gastos({ notify }) {
                   <td className="mini">{g.creado_por || ""}</td>
                   <td><div className="actions">
                     <button className="btn btn-ghost btn-sm" onClick={() => setForm({ ...g, venta_id: g.venta_id || "" })}>Editar</button>
+                    <button className="btn btn-ghost btn-sm" title="Es una compra de materiales: subir su factura, pasa a Compras y actualiza el catálogo" onClick={() => setMateriales(g)}>Es compra de materiales</button>
                     <button className="btn btn-danger btn-sm" onClick={() => eliminar(g)}>✕</button>
                   </div></td>
                 </tr>
@@ -119,6 +123,7 @@ export default function Gastos({ notify }) {
           </div>
         </Modal>
       )}
+      {materiales && <FacturaCompra gasto={materiales === "nuevo" ? null : materiales} notify={notify} onClose={() => setMateriales(null)} onListo={() => cargar()} />}
     </>
   );
 }

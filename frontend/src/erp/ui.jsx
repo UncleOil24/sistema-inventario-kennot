@@ -324,14 +324,26 @@ export function Avisos() {
         <button className={`btn ${op.peligro ? "btn-danger" : "btn-primary"}`} autoFocus={!op.texto} disabled={op.texto && op.obligatorio && !valor.trim()} onClick={aceptar}>{op.boton || "Aceptar"}</button>
       </>}>
       <div style={{ whiteSpace: "pre-line", fontSize: 14, lineHeight: 1.5 }}>{op.mensaje}</div>
+      {op.texto && op.sugerencias && (
+        <div className="chips" style={{ marginTop: 12 }}>
+          {op.sugerencias.map((s) => <button key={s} type="button" className={`chip ${valor === s ? "activo" : ""}`} onClick={() => setValor(s)}>{s}</button>)}
+          <button type="button" className={`chip ${valor && !op.sugerencias.includes(valor) ? "activo" : ""}`} onClick={() => { setValor(""); setTimeout(() => document.getElementById("aviso-texto")?.focus(), 0); }}>Otro…</button>
+        </div>
+      )}
       {op.texto && (
         <div className="field" style={{ marginTop: 12 }}>
-          <input autoFocus value={valor} placeholder={op.placeholder || ""} onChange={(e) => setValor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && aceptar()} />
+          <input id="aviso-texto" autoFocus={!op.sugerencias} value={valor} placeholder={op.placeholder || ""} onChange={(e) => setValor(e.target.value)} onKeyDown={(e) => e.key === "Enter" && aceptar()} />
         </div>
       )}
     </Modal>
   );
 }
+
+// Motivo de rechazo de una cotización: opciones rápidas u "Otro" con texto
+export const MOTIVOS_RECHAZO = ["Fuera de plazo", "Adj. a otro proveedor", "Eliminada"];
+export const motivoRechazo = (nombre) => pedirTexto(`¿Por qué se rechazó la ${nombre}?`, {
+  titulo: "Cotización rechazada", sugerencias: MOTIVOS_RECHAZO, placeholder: "Elige una opción o escribe otro motivo", boton: "Marcar rechazada", obligatorio: true,
+});
 
 // Pedido a proveedor: qué líneas incluir (si todas tienen precio, o ninguna, no se pregunta)
 export const modoPedido = async (items) => {
