@@ -18,7 +18,7 @@ function margenParaEntrar(lineas, monto) {
 
 // "Cuadrar al presupuesto": baja todos los precios en el mismo % (sin bajar de la compra cuando se conoce)
 // hasta que el total con IVA quede igual o bajo el monto. Devuelve { precios: Map(clave -> precio), pct } o null si no se puede.
-const claveDe = (i) => (i.producto_id ? `p${i.producto_id}` : `c${i.clave}`);
+const claveDe = (i) => (i.clave ? `c${i.clave}` : `p${i.producto_id}`);
 function cuadrar(lineas, monto) {
   const meta = Math.floor(monto / IVA); // neto máximo
   const neto = (ps) => lineas.reduce((s, i) => s + ps.get(claveDe(i)) * Number(i.cantidad || 0), 0);
