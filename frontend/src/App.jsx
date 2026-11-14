@@ -183,6 +183,8 @@ const styles = `
   .estado-neutral { color: var(--text2); border-color: var(--border2); background: var(--surface2); }
   .estado-muted { color: var(--text3); border-color: var(--border); background: transparent; text-decoration: line-through; }
   .fila-anulada td { opacity: 0.45; }
+  .fila-raro td { background: rgba(192, 57, 43, 0.10); }
+  .aviso-envase { margin-top: 4px; padding: 5px 8px; border-radius: 6px; font-size: 12px; background: rgba(var(--accent-rgb), 0.10); border: 1px solid rgba(var(--accent-rgb), 0.35); }
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-x: auto; }
   .modal .panel { background: var(--surface2); margin-bottom: 0; }
   .panel-titulo { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

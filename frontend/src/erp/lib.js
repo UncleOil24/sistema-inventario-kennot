@@ -87,8 +87,34 @@ export const precioSegun = (p, tipo) => Number(tipo === "particular" ? p.precio_
 
 
 // Línea de cotización a partir de un producto del catálogo
+// Contenido por envase escrito en el nombre: "CAJA 1000", "X 100 UN", "BOLSA DE 50", "PACK 10", "1000 UNIDADES"
+export function contenidoDeNombre(nombre) {
+  const t = String(nombre || "").toUpperCase().replace(/\./g, "");
+  const m = t.match(/\b(?:CAJA|BOLSA|PACK|PAQUETE|PAQ|ROLLO|SET|DISPLAY|BLISTER)\s*(?:DE|X|C\/)?\s*(\d{2,5})\b/)
+    || t.match(/\bX\s*(\d{2,5})\s*(?:UN|UNID|UNIDADES|U|PCS|PZS|PIEZAS|PARES)\b/)
+    || t.match(/\bX\s*(\d{3,5})\b(?!\s*(?:M|MM|CM|MT|MTS|METROS|GR|G|KG|ML|LT|L|CC)\b)/)
+    || t.match(/\b(\d{2,5})\s*(?:UN|UNID|UNIDADES|PCS|PZS|PIEZAS)\b/);
+  const n = m ? Number(m[1]) : 0;
+  return n > 1 ? n : null;
+}
+// Contenido del producto: el confirmado en el catálogo o, si no hay, el que dice el nombre
+export const contenidoDe = (p) => (Number(p?.contenido) > 1 ? Number(p.contenido) : contenidoDeNombre(p?.nombre));
+
+// Factura de proveedor que cobra por unidad un producto que nosotros compramos en envase (caja de 1.000):
+// propone pasar la línea a envases (cantidad ÷ contenido, precio × contenido) para no ensuciar el catálogo.
+export function envaseEnFactura(l, prod) {
+  const c = contenidoDe(prod);
+  if (!c || l.envase_ok) return null;
+  const cant = Number(l.cantidad) || 0; const precio = Number(l.precio_neto) || 0;
+  const porUnidad = /^(UN|UND|UNI|UNID|UNIDAD|UNIDADES|U|C\/U|PZA|PZS|PCS)?$/i.test(String(l.unidad || "").trim());
+  const ref = Number(prod?.precio_compra) || 0;
+  const calzaPrecio = ref > 0 ? precio * c > ref * 0.4 && precio * c < ref * 2.5 : true;
+  if (!porUnidad || cant < c || !calzaPrecio || !(precio > 0)) return null;
+  return { contenido: c, cantidad: Math.round((cant / c) * 1000) / 1000, precio: Math.round(precio * c) };
+}
+
 export const lineaDesdeProducto = (p, tipo) => ({
-  producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: 1,
+  producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: 1, contenido: contenidoDe(p),
   precio: precioSegun(p, tipo), auto: true, // auto: el precio sigue al tipo de cliente
   convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
   costo: p.precio_compra !== undefined ? Number(p.precio_compra) || 0 : undefined, proveedor: p.proveedor,

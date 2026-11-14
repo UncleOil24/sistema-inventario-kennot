@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Modal, Estado, SelectorProducto } from "./ui";
-import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO } from "./lib";
+import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
 
 // "Subir facturas y boletas" de una venta: se suben todos los documentos juntos; el sistema lee cada uno
 // (proveedor, N°, fecha, productos y montos), lo calza con las líneas de la venta y lo guarda con el proveedor
@@ -199,6 +199,10 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => setLinea(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => setLinea(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
+                      {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
+                        <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
+                          <button className="link" onClick={() => setLinea(l.i, { cantidad: e.cantidad, precio_neto: e.precio, envase_ok: true })}>Convertir</button>{" · "}
+                          <button className="link" onClick={() => setLinea(l.i, { envase_ok: true })}>Está bien así</button></div>) : null; })()}
                     </td>
                     <td className="mini">
                       {l.venta_linea ? <>✓ {l.venta_linea.nombre}<div>necesita {l.venta_linea.cantidad}{Number(l.cantidad) > l.venta_linea.cantidad ? ` · se compraron ${l.cantidad}: cuenta el total pagado` : Number(l.cantidad) < l.venta_linea.cantidad ? ` · faltan ${l.venta_linea.cantidad - Number(l.cantidad)}` : ""}</div></>

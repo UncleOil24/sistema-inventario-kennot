@@ -87,6 +87,9 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
       cantidad,
       grupo: b.grupo !== undefined ? (String(b.grupo || "").trim() || null) : null, // grupo del presupuesto (M27)
       nota_interna: String(b.nota_interna || "").trim() || null,
+      // Conversión de unidades a envases (ej. 2.000 un = 2 cajas de 1.000): "convertido" guarda la cantidad pedida,
+      // "sin_conversion" que ya se revisó y la cantidad está bien
+      envase: b.envase && typeof b.envase === "object" ? { convertido: Number(b.envase.convertido) || null, sin_conversion: !!b.envase.sin_conversion } : null,
     };
     if (!producto_id) {
       // No está en catálogo (rojo): descripción del cliente y precio a mano

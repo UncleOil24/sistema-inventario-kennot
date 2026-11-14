@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, SelectorCategoria, confirmar, pedirTexto } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
-import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar } from "./lib";
+import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar, contenidoDeNombre } from "./lib";
 
 // Unidad de medida: lista cerrada (M11)
 const UNIDADES = ["UNIDAD", "METRO", "KILO", "SACO", "TINETA", "GALÓN", "ROLLO", "CAJA", "BOLSA", "PACK", "PAR", "JUEGO", "PLIEGO", "PLANCHA", "TIRA", "M2", "M3"];
@@ -193,6 +193,7 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
       const body = {
         nombre: form.nombre, categoria: form.categoria, unidad: form.unidad, codigo: form.codigo || undefined,
         certificacion: form.certificacion || "", ficha_tecnica: form.ficha_tecnica || "", modelo_equivalente: form.modelo_equivalente || "",
+        ...(esGerencia ? { contenido: Number(form.contenido) > 1 ? Number(form.contenido) : null } : {}),
       };
       if (nuevo) {
         if (esAdmin && Number(form.precio_compra) > 0) Object.assign(body, { precio_compra: Number(form.precio_compra), proveedor: form.proveedor });
@@ -255,6 +256,15 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
             {UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
+        {esGerencia && (
+          <div className="field">
+            <label>Contenido por envase (unidades)</label>
+            <input type="number" min="0" value={form.contenido ?? ""} placeholder={contenidoDeNombre(form.nombre) ? `según el nombre: ${contenidoDeNombre(form.nombre)}` : "vacío = se vende suelto"}
+              onChange={(e) => set("contenido", e.target.value)} />
+            {!form.contenido && contenidoDeNombre(form.nombre) && <button type="button" className="link mini" onClick={() => set("contenido", contenidoDeNombre(form.nombre))}>Usar {contenidoDeNombre(form.nombre)} (dice el nombre)</button>}
+            {(Number(form.contenido) > 1 || contenidoDeNombre(form.nombre)) && (form.unidad || "UNIDAD") === "UNIDAD" && <span className="mini" style={{ color: "var(--warn)" }}>Si el precio es por caja o bolsa, la unidad debería ser CAJA, BOLSA o PACK.</span>}
+          </div>
+        )}
       </div>
       <details open={!!(form.certificacion || form.ficha_tecnica || form.modelo_equivalente) || /EPP/i.test(form.categoria || "")}>
         <summary className="mini" style={{ cursor: "pointer", marginBottom: 8 }}>Datos técnicos (EPP y licitaciones)</summary>
