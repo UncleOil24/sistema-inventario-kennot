@@ -170,6 +170,34 @@ export function InicioDepto({ depto, notify, irA }) {
           </div>
         </div>
       )}
+      {depto === "comercial" && data.postuladas && (() => {
+        const p = data.postuladas, m = p.mes;
+        const emp = { kenott: "Kenott", tactics: "Tactics", ambas: "Kenott y Tactics" };
+        return (
+          <div className="panel" style={{ marginBottom: 14 }}>
+            <div className="panel-titulo">Postuladas: SEGUIMIENTO <span className="mini">· confirmadas en Mercado Público (las solo cotizadas no cuentan)</span></div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18, margin: "6px 0" }}>
+              <span>En {mesLargo(data.mes_actual.mes)}: <strong>{m.cantidad}</strong> postulada(s) <span className="mini">(Kenott {m.kenott} · Tactics {m.tactics})</span></span>
+              <span>Monto ofertado: <strong>{fmt(m.monto)}</strong></span>
+              <span className="estado estado-ok">{m.ganadas} ganada(s)</span>
+              <span className="estado estado-neutral">{m.perdidas} perdida(s)</span>
+              <span className="estado estado-info">{m.esperando} esperando resultado</span>
+            </div>
+            {!p.esperando.length ? <div className="mini" style={{ marginTop: 8 }}>// ninguna postulada esperando resultado</div> : (
+              <table className="table table-compacta" style={{ marginTop: 8 }}>
+                <tbody>{p.esperando.slice(0, 10).map((l) => (
+                  <tr key={l.codigo} className="clickable" onClick={() => irA("licitaciones", l.codigo)}>
+                    <td>{l.nombre}<div className="mini">{l.codigo} · {l.organismo} · {emp[l.empresa] || "—"} · postulada {l.postulada_en ? fecha(l.postulada_en) : "—"}{l.por ? ` por ${l.por}` : ""}{l.cot_numero ? ` · N${l.cot_numero}` : " · sin cotización en el sistema"}{l.cierre ? ` · ${new Date(l.cierre) < new Date() ? "cerró" : "cierra"} ${fecha(l.cierre)}` : ""}</div></td>
+                    <td className="price-cell">{l.total ? fmt(l.total) : ""}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            )}
+            {p.total_esperando > 10 && <button className="link" onClick={() => irA("licitaciones")}>y {p.total_esperando - 10} más en Licitaciones → Postuladas</button>}
+            <div className="mini" style={{ marginTop: 6 }}>El resultado se marca en "Enviadas: REVISAR" (Aceptada / Rechazada) sobre su cotización.</div>
+          </div>
+        );
+      })()}
       {aceptar && <AceptarCotizacion cot={aceptar} notify={notify} onClose={() => setAceptar(null)}
         onHecho={(venta) => { setAceptar(null); setData((d) => ({ ...d, enviadas: d.enviadas.filter((x) => x.id !== aceptar.id) })); irA("ventas", venta.id); }} />}
       {depto === "comercial" && (

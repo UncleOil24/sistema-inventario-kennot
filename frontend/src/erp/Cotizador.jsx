@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Totales, Estado, confirmar, modoPedido } from "./ui";
 import ImportarLista from "./ImportarLista";
 import ControlPresupuesto from "./Presupuesto";
@@ -114,6 +114,14 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", presupuesto: null, lugar_entrega: "", items: [] }));
   const empresa = borrador.empresa || "kenott";
+  // El nombre no repite el ID del proceso (ya va en su recuadro): "Compra Ágil 2440-2281-COT26 – Materiales..." -> "Materiales..."
+  useEffect(() => {
+    const id = String(borrador.id_solicitud || "").trim();
+    if (!id || !borrador.nombre_cotizacion) return;
+    const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const limpio = borrador.nombre_cotizacion.replace(new RegExp(`^\\s*(compra\\s+[áa]gil|licitaci[óo]n)?\\s*${esc}\\s*[–—-]?\\s*`, "i"), "").trim();
+    if (limpio && limpio !== borrador.nombre_cotizacion) set({ nombre_cotizacion: limpio });
+  }, [borrador.id_solicitud, borrador.nombre_cotizacion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
   const agregarLista = (nuevas, res) => {

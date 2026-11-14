@@ -105,6 +105,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                       ? <span className="id-solicitud" title="ID del cliente o de la solicitud de Mercado Público">ID {c.id_solicitud}</span>
                       : <span className="mini" style={{ color: "var(--warn)" }} title="Edítala para agregar el ID del cliente o de la solicitud">sin ID</span>}
                     {c.creado_por && <span title="Quién la hizo">por {c.creado_por}</span>}
+                    {c.postulada && <span className="estado estado-ok" title="Confirmado en Licitaciones">✓ Postulada en Mercado Público {c.postulada.codigo}{c.postulada.fecha ? ` el ${fecha(c.postulada.fecha)}` : ""}</span>}
                     <Estado valor={c.empresa || "kenott"} />
                     <span>{c.cliente || "Sin cliente"}</span>
                     <span>{fecha(c.fecha || c.createdAt)}</span>

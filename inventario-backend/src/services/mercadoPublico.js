@@ -480,7 +480,7 @@ async function limpiarCerradas() {
   await sequelize.query(`CREATE TABLE IF NOT EXISTS mp_conteo_cerradas (fecha date PRIMARY KEY, cerrados int NOT NULL DEFAULT 0,
     descartados int NOT NULL DEFAULT 0, sin_postular int NOT NULL DEFAULT 0, compra_agil int NOT NULL DEFAULT 0, licitaciones int NOT NULL DEFAULT 0)`);
   const [filas] = await sequelize.query(`WITH borradas AS (
-      DELETE FROM licitaciones l WHERE l.fecha_cierre < NOW() - INTERVAL '3 days' AND l.cotizacion_id IS NULL
+      DELETE FROM licitaciones l WHERE l.fecha_cierre < NOW() - INTERVAL '3 days' AND l.cotizacion_id IS NULL AND l.estado_interno <> 'postulada'
         AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo))
       RETURNING fecha_cierre, estado_interno, fuente)
     INSERT INTO mp_conteo_cerradas AS m (fecha, cerrados, descartados, sin_postular, compra_agil, licitaciones)

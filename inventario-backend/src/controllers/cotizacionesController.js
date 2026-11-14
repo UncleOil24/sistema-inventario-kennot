@@ -149,6 +149,12 @@ const revisarPostulacion = async ({ id_solicitud, empresa, id, forzar }, t) => {
     throw new ErrorNegocio(`Ya hay una cotización de ${otra.empresa === "tactics" ? "Tactics" : "Kenott"} (N${otra.numero}) para el proceso ${id_solicitud}. Si las dos empresas postulan al mismo proceso, el art. 60 del reglamento de compras públicas puede dejar inadmisibles ambas ofertas (empresas relacionadas). ¿Guardar igual?`, 409);
   }
 };
+// El nombre no repite el ID del proceso (ya va en su recuadro): "Compra Ágil 2440-2281-COT26 – Materiales..." -> "Materiales..."
+const sinIdEnNombre = (nombre, id) => {
+  if (!nombre || !id) return nombre;
+  const esc = String(id).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(nombre).replace(new RegExp(`^\\s*(compra\\s+[áa]gil|licitaci[óo]n)?\\s*${esc}\\s*[–—-]?\\s*`, "i"), "").trim() || nombre;
+};
 // Anota en la licitación qué empresa postula (o "ambas")
 const anotarPostulacion = async (id_solicitud, t) => {
   if (!esSolicitudMP(id_solicitud)) return;
@@ -197,7 +203,11 @@ const getCotizaciones = handler(async (req, res) => {
   if (req.query.empresa) where.empresa = req.query.empresa;
   if (busqueda) where[Op.or] = ["numero", "cliente", "nombre_cotizacion", "id_solicitud"].map((c) => ({ [c]: { [Op.iLike]: `%${busqueda}%` } }));
   const data = await Cotizacion.findAll({ where, order: [["anterior", "ASC"], ["createdAt", "DESC"]] });
-  res.json({ ok: true, data: data.map(vista(req)) });
+  // Las que se postularon en Mercado Público (confirmado a mano en Licitaciones)
+  const ids = data.map((c) => c.id);
+  const [pos] = ids.length ? await sequelize.query(`SELECT postulada_cotizacion_id AS id, codigo, postulada_en FROM licitaciones WHERE postulada_cotizacion_id IN (:ids)`, { replacements: { ids } }) : [[]];
+  const porId = Object.fromEntries(pos.map((p) => [p.id, { codigo: p.codigo, fecha: p.postulada_en }]));
+  res.json({ ok: true, data: data.map((c) => ({ ...vista(req)(c), postulada: porId[c.id] || null })) });
 });
 
 // GET /api/cotizaciones/:id
@@ -229,7 +239,7 @@ const crearCotizacion = handler(async (req, res) => {
       presupuesto: limpiarPresupuesto(b.presupuesto),
       lugar_entrega: String(b.lugar_entrega || "").trim() || null,
       plazo_entrega: String(b.plazo_entrega || "").trim() || params.plazo_entrega || null,
-      nombre_cotizacion: b.nombre_cotizacion || null, // se imprime como "Descripción" (Kenott) o "Proyecto" (Tactics)
+      nombre_cotizacion: sinIdEnNombre(b.nombre_cotizacion, b.id_solicitud) || null, // se imprime como "Descripción" (Kenott) o "Proyecto" (Tactics)
       fecha, validez_dias: validez, fecha_validez: sumarDias(fecha, validez),
       estado: EDITABLES.includes(b.estado) ? b.estado : "cotizacion",
       notas: b.notas || null,
@@ -269,7 +279,7 @@ const actualizarCotizacion = handler(async (req, res) => {
       const items = await armarItems(b.items, cambios.tipo_precio || c.tipo_precio, b.actualizar_costos ? null : c.items, t);
       Object.assign(cambios, { items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0) });
     }
-    if (b.nombre_cotizacion !== undefined) cambios.nombre_cotizacion = b.nombre_cotizacion;
+    if (b.nombre_cotizacion !== undefined) cambios.nombre_cotizacion = sinIdEnNombre(b.nombre_cotizacion, b.id_solicitud !== undefined ? b.id_solicitud : c.id_solicitud);
     if (b.notas !== undefined) cambios.notas = b.notas;
     if (b.validez_dias) {
       cambios.validez_dias = Number(b.validez_dias);
