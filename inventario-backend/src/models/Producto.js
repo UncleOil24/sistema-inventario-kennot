@@ -11,6 +11,8 @@ const Producto = sequelize.define("Producto", {
   nombre: { type: DataTypes.STRING(255), allowNull: false, validate: { notEmpty: true } }, // descripción estándar
   categoria: { type: DataTypes.STRING(100), allowNull: false, defaultValue: "General" },
   unidad: { type: DataTypes.STRING(50), allowNull: false, defaultValue: "UNIDAD" },
+  // Contenido por envase: cuántas unidades trae lo que se vende (ej. caja de 1.000 grapas = 1000). Vacío = se vende suelto.
+  contenido: { type: DataTypes.INTEGER, allowNull: true },
   activo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   en_planilla: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // vino de la planilla consolidada
 

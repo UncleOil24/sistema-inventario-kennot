@@ -3,7 +3,7 @@ import { Totales, Estado, confirmar, modoPedido } from "./ui";
 import ImportarLista from "./ImportarLista";
 import ControlPresupuesto from "./Presupuesto";
 import { conConfirmacion } from "./Recorrido";
-import { fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
+import { contenidoDe, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
 
 // Identificador de la línea: el producto, o una clave para las que no están en catálogo
 const idL = (i) => (i.producto_id ? `p${i.producto_id}` : `c${i.clave}`);
@@ -12,6 +12,28 @@ const PLAZO_DEFECTO = "02 días hábiles una vez aceptada la propuesta y emitida
 
 // Cotizador: arma la cotización con nuestros precios según el tipo de cliente.
 // borrador: { id?, numero?, cliente_id, tipo_precio, nombre_cotizacion, validez_dias, notas, items }
+// --- Envases: un producto que se vende en caja/bolsa de N unidades -----------------------------------
+const contenidoLinea = (i) => (i.producto_id && (i.caso || "mismo") !== "nuevo" ? contenidoDe(i) : null);
+const miles = (n) => Number(n).toLocaleString("es-CL");
+const ENVASES = { CAJA: "caja", BOLSA: "bolsa", PACK: "pack", PAQUETE: "paquete", ROLLO: "rollo", JUEGO: "juego", PAR: "par", DISPLAY: "display" };
+const nombreEnvase = (unidad, n, nombre = "") => {
+  const u = String(unidad || "").toUpperCase();
+  const delNombre = (String(nombre).toUpperCase().match(/\b(CAJA|BOLSA|PACK|PAQUETE|ROLLO|DISPLAY)\b/) || [])[1];
+  const base = ENVASES[u] || ENVASES[delNombre] || "envase";
+  return n === 1 ? base : base === "par" ? "pares" : base === "pack" ? "packs" : `${base}s`;
+};
+// La cantidad parece en unidades sueltas: igual o mayor que el contenido del envase
+const debeConvertir = (i) => { const c = contenidoLinea(i); return !!c && Number(i.cantidad) >= c && !i.envase?.sin_conversion && !i.envase?.convertido; };
+function convertirLinea(i) {
+  const c = contenidoLinea(i); const pedido = Number(i.cantidad); const n = Math.ceil(pedido / c);
+  const base = String(i.descripcion_cliente || i.nombre || "").replace(/\s*\(\d+ \w+ de [\d.]+ un = [\d.]+ un\)$/, "");
+  return { ...i, cantidad: n, descripcion_cliente: `${base} (${n} ${nombreEnvase(i.unidad, n, i.nombre)} de ${miles(c)} un = ${miles(n * c)} un)`, envase: { convertido: pedido } };
+}
+function deshacerConversion(i) {
+  const base = String(i.descripcion_cliente || "").replace(/\s*\(\d+ \w+ de [\d.]+ un = [\d.]+ un\)$/, "");
+  return { ...i, cantidad: i.envase.convertido, descripcion_cliente: base === i.nombre ? "" : base, envase: { sin_conversion: true } };
+}
+
 export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, notify, onGuardada, irAClientes }) {
   const productos = useProductos();
   const [q, setQ] = useState("");
@@ -95,9 +117,13 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
 
   // Líneas que vienen de la lista del cliente (leída por Claude y revisada)
   const agregarLista = (nuevas, res) => {
+    let convertidas = 0;
     setBorrador((b) => {
       const lista = [...b.items];
-      for (const n of nuevas) {
+      for (const n0 of nuevas) {
+        // Si pidieron unidades sueltas de un producto que se vende en envase (ej. 2.000 grapas, caja de 1.000), se convierte
+        const n = debeConvertir(n0) ? convertirLinea(n0) : n0;
+        if (n !== n0) convertidas++;
         const previa = n.producto_id && lista.find((i) => i.producto_id === n.producto_id);
         if (previa) Object.assign(previa, { cantidad: Number(previa.cantidad) + Number(n.cantidad) });
         else lista.push(n);
@@ -105,7 +131,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       return { ...b, items: lista, archivo_cliente: res.archivo, nombre_cotizacion: b.nombre_cotizacion || (res.cliente ? `Lista ${res.cliente}` : "") };
     });
     setImportar(false);
-    notify(`✓ ${nuevas.length} líneas agregadas desde la lista del cliente`);
+    notify(`✓ ${nuevas.length} líneas agregadas desde la lista del cliente${convertidas ? ` · ${convertidas} convertida(s) a envases: revísalas (marcadas en azul)` : ""}`);
   };
 
   const guardar = async (estadoPedido, salida = null) => {
@@ -136,7 +162,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         items: items.map((i) => ({
           producto_id: i.producto_id || null, clave: i.clave || null, caso: i.caso || "mismo", cantidad: Number(i.cantidad),
           precio: i.precio === "" ? null : Number(i.precio), descripcion_cliente: i.descripcion_cliente || null, grupo: i.grupo || null,
-          nota_interna: i.nota_interna || null, unidad: i.unidad,
+          nota_interna: i.nota_interna || null, unidad: i.unidad, envase: i.envase || null,
         })),
       };
       // Si la otra empresa ya cotizó este proceso, el servidor avisa (art. 60) y se pide confirmación
@@ -276,8 +302,14 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                   const m = (Number(i.precio) - Number(i.costo || 0)) * Number(i.cantidad);
                   const mp = Number(i.precio) ? Math.round(((Number(i.precio) - Number(i.costo || 0)) / Number(i.precio)) * 100) : 0;
                   const caso = i.caso || "mismo";
+                  const totalLinea = Number(i.precio || 0) * Number(i.cantidad || 0);
+                  const resto = subtotal - totalLinea;
+                  const presuTotal = Number(borrador.presupuesto?.total) || 0;
+                  // Monto raro: una línea que vale más de 5 veces todo el resto junto, o más que el presupuesto (ej. unidad mal puesta)
+                  const raro = totalLinea > 0 && ((items.length >= 3 && totalLinea > resto * 5) || (presuTotal > 0 && totalLinea * 1.19 > presuTotal));
+                  const cont = contenidoLinea(i);
                   return (
-                    <tr key={k} className={CASOS[caso]?.[1] || (!(Number(i.precio) > 0) ? "fila-alerta" : "")}>
+                    <tr key={k} className={raro ? "fila-raro" : CASOS[caso]?.[1] || (!(Number(i.precio) > 0) ? "fila-alerta" : "")}>
                       <td className="id-cell">{i.codigo ?? ""}</td>
                       <td>
                         <input className="desc-cliente" value={i.descripcion_cliente || ""} placeholder={i.nombre} title="Se imprime en la cotización (lo que pidió el cliente)"
@@ -293,6 +325,15 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                               {i.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(i.fecha_precio)}</span>}
                             </>}
                         </div>
+                        {debeConvertir(i) && (
+                          <div className="aviso-envase">
+                            ¿{miles(i.cantidad)} unidades = {Math.ceil(Number(i.cantidad) / cont)} {nombreEnvase(i.unidad, Math.ceil(Number(i.cantidad) / cont), i.nombre)} de {miles(cont)}? El precio es por {nombreEnvase(i.unidad, 1, i.nombre)} de {miles(cont)} un.
+                            {" "}<button className="link" onClick={() => setItems((l) => l.map((x) => (idL(x) === k ? convertirLinea(x) : x)))}>Convertir</button>
+                            {" · "}<button className="link" onClick={() => setItems((l) => l.map((x) => (idL(x) === k ? { ...x, envase: { sin_conversion: true } } : x)))}>La cantidad está bien</button>
+                          </div>
+                        )}
+                        {i.envase?.convertido && <div className="mini" style={{ color: "var(--accent)" }}>Convertido desde {miles(i.envase.convertido)} un · <button className="link" onClick={() => setItems((l) => l.map((x) => (idL(x) === k ? deshacerConversion(x) : x)))}>deshacer</button></div>}
+                        {raro && <div className="mini" style={{ color: "var(--danger)" }}>⚠ Esta línea vale {fmt(totalLinea)}{presuTotal > 0 && totalLinea * 1.19 > presuTotal ? ", más que todo el presupuesto" : ", más de 5 veces todo el resto de la cotización"}: revisa la cantidad y la unidad.</div>}
                         {caso !== "mismo" && <input className="desc-cliente nota" value={i.nota_interna || ""} placeholder="Nota interna (no se imprime)" onChange={(e) => setLinea(k, "nota_interna", e.target.value)} />}
                       </td>
                       {grupos.length > 0 && <td>

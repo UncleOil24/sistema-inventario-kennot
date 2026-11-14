@@ -142,7 +142,7 @@ const getProducto = handler(async (req, res) => {
   res.json({ ok: true, data: vista(req, await getParametros())(producto) });
 });
 
-const CAMPOS_EDITABLES = ["codigo", "nombre", "categoria", "unidad", "activo", "certificacion", "ficha_tecnica", "modelo_equivalente"];
+const CAMPOS_EDITABLES = ["codigo", "nombre", "categoria", "unidad", "activo", "certificacion", "ficha_tecnica", "modelo_equivalente", "contenido"];
 const unidadValida = (u) => {
   const n = normalizarUnidad(u);
   if (!n) throw new ErrorNegocio(`Unidad "${u}" no válida. Usa una de: ${UNIDADES.join(", ")}`);
@@ -262,7 +262,8 @@ const actualizarProducto = handler(async (req, res) => {
       if (c === "nombre") v = String(v).trim().toUpperCase();
       if (c === "unidad") v = String(v || "") === String(p.unidad || "") ? p.unidad : unidadValida(v); // una unidad por revisar se puede dejar igual
       if (["certificacion", "ficha_tecnica", "modelo_equivalente"].includes(c)) v = String(v || "").trim() || null;
-      if (String(v) !== String(p[c])) cambios[c] = v;
+      if (c === "contenido") { v = Math.round(Number(v) || 0); v = v > 1 ? v : null; if (String(v ?? "") === String(p.contenido ?? "")) continue; }
+      if (String(v ?? "") !== String(p[c] ?? "")) cambios[c] = v;
     }
     for (const [campo, v] of Object.entries(cambios)) {
       await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo, antes: String(p[campo] ?? ""), despues: String(v), motivo: req.body.motivo || null }, t);

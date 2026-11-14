@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Modal, Estado, SelectorProducto } from "./ui";
-import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL } from "./lib";
+import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
 // o se crea una compra nueva. Los precios entran al catálogo con la fecha de la factura y el PDF queda en la compra.
@@ -165,6 +165,10 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => set(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
+                      {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
+                        <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
+                          <button className="link" onClick={() => set(l.i, { cantidad: e.cantidad, precio_neto: e.precio, envase_ok: true })}>Convertir</button>{" · "}
+                          <button className="link" onClick={() => set(l.i, { envase_ok: true })}>Está bien así</button></div>) : null; })()}
                     </td>
                     <td className="mini">
                       {l.accion === "existente" && l.producto ? (Number(l.producto.precio_compra) > 0 ? <>{fmt(l.producto.precio_compra)} {l.producto.proveedor}
