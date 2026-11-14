@@ -3,7 +3,8 @@ const sequelize = require("../../config/database");
 
 // PDF de la factura del proveedor guardado en nuestra compra (C-0001...)
 const DocumentoCompra = sequelize.define("DocumentoCompra", {
-  orden_id: { type: DataTypes.INTEGER, allowNull: false },
+  orden_id: { type: DataTypes.INTEGER, allowNull: true },
+  gasto_id: { type: DataTypes.INTEGER, allowNull: true }, // documento de un gasto de la venta (flete, combustible...)
   tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "factura" },
   folio: { type: DataTypes.STRING(50), allowNull: true },
   fecha: { type: DataTypes.DATEONLY, allowNull: true },
