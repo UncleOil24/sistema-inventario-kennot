@@ -108,6 +108,8 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
     return {
       ...comun,
       producto_id: p.id,
+      // Clave de la línea: el mismo producto puede ir en varias líneas (ej. tinetas de distintos colores)
+      ...(b.clave ? { clave: String(b.clave).slice(0, 40) } : {}),
       codigo: p.codigo,
       nombre: p.nombre,
       descripcion_cliente: desc,

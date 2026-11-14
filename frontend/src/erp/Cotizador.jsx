@@ -5,8 +5,10 @@ import ControlPresupuesto from "./Presupuesto";
 import { conConfirmacion } from "./Recorrido";
 import { contenidoDe, fmt, useProductos, precioSegun, sinTildes, descargar, lineaDesdeProducto, haceMeses, idCot, nombreCot } from "./lib";
 
-// Identificador de la línea: el producto, o una clave para las que no están en catálogo
-const idL = (i) => (i.producto_id ? `p${i.producto_id}` : `c${i.clave}`);
+// Identificador de la línea: su clave (el mismo producto puede ir en varias líneas, ej. tinetas de distintos colores);
+// las líneas antiguas sin clave se identifican por el producto
+const idL = (i) => (i.clave ? `c${i.clave}` : `p${i.producto_id}`);
+const nuevaClave = () => `l${Date.now()}${Math.floor(Math.random() * 1000)}`;
 const CASOS = { mismo: ["Mismo producto", ""], similar: ["Similar", "fila-similar"], nuevo: ["No está en catálogo", "fila-nuevo"] };
 const PLAZO_DEFECTO = "02 días hábiles una vez aceptada la propuesta y emitida la orden de compra";
 
@@ -79,19 +81,20 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   }, [q, productos]);
 
   const agregar = (p) => {
-    if (items.some((i) => i.producto_id === p.id)) { notify("Ya está en la cotización"); return; }
     if (asociando) {
       // La línea roja pasa a cotizarse con este producto (similar): se mantiene lo que pidió el cliente
       setItems((l) => l.map((i) => (idL(i) === asociando ? {
-        ...lineaDesdeProducto(p, tipo), cantidad: i.cantidad, grupo: i.grupo, descripcion_cliente: i.descripcion_cliente, caso: "similar",
+        ...lineaDesdeProducto(p, tipo), clave: i.clave || nuevaClave(), cantidad: i.cantidad, grupo: i.grupo, descripcion_cliente: i.descripcion_cliente, caso: "similar",
         nota_interna: `Cotizado con similar: ${p.nombre}`,
       } : i)));
       setAsociando(null);
       setQ("");
       return;
     }
-    setItems((l) => [...l, { ...lineaDesdeProducto(p, tipo), caso: "mismo" }]);
+    const repetido = items.some((i) => i.producto_id === p.id);
+    setItems((l) => [...l, { ...lineaDesdeProducto(p, tipo), clave: nuevaClave(), caso: "mismo" }]);
     setQ("");
+    if (repetido) notify("Ya estaba en la cotización: se agregó otra línea (ej. otro color). Escribe en cada una lo que pidió el cliente");
   };
   // Línea que no está en catálogo (rojo): la descripción del cliente y el precio a mano
   const agregarNoEsta = () => {
@@ -132,9 +135,10 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         // Si pidieron unidades sueltas de un producto que se vende en envase (ej. 2.000 grapas, caja de 1.000), se convierte
         const n = debeConvertir(n0) ? convertirLinea(n0) : n0;
         if (n !== n0) convertidas++;
-        const previa = n.producto_id && lista.find((i) => i.producto_id === n.producto_id);
+        // Solo se juntan si es el mismo producto Y lo mismo que pidió el cliente (distintos colores quedan en líneas separadas)
+        const previa = n.producto_id && lista.find((i) => i.producto_id === n.producto_id && (i.descripcion_cliente || "") === (n.descripcion_cliente || ""));
         if (previa) Object.assign(previa, { cantidad: Number(previa.cantidad) + Number(n.cantidad) });
-        else lista.push(n);
+        else lista.push({ ...n, clave: n.clave || nuevaClave() });
       }
       return { ...b, items: lista, archivo_cliente: res.archivo, nombre_cotizacion: b.nombre_cotizacion || (res.cliente ? `Lista ${res.cliente}` : "") };
     });
