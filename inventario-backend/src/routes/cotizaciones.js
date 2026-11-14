@@ -15,6 +15,7 @@ router.post("/:id/aplicar-proveedor", comercial, c.aplicarProveedor);
 router.post("/", comercial, c.crearCotizacion);
 router.put("/:id", comercial, c.actualizarCotizacion);
 router.post("/:id/estado", comercial, c.cambiarEstado);
+router.post("/:id/postular", comercial, c.postularCotizacion);
 router.post("/:id/seguimiento", comercial, c.registrarSeguimiento);
 router.delete("/:id", soloAdmin, c.eliminarCotizacion);
 
