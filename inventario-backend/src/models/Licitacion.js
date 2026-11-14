@@ -2,7 +2,7 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../../config/database");
 
 // Procesos de Mercado Público (licitaciones y Compra Ágil) que pueden interesarnos.
-// estado_interno: nueva | revisada | descartada | cotizada
+// estado_interno: nueva | revisada | descartada | cotizada | postulada (confirmada a mano: se envió en Mercado Público)
 const Licitacion = sequelize.define("Licitacion", {
   codigo: { type: DataTypes.STRING(40), primaryKey: true }, // CodigoExterno, ej. 2401-55-LE26
   nombre: { type: DataTypes.TEXT, allowNull: false },
@@ -37,6 +37,11 @@ const Licitacion = sequelize.define("Licitacion", {
   lugar_entrega: { type: DataTypes.STRING(255), allowNull: true },
   criterios: { type: DataTypes.TEXT, allowNull: true }, // ej. "precio 50%, plazo 30%, localidad 20%"
   checklist: { type: DataTypes.JSONB, allowNull: true }, // [{ doc, listo }] documentos exigidos
+  // --- Postulación confirmada (se envió en Mercado Público): no basta con cotizar ---
+  postulada_en: { type: DataTypes.DATE, allowNull: true },
+  postulada_por: { type: DataTypes.STRING(120), allowNull: true },
+  postulada_empresa: { type: DataTypes.STRING(20), allowNull: true }, // kenott | tactics | ambas
+  postulada_cotizacion_id: { type: DataTypes.INTEGER, allowNull: true }, // null = se postuló sin cotización en el sistema
 }, {
   tableName: "licitaciones",
   timestamps: true,

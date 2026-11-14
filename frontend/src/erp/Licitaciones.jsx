@@ -3,10 +3,12 @@ import { Modal } from "./ui";
 import ImportarLista from "./ImportarLista";
 import { api, fmt, fecha, sinTildes } from "./lib";
 
-const VISTAS = [["nuevas", "Nuevas"], ["abiertas", "Abiertas"], ["cotizadas", "Cotizadas"], ["descartadas", "Descartadas"], ["todas", "Todas"]];
+const VISTAS = [["nuevas", "Nuevas"], ["abiertas", "Abiertas"], ["cotizadas", "Cotizadas"], ["postuladas", "Postuladas"], ["descartadas", "Descartadas"], ["todas", "Todas"]];
 const FUENTES = [["", "Todo"], ["compra_agil", "Compra Ágil"], ["licitacion", "Licitaciones"]];
 const tipoDe = (l) => (l.fuente === "compra_agil" ? "Compra Ágil" : "Licitación");
 const colorCalce = (r) => (r >= 80 ? "estado-ok" : r >= 50 ? "estado-neutral" : "estado-muted");
+const NOMBRE_EMP = { kenott: "Kenott", tactics: "Tactics", ambas: "Kenott y Tactics" };
+const RESULTADO = { aceptada: ["ganada", "estado-ok"], rechazada: ["perdida", "estado-neutral"], vencida: ["vencida", "estado-neutral"] };
 const diasPara = (d) => (d ? Math.ceil((new Date(d) - new Date()) / 864e5) : null);
 
 // Licitaciones de Mercado Público que calzan con nuestras palabras clave y región.
@@ -32,6 +34,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
   const [abierta, setAbierta] = useState(null);
   const [cotizar, setCotizar] = useState(null);
   const [fichaL, setFichaL] = useState(null);
+  const [postularL, setPostularL] = useState(null);
   const [codigoTraer, setCodigoTraer] = useState("");
   const [trayendo, setTrayendo] = useState(false);
   const [traido, setTraido] = useState(null); // { licitacion, existia, motivos }
@@ -91,6 +94,12 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
 
   const marcar = async (l, estado_interno) => {
     try { await api(`/mercado-publico/licitaciones/${encodeURIComponent(l.codigo)}`, { method: "PUT", body: { estado_interno } }); cargar(); }
+    catch (e) { notify(e.message, "danger"); }
+  };
+
+  const deshacerPostulacion = async (l) => {
+    if (!window.confirm(`¿Quitar la marca de postulada a ${l.codigo}? Vuelve a la lista de pendientes.`)) return;
+    try { await api(`/mercado-publico/licitaciones/${encodeURIComponent(l.codigo)}/postular`, { method: "DELETE" }); notify(`${l.codigo} vuelve a pendientes`); cargar(); }
     catch (e) { notify(e.message, "danger"); }
   };
 
@@ -185,10 +194,14 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                     {l.organismo && (clienteDe(l, clientes)
                       ? <span className="estado estado-ok" title="Ya está en Clientes">✓ cliente</span>
                       : <button className="link" onClick={() => setNuevoCliente(l)}>+ Agregar cliente</button>)}
-                    {l.empresa_postula && <span className="estado estado-info" title="Empresa que postula">{l.empresa_postula === "ambas" ? "postulan Kenott y Tactics" : `postula ${l.empresa_postula === "tactics" ? "Tactics" : "Kenott"}`}</span>}
+                    {l.estado_interno === "postulada"
+                      ? <span className="estado estado-ok" title={`Marcada por ${l.postulada_por || "—"}`}>✓ Postulada por {NOMBRE_EMP[l.postulada_empresa] || "—"}{l.postulada_en ? ` · ${fecha(l.postulada_en)}` : ""}{l.cotizacion_postulada ? ` · N${l.cotizacion_postulada.numero}` : " · sin cotización en el sistema"}</span>
+                      : l.empresa_postula && <span className="estado estado-info" title="Empresa que va a postular (aún no confirmado)">Para postular: {NOMBRE_EMP[l.empresa_postula]}</span>}
+                    {l.estado_interno === "postulada" && RESULTADO[l.cotizacion_postulada?.estado] && <span className={`estado ${RESULTADO[l.cotizacion_postulada.estado][1]}`}>{RESULTADO[l.cotizacion_postulada.estado][0]}</span>}
+                    {l.estado_interno === "cotizada" && <span className="estado estado-warn" title="Se cotizó, pero falta confirmar que se envió en Mercado Público">Cotizada, falta postular</span>}
                     {l.checklist?.length > 0 && <span className={l.checklist.every((x) => x.listo) ? "estado estado-ok" : ""}>docs {l.checklist.filter((x) => x.listo).length}/{l.checklist.length}</span>}
                     {l.cotizaciones?.length > 0 && <span className="id-solicitud">Cotizada: {l.cotizaciones.map((c) => `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero}${c.creado_por ? ` por ${c.creado_por}` : ""}`).join(" · ")}</span>}
-                    {l.estado_interno !== "nueva" && !(l.estado_interno === "cotizada" && l.cotizaciones?.length) && <span className={`estado estado-${l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno === "cotizada" ? "en cotización" : l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
+                    {!["nueva", "cotizada", "postulada"].includes(l.estado_interno) && <span className={`estado estado-${l.estado_interno === "descartada" ? "muted" : "neutral"}`}>{l.estado_interno}{l.descarte_auto ? " (auto)" : ""}</span>}
                     {l.fecha_cierre && new Date(l.fecha_cierre) < new Date() && <span className="estado estado-muted" style={{ textDecoration: "none" }}>cerrada</span>}
                   </div>
                   {l.relevancia != null
@@ -205,7 +218,10 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
                     <button className="btn btn-ghost btn-sm" onClick={() => { setAbierta(l); if (l.estado_interno === "nueva") marcar(l, "revisada"); }}>Ver productos</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => setFichaL(l)}>Ficha para postular</button>
                     <button className="btn btn-success btn-sm" title={l.items?.length ? "" : "Sin productos en Mercado Público: podrás subir las bases o el anexo"} onClick={() => setCotizar(l)}>Cotizar</button>
-                    {l.estado_interno !== "descartada"
+                    {l.estado_interno === "postulada"
+                      ? <button className="btn btn-ghost btn-sm" onClick={() => deshacerPostulacion(l)}>Deshacer postulada</button>
+                      : <button className={`btn btn-sm ${l.estado_interno === "cotizada" ? "btn-primary" : "btn-ghost"}`} title="Confirma que se envió en Mercado Público" onClick={() => setPostularL(l)}>✓ Marcar postulada</button>}
+                    {l.estado_interno === "postulada" ? null : l.estado_interno !== "descartada"
                       ? <button className="btn btn-ghost btn-sm" onClick={() => marcar(l, "descartada")}>Descartar</button>
                       : <button className="btn btn-ghost btn-sm" onClick={() => marcar(l, "revisada")}>Recuperar</button>}
                   </div>
@@ -218,6 +234,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
 
       {nuevoCliente && <ClienteDesdeLicitacion l={nuevoCliente} notify={notify} onClose={() => setNuevoCliente(null)}
         onCreado={async () => { setNuevoCliente(null); await recargarClientes?.(); }} />}
+      {postularL && <MarcarPostulada l={postularL} notify={notify} onClose={() => setPostularL(null)} onHecho={() => { setPostularL(null); cargar(); }} />}
       {fichaL && <FichaPostular l={fichaL} notify={notify} onClose={() => setFichaL(null)} onGuardada={() => { setFichaL(null); cargar(); }} />}
       {abierta && <DetalleLicitacion codigo={abierta.codigo} ficha={abierta.ficha} tipo={tipoDe(abierta)} notify={notify} onClose={() => { setAbierta(null); cargar(); }} onCotizar={(l) => { setAbierta(null); setCotizar(l); }} />}
       {cotizar && (
@@ -227,6 +244,49 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
           onAgregar={(nuevas) => { const l = cotizar; setCotizar(null); alCotizador(l, nuevas); }} />
       )}
     </>
+  );
+}
+
+// Confirmar a mano que el proceso se envió en Mercado Público (cotizar no basta): empresa y cotización enviada
+function MarcarPostulada({ l, notify, onClose, onHecho }) {
+  const cots = l.cotizaciones || [];
+  const empInicial = l.empresa_postula || (cots.length ? (new Set(cots.map((c) => c.empresa)).size > 1 ? "ambas" : cots[0].empresa) : "");
+  const [empresa, setEmpresa] = useState(empInicial || "");
+  const deEmpresa = (e) => cots.filter((c) => e === "ambas" || !e || c.empresa === e);
+  const [cot, setCot] = useState(() => { const d = deEmpresa(empInicial); return d.length ? String(d[d.length - 1].id) : ""; });
+  const [guardando, setGuardando] = useState(false);
+  const elegir = (e) => { setEmpresa(e); const d = deEmpresa(e); if (!d.some((c) => String(c.id) === cot)) setCot(d.length ? String(d[d.length - 1].id) : ""); };
+  const guardar = async () => {
+    if (!empresa) return notify("Indica qué empresa postuló", "danger");
+    setGuardando(true);
+    try {
+      await api(`/mercado-publico/licitaciones/${encodeURIComponent(l.codigo)}/postular`, { method: "POST", body: { empresa, cotizacion_id: cot ? Number(cot) : null } });
+      notify(`✓ ${l.codigo} postulada: pasa a la pestaña Postuladas y al seguimiento del Inicio`);
+      onHecho();
+    } catch (e) { notify(e.message, "danger"); setGuardando(false); }
+  };
+  return (
+    <Modal titulo={`// Marcar postulada · ${l.codigo}`} onClose={onClose} footer={<>
+      <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+      <button className="btn btn-success" disabled={guardando || !empresa} onClick={guardar}>{guardando ? "Guardando..." : "✓ Confirmar postulada"}</button>
+    </>}>
+      <div className="mini" style={{ marginBottom: 10 }}>{l.nombre} · {l.organismo}</div>
+      <div className="mini" style={{ marginBottom: 12 }}>Confirma que la oferta <strong>ya se envió en Mercado Público</strong>. Sale de Abiertas y queda en Postuladas y en el seguimiento del Inicio.</div>
+      <div className="field">
+        <label>Empresa que postuló</label>
+        <div className="chips">
+          {[["kenott", "Kenott"], ["tactics", "Tactics"], ["ambas", "Ambas"]].map(([v, t]) => <button key={v} className={`chip ${empresa === v ? "activo" : ""}`} onClick={() => elegir(v)}>{t}</button>)}
+        </div>
+      </div>
+      <div className="field">
+        <label>Cotización enviada</label>
+        <select value={cot} onChange={(e) => setCot(e.target.value)}>
+          {deEmpresa(empresa).map((c) => <option key={c.id} value={c.id}>{c.empresa === "tactics" ? "Tactics" : "Kenott"} N{c.numero} · {fmt(c.total)}{c.estado === "borrador" ? " (en ejecución)" : ""}{c.creado_por ? ` · ${c.creado_por}` : ""}</option>)}
+          <option value="">Sin cotización en el sistema</option>
+        </select>
+        {!cots.length && <div className="mini">Este proceso no tiene cotizaciones con su ID: queda postulado sin cotización.</div>}
+      </div>
+    </Modal>
   );
 }
 

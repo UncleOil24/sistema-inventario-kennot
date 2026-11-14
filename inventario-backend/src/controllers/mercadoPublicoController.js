@@ -5,6 +5,7 @@ const { handler, ErrorNegocio } = require("../services/erp");
 const mp = require("../services/mercadoPublico");
 const trabajos = require("../services/trabajos");
 const { getParametros } = require("../services/parametros");
+const { firma } = require("../middlewares/auth");
 
 // GET /api/mercado-publico/licitaciones?vista=nuevas|abiertas|cotizadas|descartadas|todas&fuente=compra_agil|licitacion&busqueda=&todas_regiones=1
 const listar = handler(async (req, res) => {
@@ -14,25 +15,28 @@ const listar = handler(async (req, res) => {
   const where = {};
   if (fuente === "compra_agil" || fuente === "licitacion") where.fuente = fuente;
   if (vista === "abiertas" || vista === "nuevas") {
-    where.estado_interno = vista === "nuevas" ? "nueva" : { [Op.ne]: "descartada" };
+    where.estado_interno = vista === "nuevas" ? "nueva" : { [Op.notIn]: ["descartada", "postulada"] };
     where[Op.or] = [{ fecha_cierre: null }, { fecha_cierre: { [Op.gte]: new Date() } }];
   }
   if (vista === "descartadas") where.estado_interno = "descartada";
   if (vista === "cotizadas") where.estado_interno = "cotizada";
+  if (vista === "postuladas") where.estado_interno = "postulada";
   if (busqueda) {
     const q = `%${busqueda}%`;
     where[Op.and] = [{ [Op.or]: [{ nombre: { [Op.iLike]: q } }, { organismo: { [Op.iLike]: q } }, { codigo: { [Op.iLike]: q } }, { comuna: { [Op.iLike]: q } }] }];
   }
-  const filas = await Licitacion.findAll({ where, order: [["prioridad", "DESC"], ["fecha_cierre", "ASC"], ["codigo", "ASC"]], limit: 500 });
+  const orden = vista === "postuladas" ? [["postulada_en", "DESC"], ["codigo", "ASC"]] : [["prioridad", "DESC"], ["fecha_cierre", "ASC"], ["codigo", "ASC"]];
+  const filas = await Licitacion.findAll({ where, order: orden, limit: 500 });
   // Región, monto mínimo y organismos excluidos de Config. (en "Descartadas" y "Todas" se ve todo)
-  const filtrar = vista === "descartadas" || vista === "todas" ? (l) => req.query.todas_regiones === "1" || mp.enRegiones(l.region, params)
+  const filtrar = vista === "postuladas" ? () => true : vista === "descartadas" || vista === "todas" ? (l) => req.query.todas_regiones === "1" || mp.enRegiones(l.region, params)
     : req.query.todas_regiones === "1" ? (l) => mp.visible({ ...l.get(), region: null }, params) : (l) => mp.visible(l, params);
   const visibles = filas.filter(filtrar);
   // Cotizaciones hechas para cada proceso (por su ID de solicitud): qué empresa postuló
   const codigos = visibles.map((l) => l.codigo.toUpperCase());
   const [cots] = codigos.length ? await sequelize.query(`SELECT id, numero, empresa, estado, total, creado_por, "createdAt" AS fecha, UPPER(id_solicitud) AS sol FROM cotizaciones
     WHERE UPPER(id_solicitud) IN (:codigos) AND estado NOT IN ('rechazada','vencida') ORDER BY id`, { replacements: { codigos } }) : [[]];
-  const data = visibles.map((l) => ({ ...l.get(), ficha: mp.fichaUrl(l), cotizaciones: cots.filter((c) => c.sol === l.codigo.toUpperCase()) }));
+  const postuladas = await cotizacionesPostuladas(visibles);
+  const data = visibles.map((l) => ({ ...l.get(), ficha: mp.fichaUrl(l), cotizaciones: cots.filter((c) => c.sol === l.codigo.toUpperCase()), cotizacion_postulada: postuladas[l.postulada_cotizacion_id] || null }));
   res.json({
     ok: true,
     data: {
@@ -49,6 +53,39 @@ const listar = handler(async (req, res) => {
   });
 });
 
+// Cotización con que se postuló cada proceso (número, empresa, total y en qué terminó)
+const cotizacionesPostuladas = async (lics) => {
+  const ids = [...new Set(lics.map((l) => l.postulada_cotizacion_id).filter(Boolean))];
+  if (!ids.length) return {};
+  const [rows] = await sequelize.query(`SELECT id, numero, empresa, estado, total, creado_por FROM cotizaciones WHERE id IN (:ids)`, { replacements: { ids } });
+  return Object.fromEntries(rows.map((r) => [r.id, r]));
+};
+
+// POST /api/mercado-publico/licitaciones/:codigo/postular   { empresa, cotizacion_id | null }
+// Se confirma a mano que el proceso se envió en Mercado Público (cotizar no basta)
+const postular = handler(async (req, res) => {
+  const l = await Licitacion.findByPk(req.params.codigo);
+  if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
+  const empresa = ["kenott", "tactics", "ambas"].includes(req.body?.empresa) ? req.body.empresa : null;
+  if (!empresa) throw new ErrorNegocio("Indica qué empresa postuló");
+  let cotizacion_id = Number(req.body?.cotizacion_id) || null;
+  if (cotizacion_id) {
+    const [[c]] = await sequelize.query(`SELECT id FROM cotizaciones WHERE id = :id AND UPPER(TRIM(id_solicitud)) = UPPER(:cod)`, { replacements: { id: cotizacion_id, cod: l.codigo } });
+    if (!c) throw new ErrorNegocio("Esa cotización no es de este proceso");
+  }
+  await l.update({ estado_interno: "postulada", descarte_auto: false, postulada_en: new Date(), postulada_por: firma(req), postulada_empresa: empresa, postulada_cotizacion_id: cotizacion_id, empresa_postula: empresa });
+  res.json({ ok: true, data: l });
+});
+
+// DELETE /api/mercado-publico/licitaciones/:codigo/postular   -> vuelve a cotizada (o revisada si no tiene cotización)
+const deshacerPostulacion = handler(async (req, res) => {
+  const l = await Licitacion.findByPk(req.params.codigo);
+  if (!l) throw new ErrorNegocio("Licitación no encontrada", 404);
+  const [[c]] = await sequelize.query(`SELECT COUNT(*)::int AS n FROM cotizaciones WHERE UPPER(TRIM(id_solicitud)) = UPPER(:cod) AND estado NOT IN ('rechazada','vencida')`, { replacements: { cod: l.codigo } });
+  await l.update({ estado_interno: c.n ? "cotizada" : "revisada", postulada_en: null, postulada_por: null, postulada_empresa: null, postulada_cotizacion_id: null });
+  res.json({ ok: true, data: l });
+});
+
 // GET /api/mercado-publico/licitaciones/:codigo
 const detalle = handler(async (req, res) => {
   const l = await Licitacion.findByPk(req.params.codigo);
@@ -58,7 +95,8 @@ const detalle = handler(async (req, res) => {
   try { await mp.cargarDetalle(l); } catch (e) { aviso_mp = e.message; }
   const [cotizaciones] = await sequelize.query(`SELECT id, numero, empresa, estado, total, creado_por, "createdAt" AS fecha FROM cotizaciones
     WHERE UPPER(id_solicitud) = UPPER(:c) AND estado NOT IN ('rechazada','vencida') ORDER BY id`, { replacements: { c: l.codigo } });
-  res.json({ ok: true, data: { ...l.get(), ficha: mp.fichaUrl(l), cotizaciones, aviso_mp } });
+  const postuladas = await cotizacionesPostuladas([l]);
+  res.json({ ok: true, data: { ...l.get(), ficha: mp.fichaUrl(l), cotizaciones, cotizacion_postulada: postuladas[l.postulada_cotizacion_id] || null, aviso_mp } });
 });
 
 // PUT /api/mercado-publico/licitaciones/:codigo   { estado_interno, nota, cotizacion_id }
@@ -114,4 +152,4 @@ const trabajo = handler(async (req, res) => {
   res.json({ ok: true, data: t });
 });
 
-module.exports = { listar, detalle, actualizar, sincronizar, trabajo, traer };
+module.exports = { listar, detalle, actualizar, sincronizar, trabajo, traer, postular, deshacerPostulacion };

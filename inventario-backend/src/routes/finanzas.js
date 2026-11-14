@@ -48,9 +48,9 @@ router.get("/produccion", handler(async (req, res) => {
   // Mercado Público: procesos que cerraron en el período y qué pasó con cada uno
   const [mp] = await q(`SELECT
       COUNT(*)::int AS cerrados,
-      COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo)))::int AS cotizados,
+      COUNT(*) FILTER (WHERE estado_interno = 'postulada')::int AS cotizados,
       COUNT(*) FILTER (WHERE estado_interno = 'descartada')::int AS descartados,
-      COUNT(*) FILTER (WHERE estado_interno <> 'descartada' AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo)))::int AS sin_postular,
+      COUNT(*) FILTER (WHERE estado_interno NOT IN ('descartada', 'postulada'))::int AS sin_postular,
       COUNT(*) FILTER (WHERE fuente = 'compra_agil')::int AS compra_agil,
       COUNT(*) FILTER (WHERE fuente <> 'compra_agil')::int AS licitaciones
     FROM licitaciones l WHERE ${enRango("l.fecha_cierre")} AND l.fecha_cierre < NOW()`);
@@ -63,8 +63,7 @@ router.get("/produccion", handler(async (req, res) => {
   } catch { /* la tabla se crea con la primera limpieza */ }
   r.mercado_publico = mp;
   r.sin_postular = await q(`SELECT codigo, nombre, organismo, fecha_cierre, monto_estimado::float AS monto, fuente FROM licitaciones l
-    WHERE ${enRango("l.fecha_cierre")} AND l.fecha_cierre < NOW() AND estado_interno <> 'descartada'
-      AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo)) ORDER BY fecha_cierre DESC LIMIT 100`);
+    WHERE ${enRango("l.fecha_cierre")} AND l.fecha_cierre < NOW() AND estado_interno NOT IN ('descartada', 'postulada') ORDER BY fecha_cierre DESC LIMIT 100`);
   // Comercial: cotizaciones por persona y empresa
   r.cotizaciones = await q(`SELECT COALESCE(creado_por, 'Sin registro') AS persona, empresa, COUNT(*)::int AS cantidad, SUM(total)::float AS monto,
       COUNT(*) FILTER (WHERE estado = 'aceptada')::int AS ganadas, SUM(total) FILTER (WHERE estado = 'aceptada')::float AS monto_ganado,

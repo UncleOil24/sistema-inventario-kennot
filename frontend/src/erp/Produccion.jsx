@@ -49,7 +49,7 @@ export default function Produccion({ notify, irA }) {
 
       <div className="stats">
         <div className="stat-card"><div className="stat-label">Procesos de Merc. Público que cerraron</div><div className="stat-value">{mp.cerrados}</div><div className="mini">{mp.compra_agil} Compra Ágil · {mp.licitaciones} licitaciones</div></div>
-        <div className="stat-card"><div className="stat-label">Postulados (cotizados)</div><div className="stat-value" style={{ color: "var(--success)" }}>{mp.cotizados}</div><div className="mini">{pct}% de los que cerraron</div></div>
+        <div className="stat-card"><div className="stat-label">Postulados (confirmados)</div><div className="stat-value" style={{ color: "var(--success)" }}>{mp.cotizados}</div><div className="mini">{pct}% de los que cerraron</div></div>
         <div className="stat-card"><div className="stat-label">Cerraron sin postular</div><div className="stat-value" style={{ color: mp.sin_postular ? "var(--danger)" : undefined }}>{mp.sin_postular}</div><div className="mini">no descartados a propósito</div></div>
         <div className="stat-card"><div className="stat-label">Descartados</div><div className="stat-value">{mp.descartados}</div><div className="mini">no eran del rubro o no convenía</div></div>
       </div>

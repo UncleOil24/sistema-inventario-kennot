@@ -192,12 +192,12 @@ const getDashboard = handler(async (req, res) => {
   const diaChile = (d) => new Date(d).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
   const manana = ymd(new Date(Date.now() + 864e5));
   const porCerrar = comercial ? (await Licitacion.findAll({
-    where: { estado_interno: ["nueva", "revisada"], fecha_cierre: { [Op.gte]: new Date(), [Op.lte]: new Date(Date.now() + 2 * 864e5) } },
+    where: { estado_interno: ["nueva", "revisada", "cotizada"], fecha_cierre: { [Op.gte]: new Date(), [Op.lte]: new Date(Date.now() + 2 * 864e5) } },
     order: [["fecha_cierre", "ASC"]], attributes: ["codigo", "nombre", "organismo", "fecha_cierre", "monto_estimado", "fuente", "region", "comuna", "relevancia", "prioridad", "estado_interno", "descarte_auto"],
   })).filter((l) => visible(l, params) && [hoyStr, manana].includes(diaChile(l.fecha_cierre))) : [];
   for (const l of porCerrar) {
     const esHoy = diaChile(l.fecha_cierre) === hoyStr;
-    tareas.push({ tipo: "oportunidad", urgencia: 0, texto: `Cotizar "${l.nombre}"`, cierre: l.fecha_cierre, detalle: `${l.organismo || ""} · ${l.codigo} · cierra ${esHoy ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}`, monto: l.monto_estimado ? n(l.monto_estimado) : null, monto_label: "monto", descartar: l.codigo, vista: "licitaciones", id: l.codigo, boton: "Ver oportunidad" });
+    tareas.push({ tipo: "oportunidad", urgencia: 0, texto: l.estado_interno === "cotizada" ? `Postular "${l.nombre}" (ya está cotizada: confirma el envío)` : `Cotizar "${l.nombre}"`, cierre: l.fecha_cierre, detalle: `${l.organismo || ""} · ${l.codigo} · cierra ${esHoy ? "hoy" : "mañana"} ${new Date(l.fecha_cierre).toLocaleTimeString("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit" })}`, monto: l.monto_estimado ? n(l.monto_estimado) : null, monto_label: "monto", descartar: l.codigo, vista: "licitaciones", id: l.codigo, boton: "Ver oportunidad" });
   }
   const yaEnTarea = new Set(porCerrar.map((l) => l.codigo));
   const otrasNuevas = licNuevas.filter((l) => !yaEnTarea.has(l.codigo)).length;
@@ -293,7 +293,7 @@ const getDashboard = handler(async (req, res) => {
   // Procesos de Mercado Público que cerraron en los últimos 7 días sin que se cotizaran (informativo, ya no se ejecutan)
   const [cerradasSinPostular] = await sequelize.query(`SELECT l.codigo, l.nombre, l.organismo, l.fecha_cierre, l.monto_estimado, l.fuente, l.estado_interno
     FROM licitaciones l
-    WHERE l.fecha_cierre < NOW() AND l.fecha_cierre >= NOW() - INTERVAL '3 days' AND l.estado_interno <> 'descartada'
+    WHERE l.fecha_cierre < NOW() AND l.fecha_cierre >= NOW() - INTERVAL '3 days' AND l.estado_interno NOT IN ('descartada', 'postulada')
       AND COALESCE(l.relevancia, 100) >= :rel
       AND NOT EXISTS (SELECT 1 FROM cotizaciones c WHERE UPPER(c.id_solicitud) = UPPER(l.codigo))
     ORDER BY l.fecha_cierre DESC LIMIT 30`, { replacements: { rel: Number(params.mp_relevancia_minima) || 0 } });
@@ -302,8 +302,30 @@ const getDashboard = handler(async (req, res) => {
   const enviadas = comercial ? await Cotizacion.findAll({ where: { estado: "cotizacion" }, order: [["fecha", "DESC"], ["id", "DESC"]], limit: 40,
     attributes: ["id", "numero", "empresa", "anterior", "cliente", "id_solicitud", "nombre_cotizacion", "fecha", "fecha_validez", "total", "creado_por"] }) : [];
 
+  // Postuladas (confirmadas a mano): resumen del mes y seguimiento de las que esperan resultado
+  let postuladas = null;
+  if (comercial) {
+    const [lista] = await sequelize.query(`SELECT l.codigo, l.nombre, l.organismo, l.fecha_cierre, l.fuente, l.postulada_en, l.postulada_por, l.postulada_empresa AS empresa,
+        c.id AS cot_id, c.numero AS cot_numero, c.empresa AS cot_empresa, c.estado AS cot_estado, c.total AS cot_total, l.monto_estimado
+      FROM licitaciones l LEFT JOIN cotizaciones c ON c.id = l.postulada_cotizacion_id
+      WHERE l.estado_interno = 'postulada' ORDER BY l.postulada_en DESC NULLS LAST LIMIT 300`);
+    const delMes = lista.filter((p) => p.postulada_en && ymd(new Date(p.postulada_en)) >= inicioMes);
+    const res = (x) => (x.cot_estado === "aceptada" ? "ganada" : ["rechazada", "vencida"].includes(x.cot_estado) ? "perdida" : "esperando");
+    const contar = (arr) => ({ cantidad: arr.length, monto: n(arr.reduce((s, x) => s + Number(x.cot_total || 0), 0)),
+      kenott: arr.filter((x) => x.empresa !== "tactics").length, tactics: arr.filter((x) => x.empresa !== "kenott").length,
+      ganadas: arr.filter((x) => res(x) === "ganada").length, perdidas: arr.filter((x) => res(x) === "perdida").length, esperando: arr.filter((x) => res(x) === "esperando").length });
+    postuladas = {
+      mes: contar(delMes),
+      esperando: lista.filter((x) => res(x) === "esperando").slice(0, 30).map((x) => ({ codigo: x.codigo, nombre: x.nombre, organismo: x.organismo, cierre: x.fecha_cierre, fuente: x.fuente,
+        postulada_en: x.postulada_en, por: x.postulada_por, empresa: x.empresa, cot_id: x.cot_id, cot_numero: x.cot_numero, cot_empresa: x.cot_empresa,
+        total: x.cot_total != null ? n(x.cot_total) : (x.monto_estimado ? n(x.monto_estimado) : null), sin_cotizacion: !x.cot_id })),
+      total_esperando: lista.filter((x) => res(x) === "esperando").length,
+    };
+  }
+
   const data = {
     tareas,
+    postuladas,
     // Facturas por emitir (Inicio de Comercial, siempre arriba): todo lo que Operativo movió y falta facturar
     por_facturar: comercial ? porFacturar.map((v) => ({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, oc: v.orden_compra_cliente, etapa: v.etapa,
       falta: n(Number(v.total) - Number(v.monto_facturado || 0)), parcial: v.estado_factura === "parcial" })) : [],

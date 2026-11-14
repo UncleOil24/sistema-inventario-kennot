@@ -49,6 +49,7 @@ async function migrar() {
   // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
   await borradoresV0004(q);
+  await postuladasV1(q);
   await protegerTablas(q);
 }
 
@@ -67,6 +68,20 @@ async function borradoresV0004(q) {
     if (ocs.length) console.log(`✓ V-0004: ${ocs.length} orden(es) en borrador descartadas (${ocs.map((o) => o.numero).join(", ")})`);
     await tq(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_borradores_v0004', '${new Date().toISOString()}', NOW(), NOW())`);
   });
+}
+
+// Postuladas (gerencia, 14-nov-2026): las licitaciones que ya tienen una cotización finalizada quedan como postuladas
+async function postuladasV1(q) {
+  const [[hecho]] = await q(`SELECT valor FROM parametros WHERE clave = 'migracion_postuladas_v1'`);
+  if (hecho) return;
+  const [filas] = await q(`WITH c AS (
+      SELECT UPPER(TRIM(id_solicitud)) AS sol, MAX(id) AS id, COUNT(DISTINCT empresa) AS n_emp, MIN(empresa) AS empresa, MAX(fecha) AS fecha
+      FROM cotizaciones WHERE estado IN ('cotizacion','aceptada','rechazada','vencida') AND NOT anterior AND id_solicitud IS NOT NULL GROUP BY 1)
+    UPDATE licitaciones l SET estado_interno = 'postulada', postulada_cotizacion_id = c.id, postulada_en = c.fecha,
+      postulada_empresa = CASE WHEN c.n_emp > 1 THEN 'ambas' ELSE c.empresa END, postulada_por = 'Sistema (cotización finalizada)'
+    FROM c WHERE UPPER(l.codigo) = c.sol AND l.estado_interno <> 'descartada' AND l.estado_interno <> 'postulada' RETURNING l.codigo`);
+  if (filas.length) console.log(`✓ ${filas.length} licitación(es) marcadas como postuladas (tenían cotización finalizada)`);
+  await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_postuladas_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)
