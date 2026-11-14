@@ -122,6 +122,16 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                   <div className="hist-total">{fmt(c.total)}</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => setAbierta(c)}>Ver</button>
+                    {!c.postulada && !["borrador", "espera_proveedor"].includes(c.estado) && (
+                      <button className="btn btn-ghost btn-sm" title="Confirma que esta cotización se envió en Mercado Público"
+                        onClick={() => {
+                          if (!c.id_solicitud) return notify("Primero agrega el ID de Mercado Público a la cotización (ej. 3287-537-COT26)", "danger");
+                          if (!window.confirm(`¿Confirmas que ${nombreCot(c)} se postuló en Mercado Público (${c.id_solicitud})?`)) return;
+                          api(`/cotizaciones/${c.id}/postular`, { method: "POST", body: {} })
+                            .then((r) => { notify(`✓ ${r.data.codigo} postulada${r.data.origen === "creada" ? " (el proceso se creó con los datos de la cotización)" : r.data.origen === "traida" ? " (el proceso se trajo de Mercado Público)" : ""}`); cargar(); })
+                            .catch((e) => notify(e.message, "danger"));
+                        }}>✓ Marcar postulada</button>
+                    )}
                     {c.estado === "borrador" && <>
                       <button className="btn btn-primary btn-sm" onClick={() => editar(c)}>Continuar</button>
                       <button className="btn btn-ghost btn-sm" title="Excel con el detalle de materiales sin valores (hoja General y una por especialidad), para enviar a cotizar" onClick={() => pedido(c)}>↓ Pedido a proveedor</button>

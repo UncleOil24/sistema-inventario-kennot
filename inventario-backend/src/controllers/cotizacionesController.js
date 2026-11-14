@@ -151,6 +151,34 @@ const revisarPostulacion = async ({ id_solicitud, empresa, id, forzar }, t) => {
     throw new ErrorNegocio(`Ya hay una cotización de ${otra.empresa === "tactics" ? "Tactics" : "Kenott"} (N${otra.numero}) para el proceso ${id_solicitud}. Si las dos empresas postulan al mismo proceso, el art. 60 del reglamento de compras públicas puede dejar inadmisibles ambas ofertas (empresas relacionadas). ¿Guardar igual?`, 409);
   }
 };
+// POST /api/cotizaciones/:id/postular   { empresa? }
+// Marca como postulada en Mercado Público el proceso de esta cotización (por su ID de solicitud).
+// Si el proceso no está en Merc. Público, se trae por su código; si Mercado Público no responde, se crea con los datos de la cotización.
+const postularCotizacion = handler(async (req, res) => {
+  const c = await Cotizacion.findByPk(req.params.id);
+  if (!c) throw new ErrorNegocio("Cotización no encontrada", 404);
+  const codigo = String(c.id_solicitud || "").trim().toUpperCase();
+  if (!/^\d+-\d+-[A-Z0-9]+$/.test(codigo)) throw new ErrorNegocio("Esta cotización no tiene un ID de Mercado Público (ej. 3287-537-COT26). Escríbelo en la cotización y vuelve a intentar");
+  let l = await Licitacion.findByPk(codigo);
+  let origen = "existia";
+  if (!l) {
+    try { l = (await require("../services/mercadoPublico").traerPorCodigo(codigo)).licitacion; origen = "traida"; }
+    catch (e) { console.error("postular: traer", codigo, e.message); }
+  }
+  if (!l) {
+    l = await Licitacion.create({
+      codigo, nombre: c.nombre_cotizacion || `Proceso ${codigo}`, organismo: c.cliente || null, manual: true,
+      fuente: /-COT\d*$/.test(codigo) ? "compra_agil" : "licitacion", detalle_cargado: false, estado_interno: "revisada",
+    });
+    origen = "creada";
+  }
+  const [emps] = await sequelize.query(`SELECT DISTINCT empresa FROM cotizaciones WHERE UPPER(TRIM(id_solicitud)) = :codigo AND estado NOT IN ('rechazada','vencida','borrador')`, { replacements: { codigo } });
+  const empresa = ["kenott", "tactics", "ambas"].includes(req.body?.empresa) ? req.body.empresa
+    : emps.length > 1 && emps.some((e) => e.empresa !== c.empresa) ? "ambas" : c.empresa;
+  await l.update({ estado_interno: "postulada", descarte_auto: false, manual: true, postulada_en: new Date(), postulada_por: firma(req), postulada_empresa: empresa, postulada_cotizacion_id: c.id, empresa_postula: empresa });
+  res.json({ ok: true, data: { codigo, origen, empresa } });
+});
+
 // El nombre no repite el ID del proceso (ya va en su recuadro): "Compra Ágil 2440-2281-COT26 – Materiales..." -> "Materiales..."
 const sinIdEnNombre = (nombre, id) => {
   if (!nombre || !id) return nombre;
@@ -558,6 +586,7 @@ const descargarPdf = async (req, res) => {
 };
 
 module.exports = {
+  postularCotizacion,
   descargarPedidoProveedor, leerProveedor, aplicarProveedor,
   registrarSeguimiento, cantidadPorSeguir, wherePorSeguir,
   descargarPdf, descargarInterna,
