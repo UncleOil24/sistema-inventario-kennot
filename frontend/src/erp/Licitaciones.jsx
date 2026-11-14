@@ -99,7 +99,7 @@ export default function Licitaciones({ esAdmin, notify, clientes, onCotizar, rec
     const cliente = clienteDe(l, clientes);
     onCotizar({
       cliente_id: cliente?.id || "", tipo_precio: cliente?.tipo || "convenio",
-      nombre_cotizacion: `${tipoDe(l)} ${l.codigo} – ${l.nombre}`.slice(0, 250),
+      nombre_cotizacion: String(l.nombre || "").slice(0, 250), // el ID ya va en su recuadro de la cotización
       id_solicitud: l.codigo,
       lugar_entrega: l.lugar_entrega || "",
       // Presupuesto y grupos de la ficha (M27): el cotizador compara en vivo
