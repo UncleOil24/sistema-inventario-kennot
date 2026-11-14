@@ -127,7 +127,9 @@ const limpiarPresupuesto = (p) => {
     .map((g) => ({ nombre: String(g.nombre || "").trim(), monto: Math.round(Number(g.monto) || 0) }))
     .filter((g) => g.nombre);
   const total = Math.round(Number(p.total) || 0);
-  return total || grupos.length ? { total: total || null, grupos } : null;
+  // Descuento interno aplicado para cuadrar al presupuesto (queda anotado; no se imprime)
+  const ajuste = p.ajuste && Number(p.ajuste.pct) > 0 ? { tipo: "cuadrar", pct: Math.round(Number(p.ajuste.pct) * 10) / 10, fecha: String(p.ajuste.fecha || "").slice(0, 10) } : null;
+  return total || grupos.length ? { total: total || null, grupos, ...(ajuste ? { ajuste } : {}) } : null;
 };
 
 // Postulación doble (M32, art. 60). Decisión de gerencia (5-nov-2026): Kenott y Tactics tienen representantes
