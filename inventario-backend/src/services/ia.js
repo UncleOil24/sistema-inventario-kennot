@@ -390,6 +390,7 @@ async function extraerDocumentoProveedor(file, usuario) {
       proveedor: String(datos.proveedor || "").trim().toUpperCase(), razon_social: datos.razon_social || "", rut: datos.rut || "",
       tipo_documento: datos.tipo_documento || "cotizacion", numero_documento: datos.numero_documento || "",
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || "") ? datos.fecha : null,
+      total_documento: Number(datos.total_documento) > 0 ? Math.round(Number(datos.total_documento)) : null,
     },
     control, lineas, truncado,
   };

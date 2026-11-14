@@ -8,6 +8,8 @@ const fc = require("../controllers/facturaCompraController");
 const subirFactura = require("multer")({ storage: require("multer").memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 router.post("/factura/leer", operativo, subirFactura.single("archivo"), fc.leer);
 router.post("/factura/registrar", operativo, fc.registrarFactura);
+router.post("/factura/gasto", operativo, fc.registrarGasto);
+router.get("/gastos/:gastoId/documento", operativo, fc.descargarGasto);
 router.get("/:id/documentos/:docId", fc.descargar);
 router.get("/", c.getOrdenes);
 router.get("/:id", c.getOrden);

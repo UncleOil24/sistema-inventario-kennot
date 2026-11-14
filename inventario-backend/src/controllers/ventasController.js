@@ -168,7 +168,9 @@ const resumenVenta = async (venta) => {
   ]);
   const total_gastos = gastos.reduce((s, g) => s + Number(g.monto), 0);
   const margen = Number(venta.subtotal) - Number(venta.costo_total);
-  const compras_real = ordenes.reduce((s, o) => s + Number(o.subtotal), 0);
+  // Lo realmente comprado: compras recibidas (con su factura o boleta); las pedidas aún pueden cambiar
+  const recibidas = ordenes.filter((o) => o.estado === "recibida");
+  const compras_real = recibidas.reduce((s, o) => s + Number(o.subtotal), 0);
   return {
     gastos, ordenes: ordenes.map((o) => ({ id: o.id, numero: o.numero, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: o.subtotal, estado_pago: o.estado_pago })),
     resumen: {
@@ -178,7 +180,7 @@ const resumenVenta = async (venta) => {
       utilidad: redondear(margen - total_gastos),
       compras_real: redondear(compras_real),
       // Utilidad con lo que realmente se compró (si ya hay órdenes de compra)
-      utilidad_real: ordenes.length ? redondear(Number(venta.subtotal) - compras_real - total_gastos) : null,
+      utilidad_real: recibidas.length ? redondear(Number(venta.subtotal) - compras_real - total_gastos) : null,
     },
   };
 };
@@ -370,65 +372,177 @@ const actualizarDatos = handler(async (req, res) => {
 const getCuadroCompra = handler(async (req, res) => {
   const venta = await Venta.findByPk(req.params.id);
   if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
+  const CC = require("../services/cuadroCompra");
   const ids = venta.items.map((i) => i.producto_id);
-  const [productos, proveedores, extra] = await Promise.all([
-    Producto.findAll({ where: { id: ids } }),
-    Proveedor.findAll(),
+  const [productos, proveedores, extra, opciones, ordenesFull] = await Promise.all([
+    Producto.findAll({ where: { id: ids.filter(Boolean) }, attributes: ["id", "codigo", "nombre", "unidad", "precio_compra", "proveedor"] }),
+    Proveedor.findAll({ attributes: ["id", "nombre", "contacto", "telefono", "email"] }),
     resumenVenta(venta),
+    CC.opcionesPorProducto(ids),
+    OrdenCompra.findAll({ where: { venta_id: venta.id, estado: { [Op.ne]: "anulada" } }, order: [["id", "ASC"]] }),
   ]);
   const prodMap = new Map(productos.map((p) => [p.id, p]));
-  const provMap = new Map(proveedores.map((p) => [normProv(p.nombre), p]));
-  const ocPorProv = new Map(extra.ordenes.map((o) => [normProv(o.proveedor_nombre), o]));
+  const estados = CC.estadoLineas(venta.items, ordenesFull);
 
-  const grupos = new Map();
-  venta.items.forEach((i, indice) => {
-    const prov = i.proveedor ? normProv(i.proveedor) : SIN_PROVEEDOR;
-    const p = prodMap.get(i.producto_id);
+  const lineas = venta.items.map((i, indice) => {
+    const prov = i.proveedor ? normProv(i.proveedor) : CC.SIN;
+    const ops = [...(opciones.get(i.producto_id) || [])];
+    // El proveedor y costo con que se cotizó también es una opción (aunque no tenga historial)
+    if (prov !== CC.SIN && Number(i.costo) > 0 && !ops.some((o) => o.proveedor === prov)) ops.push({ proveedor: prov, precio: Math.round(Number(i.costo)), fecha: null, cotizado: true });
+    ops.sort((a, b) => a.precio - b.precio);
     const totalCompra = Number(i.costo) * Number(i.cantidad);
     const totalVenta = Number(i.precio) * Number(i.cantidad);
-    const margen = totalVenta - totalCompra;
-    const linea = {
+    const p = prodMap.get(i.producto_id);
+    return {
       indice, producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: Number(i.cantidad),
-      compra_unit: Number(i.costo), total_compra: redondear(totalCompra),
+      proveedor: prov, compra_unit: Number(i.costo), total_compra: redondear(totalCompra),
       venta_unit: Number(i.precio), total_venta: redondear(totalVenta),
-      margen: redondear(margen), margen_pct: totalVenta ? Math.round((margen / totalVenta) * 100) : 0,
-      // Precio vigente hoy en el catálogo (para detectar si cambió desde que se cotizó)
-      vigente: p ? { proveedor: p.proveedor, precio: Number(p.precio_compra) || 0 } : null,
-      alternativa: p && p.opcion2_proveedor ? { proveedor: p.opcion2_proveedor, precio: Number(p.opcion2_precio) } : null,
-      alternativa3: p && p.opcion3_proveedor ? { proveedor: p.opcion3_proveedor, precio: Number(p.opcion3_precio) } : null,
+      margen: redondear(totalVenta - totalCompra), margen_pct: totalVenta ? Math.round(((totalVenta - totalCompra) / totalVenta) * 100) : 0,
+      catalogo: p ? { proveedor: p.proveedor, precio: Number(p.precio_compra) || 0 } : null,
+      opciones: ops.slice(0, 6),
+      ...estados[indice],
     };
-    if (!grupos.has(prov)) {
-      const ficha = provMap.get(prov);
-      grupos.set(prov, {
-        proveedor: prov,
-        contacto: ficha ? [ficha.contacto, ficha.telefono, ficha.email].filter(Boolean).join(" · ") : null,
-        proveedor_id: ficha?.id || null,
-        orden: ocPorProv.get(prov) || null,
-        lineas: [], total_compra: 0, total_venta: 0, margen: 0,
-      });
-    }
-    const g = grupos.get(prov);
-    g.lineas.push(linea);
-    g.total_compra += linea.total_compra;
-    g.total_venta += linea.total_venta;
-    g.margen += linea.margen;
   });
+  const sugerencias = CC.sugerir(lineas.filter((l) => l.estado === "por_comprar"));
 
-  const lista = [...grupos.values()].sort((a, b) => (a.proveedor === SIN_PROVEEDOR) - (b.proveedor === SIN_PROVEEDOR) || b.total_compra - a.total_compra);
+  // Resumen por proveedor elegido (solo lo que falta comprar)
+  const provMap = new Map(proveedores.map((p) => [normProv(p.nombre), p]));
+  const porProv = new Map();
+  for (const l of lineas) {
+    if (l.estado !== "por_comprar") continue;
+    const x = porProv.get(l.proveedor) || { proveedor: l.proveedor, lineas: 0, total: 0 };
+    x.lineas += 1; x.total += l.total_compra;
+    porProv.set(l.proveedor, x);
+  }
+  const resumen_proveedores = [...porProv.values()].sort((a, b) => (a.proveedor === CC.SIN) - (b.proveedor === CC.SIN) || b.total - a.total)
+    .map((x) => { const f = provMap.get(x.proveedor); return { ...x, total: redondear(x.total), contacto: f ? [f.contacto, f.telefono, f.email].filter(Boolean).join(" · ") : null }; });
+
   res.json({
     ok: true,
     data: {
-      venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, id_solicitud: venta.id_solicitud, etapa: venta.etapa, subtotal: venta.subtotal, costo_total: venta.costo_total },
-      grupos: lista,
-      totales: {
-        compra: redondear(Number(venta.costo_total)),
-        venta: redondear(Number(venta.subtotal)),
-        ...extra.resumen,
-      },
+      venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, id_solicitud: venta.id_solicitud, etapa: venta.etapa, empresa: venta.empresa },
+      lineas, sugerencias, resumen_proveedores,
+      totales: (() => {
+        // Utilidad con lo ya comprado (facturas y boletas) + lo planificado de lo que falta comprar
+        const falta = lineas.filter((l) => l.estado !== "comprado").reduce((s2, l) => s2 + l.total_compra, 0);
+        const todoComprado = lineas.every((l) => l.estado === "comprado");
+        const actual = Number(venta.subtotal) - Number(extra.resumen.compras_real || 0) - falta - Number(extra.resumen.gastos || 0);
+        return { compra: redondear(Number(venta.costo_total)), venta: redondear(Number(venta.subtotal)), ...extra.resumen,
+          falta_comprar: redondear(falta), utilidad_actual: redondear(actual), todo_comprado: todoComprado };
+      })(),
       gastos: extra.gastos,
-      ordenes: extra.ordenes,
+      ordenes: ordenesFull.map((o) => ({ id: o.id, numero: o.numero, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: Number(o.subtotal), total: Number(o.total), documento: o.documento, lineas: (o.items || []).length })),
+      proveedores: proveedores.map((p) => p.nombre).sort(),
     },
   });
+});
+
+// Precio de un producto con un proveedor: su precio vigente en el historial (o el de la línea si es el mismo proveedor)
+async function precioCon(item, proveedor) {
+  const CC = require("../services/cuadroCompra");
+  const ops = (await CC.opcionesPorProducto([item.producto_id])).get(item.producto_id) || [];
+  const o = ops.find((x) => x.proveedor === proveedor);
+  if (o) return o.precio;
+  if (normProv(item.proveedor) === proveedor) return Number(item.costo) || 0;
+  return null;
+}
+
+// POST /api/ventas/:id/asignar   { asignaciones: [{ indice, proveedor, costo? }] }
+// Con quién se compra cada línea (a mano o aplicando una sugerencia). Cambia el costo y el margen de la venta.
+const asignarProveedores = handler(async (req, res) => {
+  const lista = Array.isArray(req.body?.asignaciones) ? req.body.asignaciones : [];
+  if (!lista.length) throw new ErrorNegocio("No hay líneas para asignar");
+  await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
+    const items = [...v.items];
+    for (const a of lista) {
+      const i = items[Number(a.indice)];
+      const prov = normProv(a.proveedor || "");
+      if (!i || !prov) continue;
+      let costo = a.costo != null && a.costo !== "" ? Number(a.costo) : await precioCon(i, prov);
+      if (costo == null) costo = Number(i.costo) || 0; // sin precio con ese proveedor: se mantiene el costo
+      items[Number(a.indice)] = { ...i, proveedor: prov, costo: Math.round(costo) };
+    }
+    await v.update({ items, costo_total: items.reduce((s, x) => s + Number(x.costo) * Number(x.cantidad), 0) }, { transaction: t });
+  });
+  res.json({ ok: true, data: { asignadas: lista.length } });
+});
+
+// POST /api/ventas/:id/crear-orden   { indices: [..], proveedor }
+// Una orden (borrador) al proveedor que se elija, con las líneas marcadas. Las líneas quedan asignadas a ese proveedor.
+const crearOrdenVenta = handler(async (req, res) => {
+  const prov = normProv(req.body?.proveedor || "");
+  const indices = (req.body?.indices || []).map(Number).filter((n) => n >= 0);
+  if (!prov || prov === "SIN PROVEEDOR") throw new ErrorNegocio("Indica a qué proveedor va la orden");
+  if (!indices.length) throw new ErrorNegocio("Marca los productos de la orden");
+  const oc = await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
+    const items = [...v.items];
+    const lineas = [];
+    for (const k of indices) {
+      const i = items[k];
+      if (!i) continue;
+      let precio = await precioCon(i, prov);
+      if (precio == null) precio = Number(i.costo) || 0;
+      items[k] = { ...i, proveedor: prov, costo: Math.round(precio) };
+      lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: Number(i.cantidad), precio: Math.round(precio) });
+    }
+    if (!lineas.length) throw new ErrorNegocio("Las líneas marcadas no existen");
+    let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
+    if (!ficha) ficha = await Proveedor.create({ nombre: prov }, { transaction: t });
+    const orden = await OrdenCompra.create({
+      proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v.id, empresa: v.empresa,
+      items: lineas, ...calcularTotales(lineas),
+      notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`, creado_por: firma(req),
+    }, { transaction: t });
+    await orden.update({ numero: `C-${String(orden.id).padStart(4, "0")}` }, { transaction: t });
+    const cambios = { items, costo_total: items.reduce((s, x) => s + Number(x.costo) * Number(x.cantidad), 0) };
+    if (v.etapa === "registrada") Object.assign(cambios, { etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: firma(req) });
+    await v.update(cambios, { transaction: t });
+    return orden;
+  });
+  res.status(201).json({ ok: true, data: oc });
+});
+
+// POST /api/ventas/:id/descartar-borradores   — anula las órdenes en borrador de la venta (las líneas vuelven a "por comprar")
+const descartarBorradores = handler(async (req, res) => {
+  const v = await Venta.findByPk(req.params.id);
+  if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  const borradores = await OrdenCompra.findAll({ where: { venta_id: v.id, estado: "borrador" } });
+  for (const o of borradores) await o.update({ estado: "anulada", notas: [o.notas, `Descartada desde el cuadro de compra por ${firma(req)}`].filter(Boolean).join(" · ").slice(0, 1000) });
+  res.json({ ok: true, data: { descartadas: borradores.map((o) => o.numero) } });
+});
+
+// GET /api/ventas/:id/pedido?proveedor=X&indices=1,2,3   — Excel para pedir precio o hacer el pedido (sin crear orden)
+const pedidoExcel = handler(async (req, res) => {
+  const v = await Venta.findByPk(req.params.id);
+  if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  const prov = normProv(req.query.proveedor || "");
+  const indices = String(req.query.indices || "").split(",").filter((x) => x !== "").map(Number);
+  const items = v.items.map((i, k) => ({ ...i, k })).filter((i) => (indices.length ? indices.includes(i.k) : normProv(i.proveedor || "") === prov));
+  if (!items.length) throw new ErrorNegocio("No hay productos para el pedido");
+  const ExcelJS = require("exceljs");
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Pedido");
+  ws.columns = [{ width: 6 }, { width: 60 }, { width: 12 }, { width: 10 }, { width: 16 }, { width: 16 }];
+  ws.addRow([`Pedido de materiales${prov ? ` · ${prov}` : ""}`]).font = { bold: true, size: 14 };
+  ws.addRow([`${v.empresa === "tactics" ? "Tactics Inversiones" : "Inversiones Kenott"} · ${new Date().toLocaleDateString("es-CL")}`]);
+  ws.addRow([]);
+  const h = ws.addRow(["N°", "Producto", "Unidad", "Cantidad", "Precio unit. neto", "Total"]);
+  h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDE7E7" } }; });
+  items.forEach((i, n) => {
+    const r = ws.addRow([n + 1, i.nombre, i.unidad || "", Number(i.cantidad), null, null]);
+    r.getCell(6).value = { formula: `D${r.number}*E${r.number}` };
+  });
+  const nombre = `Pedido_${prov || "materiales"}_${v.numero}.xlsx`.replace(/[^\w.-]+/g, "_");
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+  await wb.xlsx.write(res); res.end();
 });
 
 // POST /api/ventas/:id/cambiar-proveedor   { indice, proveedor, costo }
@@ -664,5 +778,5 @@ module.exports = {
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
-  getCuadroCompra, cambiarProveedorLinea, generarOrdenes,
+  getCuadroCompra, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
 };

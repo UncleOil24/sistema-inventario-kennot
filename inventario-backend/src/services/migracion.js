@@ -48,7 +48,25 @@ async function migrar() {
   await q(`UPDATE gastos g SET empresa = v.empresa FROM ventas v WHERE g.venta_id = v.id AND g.empresa IS NULL`);
   // Ventas anteriores al plazo por cliente: su plazo es el que tenían (vencimiento − fecha)
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
+  await borradoresV0004(q);
   await protegerTablas(q);
+}
+
+// 14-nov-2026 (gerencia): las 7 órdenes en borrador que se generaron solas para la V-0004 se descartan, para
+// partir desde el cuadro de compra nuevo. Solo borradores (ninguna estaba recibida). Una sola vez.
+async function borradoresV0004(q) {
+  const [[hecho]] = await q(`SELECT valor FROM parametros WHERE clave = 'migracion_borradores_v0004'`);
+  if (hecho) return;
+  await sequelize.transaction(async (t) => {
+    const tq = (s) => sequelize.query(s, { transaction: t });
+    const [ocs] = await tq(`SELECT o.id, o.numero FROM ordenes_compra o JOIN ventas v ON v.id = o.venta_id WHERE v.numero = 'V-0004' AND o.estado = 'borrador'`);
+    for (const o of ocs) {
+      await tq(`UPDATE ordenes_compra SET estado = 'anulada', notas = CONCAT_WS(' · ', notas, 'Descartada: se parte desde el cuadro de compra nuevo (gerencia, 14-nov-2026)') WHERE id = ${Number(o.id)}`);
+      await tq(`INSERT INTO registro_cambios (usuario, tabla, registro_id, campo, antes, despues, motivo, "createdAt") VALUES ('Sistema', 'ordenes_compra', ${Number(o.id)}, 'estado', 'borrador', 'anulada', 'V-0004: se parte desde el cuadro de compra nuevo', NOW())`);
+    }
+    if (ocs.length) console.log(`✓ V-0004: ${ocs.length} orden(es) en borrador descartadas (${ocs.map((o) => o.numero).join(", ")})`);
+    await tq(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_borradores_v0004', '${new Date().toISOString()}', NOW(), NOW())`);
+  });
 }
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)

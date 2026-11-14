@@ -59,6 +59,10 @@ const leer = handler(async (req, res) => {
   const ordenId = Number(req.body?.orden_id) || null;
   const orden = ordenId ? await OrdenCompra.findByPk(ordenId) : null;
   if (ordenId && !orden) throw new ErrorNegocio("Compra no encontrada", 404);
+  // Subida desde el cuadro de compra de una venta: cada producto se calza con las líneas de la venta
+  const ventaId = Number(req.body?.venta_id) || null;
+  const venta = ventaId ? await Venta.findByPk(ventaId, { attributes: ["id", "numero", "items", "empresa"] }) : null;
+  const usadosVenta = new Set();
 
   const ver = (p) => (p ? { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor } : null);
   const usados = new Set();
@@ -71,7 +75,13 @@ const leer = handler(async (req, res) => {
     }
     const precio = Number(l.precio_neto) || 0;
     const antes = Number(prod?.precio_compra) || 0;
+    let venta_indice = null;
+    if (venta && prod) {
+      const k = venta.items.findIndex((it, j) => !usadosVenta.has(j) && it.producto_id === prod.id);
+      if (k >= 0) { usadosVenta.add(k); venta_indice = k; }
+    }
     return {
+      venta_indice, venta_linea: venta_indice != null ? { nombre: venta.items[venta_indice].nombre, cantidad: Number(venta.items[venta_indice].cantidad) } : null,
       i, descripcion: l.descripcion, codigo_proveedor: l.codigo_proveedor, marca: l.marca, unidad: l.unidad, cantidad: l.cantidad,
       precio_neto: precio, total_linea: l.total_linea, calce: l.calce, nota: l.nota,
       producto: ver(prod), candidatos: (l.candidatos || []).slice(0, 6).map(ver),
@@ -88,7 +98,11 @@ const leer = handler(async (req, res) => {
   // Proveedor y compras pendientes del mismo proveedor (para asociar la factura)
   const e = r.encabezado;
   const prov = e.proveedor ? await Proveedor.findOne({ where: sequelize.where(sequelize.fn("upper", sequelize.col("nombre")), normProv(e.proveedor)) }) : null;
-  const sugeridas = !orden && prov ? await OrdenCompra.findAll({ where: { proveedor_id: prov.id, estado: "borrador" }, attributes: ["id", "numero", "fecha", "total", "venta_id"], order: [["id", "DESC"]], limit: 10, raw: true }) : [];
+  const { Op } = require("sequelize");
+  const donde = venta
+    ? { estado: "borrador", [Op.or]: [{ venta_id: venta.id }, ...(prov ? [{ proveedor_id: prov.id }] : [])] }
+    : prov ? { proveedor_id: prov.id, estado: "borrador" } : null;
+  const sugeridas = !orden && donde ? await OrdenCompra.findAll({ where: donde, attributes: ["id", "numero", "fecha", "total", "venta_id", "proveedor_nombre"], order: [["id", "DESC"]], limit: 15, raw: true }) : [];
   const neto = lineas.reduce((s, l) => s + Math.round(l.precio_neto * l.cantidad), 0);
   res.json({
     ok: true,
@@ -99,6 +113,7 @@ const leer = handler(async (req, res) => {
       control: r.control, truncado: r.truncado, lineas, faltan, sugeridas,
       totales: { neto, iva: Math.round(neto * 0.19), total: neto + Math.round(neto * 0.19) },
       orden: orden ? { id: orden.id, numero: orden.numero, total: Number(orden.total), estado: orden.estado, documento: orden.documento } : null,
+      venta: venta ? { id: venta.id, numero: venta.numero, empresa: venta.empresa } : null,
     },
   });
 });
@@ -110,14 +125,15 @@ const registrarFactura = handler(async (req, res) => {
   const b = req.body || {};
   const proveedor = normProv(b.proveedor);
   if (!proveedor) throw new ErrorNegocio("Indica el proveedor");
-  const folio = String(b.documento || "").trim();
+  const boleta = b.tipo_documento === "boleta";
+  const folio = String(b.documento || "").trim() || (boleta ? "S/N" : "");
   if (!folio) throw new ErrorNegocio("Indica el N° de factura");
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") ? b.fecha : hoyISO();
   const lineas = (b.lineas || []).filter((l) => (l.producto_id || l.nuevo?.nombre) && Number(l.precio) > 0 && Number(l.cantidad) > 0);
   if (!lineas.length) throw new ErrorNegocio("No hay líneas con producto, cantidad y precio");
   if (b.gasto_id && !esGerencia(req)) throw new ErrorNegocio("Solo gerencia puede pasar un gasto a compra", 403);
   const usuario = firma(req);
-  const doc = `FACT. ${folio}`;
+  const doc = `${boleta ? "BOL." : "FACT."} ${folio}`;
 
   const out = await sequelize.transaction(async (t) => {
     // Proveedor
@@ -147,9 +163,11 @@ const registrarFactura = handler(async (req, res) => {
     }
     const itemsOrden = items.map(({ p, l }) => ({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: Number(l.cantidad), precio: Math.round(Number(l.precio)) }));
     const netoLineas = itemsOrden.reduce((s, i) => s + i.precio * i.cantidad, 0);
-    const neto = Number(b.neto) > 0 ? Math.round(Number(b.neto)) : netoLineas;
-    const iva = Number(b.iva) >= 0 && b.iva !== "" && b.iva != null ? Math.round(Number(b.iva)) : Math.round(neto * 0.19);
+    let neto = Number(b.neto) > 0 ? Math.round(Number(b.neto)) : netoLineas;
+    let iva = Number(b.iva) >= 0 && b.iva !== "" && b.iva != null ? Math.round(Number(b.iva)) : Math.round(neto * 0.19);
     const total = Number(b.total) > 0 ? Math.round(Number(b.total)) : neto + iva;
+    // Boleta: no da crédito de IVA, así que el costo de la compra es el total pagado
+    if (boleta) { neto = total; iva = 0; }
     const vence = sumarDias(fecha, ficha.plazo_pago_dias || 0);
 
     // Compra: la que ya existía (se completa con la factura y queda recibida) o una nueva
@@ -163,7 +181,7 @@ const registrarFactura = handler(async (req, res) => {
       if (orden.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
       await orden.update({
         proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: itemsOrden, subtotal: neto, iva, total,
-        documento: folio, fecha_factura: fecha, empresa: empresa || orden.empresa,
+        documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa: empresa || orden.empresa,
         estado: "recibida", fecha_recepcion: orden.fecha_recepcion || new Date(),
         fecha_vencimiento: orden.fecha_vencimiento || vence,
         ...(venta ? { venta_id: venta.id } : {}),
@@ -171,9 +189,9 @@ const registrarFactura = handler(async (req, res) => {
     } else {
       orden = await OrdenCompra.create({
         proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: venta?.id || null, fecha,
-        items: itemsOrden, subtotal: neto, iva, total, documento: folio, fecha_factura: fecha, empresa,
+        items: itemsOrden, subtotal: neto, iva, total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa,
         estado: "recibida", fecha_recepcion: new Date(), fecha_vencimiento: vence,
-        notas: b.gasto_id ? "Registrada desde Gastos (compra de materiales)" : "Registrada desde la factura del proveedor", creado_por: usuario,
+        notas: b.gasto_id ? "Registrada desde Gastos (compra de materiales)" : `Registrada desde la ${boleta ? "boleta" : "factura"} del proveedor`, creado_por: usuario,
       }, { transaction: t });
       await orden.update({ numero: numeroCompra(orden.id) }, { transaction: t });
     }
@@ -209,6 +227,47 @@ const registrarFactura = handler(async (req, res) => {
   res.json({ ok: true, data: { orden: out.orden, ...out.resumen } });
 });
 
+// POST /api/ordenes-compra/factura/gasto
+// { archivo_token, venta_id, tipo, descripcion, proveedor, documento, tipo_documento, fecha, empresa, total, iva }
+// Un documento que no es mercadería (flete, combustible, peajes, otros) queda como gasto de la venta, con su archivo.
+const registrarGasto = handler(async (req, res) => {
+  const b = req.body || {};
+  const total = Math.round(Number(b.total) || 0);
+  if (!(total > 0)) throw new ErrorNegocio("Indica el monto total del documento");
+  const boleta = b.tipo_documento === "boleta";
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") ? b.fecha : hoyISO();
+  const venta = Number(b.venta_id) ? await Venta.findByPk(Number(b.venta_id), { attributes: ["id", "numero", "empresa"] }) : null;
+  const TIPOS = ["flete", "combustible", "comision", "general"];
+  const usuario = firma(req);
+  const folio = String(b.documento || "").trim();
+  const g = await sequelize.transaction(async (t) => {
+    const gasto = await Gasto.create({
+      fecha, tipo: TIPOS.includes(b.tipo) ? b.tipo : "general", monto: total,
+      iva: boleta ? 0 : Number(b.iva) >= 0 && b.iva !== "" && b.iva != null ? Math.round(Number(b.iva)) : Math.round(total - total / 1.19),
+      descripcion: [String(b.descripcion || "").trim(), b.proveedor ? normProv(b.proveedor) : null].filter(Boolean).join(" · ").slice(0, 250) || "Gasto",
+      venta_id: venta?.id || null, empresa: ["kenott", "tactics"].includes(b.empresa) ? b.empresa : venta?.empresa || null,
+      comprobante: folio ? `${boleta ? "BOL" : "FACT"} ${folio}`.slice(0, 100) : null, creado_por: usuario,
+    }, { transaction: t });
+    const archivo = b.archivo_token ? pendientes.get(b.archivo_token) : null;
+    if (archivo) {
+      await DocumentoCompra.create({ gasto_id: gasto.id, folio: folio || null, fecha, monto: total, nombre_archivo: archivo.nombre, mime: archivo.mime, datos: archivo.buf, creado_por: usuario }, { transaction: t });
+      pendientes.delete(b.archivo_token);
+    }
+    await registrar({ usuario, tabla: "gastos", registro_id: gasto.id, campo: "creado", despues: `${gasto.descripcion} ${pesos(total)}`, motivo: venta ? `Gasto de la venta ${venta.numero}` : "Gasto" }, t);
+    return gasto;
+  });
+  res.status(201).json({ ok: true, data: g });
+});
+
+// GET /api/ordenes-compra/gastos/:gastoId/documento   — el archivo de un gasto
+const descargarGasto = handler(async (req, res) => {
+  const d = await DocumentoCompra.findOne({ where: { gasto_id: req.params.gastoId }, order: [["id", "DESC"]] });
+  if (!d) throw new ErrorNegocio("Documento no encontrado", 404);
+  res.setHeader("Content-Type", d.mime);
+  res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(d.nombre_archivo)}"`);
+  res.end(d.datos);
+});
+
 // GET /api/ordenes-compra/:id/documentos/:docId
 const descargar = handler(async (req, res) => {
   const d = await DocumentoCompra.findOne({ where: { id: req.params.docId, orden_id: req.params.id } });
@@ -218,4 +277,4 @@ const descargar = handler(async (req, res) => {
   res.end(d.datos);
 });
 
-module.exports = { leer, registrarFactura, descargar, precioDesdeFactura };
+module.exports = { leer, registrarFactura, registrarGasto, descargar, descargarGasto, precioDesdeFactura };

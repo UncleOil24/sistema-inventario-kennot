@@ -301,6 +301,8 @@ const styles = `
   .lic-nueva { border-left: 3px solid var(--accent); }
   .link-mini { text-decoration: underline; cursor: pointer; }
   .chip strong { margin-left: 4px; color: var(--text); }
+  .sugerencia-caja { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .barra-seleccion { display: flex; flex-direction: row; justify-content: flex-start; gap: 8px; align-items: center; flex-wrap: wrap; position: sticky; top: 0; z-index: 3; border-color: var(--accent); }
   .resumen-utilidad { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
   .resumen-utilidad > div, .vigente > div { display: flex; flex-direction: column; gap: 2px; }
   .resumen-utilidad strong, .vigente strong { font-family: var(--mono); font-size: 16px; color: var(--text); }
