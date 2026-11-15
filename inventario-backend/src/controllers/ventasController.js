@@ -681,7 +681,7 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
   const lista = [...secciones.values()].sort((a, b) => (a.orden > 0) - (b.orden > 0) || a.orden - b.orden).map((sec) => ({
     titulo: sec.titulo, proyectos: sec.proyectos,
     lineas: [...sec.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
-      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: sec.proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
+      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
   }));
   const hayOrden = lista.some((x) => /Orden de compra/.test(x.titulo)), haySol = lista.some((x) => /Solicitud/.test(x.titulo));
   const titulo = hayOrden && haySol ? "Solicitud de cotización y órdenes de compra" : hayOrden ? "Pedido de materiales (órdenes de compra)" : "Solicitud de cotización";
@@ -698,7 +698,7 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     for (const sec of lista) {
       ws.addRow([]);
       const t = ws.addRow([sec.titulo]); t.font = { bold: true, size: 12 };
-      const conObs = sec.lineas.some((l) => l.obs);
+      const conObs = true; // versión interna: siempre con observación
       const h = ws.addRow(["N°", "Material", "Unidad", "Cantidad", ...(conObs ? ["Observación interna"] : [])]);
       h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6E6E6" } }; });
       sec.lineas.forEach((l, n) => { const r = ws.addRow([n + 1, l.nombre, l.unidad || "", l.cantidad, ...(conObs ? [l.obs] : [])]); r.alignment = { wrapText: true, vertical: "top" }; });
@@ -767,7 +767,7 @@ const solicitudCotizacion = handler(async (req, res) => {
       ws.addRow([`${g.proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${g.proyectos.join(" · ")}`]).font = { bold: true };
       ws.addRow([`Fecha: ${new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}`]);
       ws.addRow([]);
-      const conObs = g.lineas.some((l) => l.obs);
+      const conObs = false; // formal: sin observación interna
       encabezado(ws, ["N°", "Material", "Unidad", "Cantidad", ...(conObs ? ["Observación interna"] : [])], [6, 60, 12, 11, ...(conObs ? [40] : [])]);
       g.lineas.forEach((l, k) => { const r = ws.addRow([k + 1, l.nombre, l.unidad || "", l.cantidad, ...(conObs ? [l.obs] : [])]); r.alignment = { wrapText: true, vertical: "top" }; });
       ws.pageSetup = { orientation: "portrait", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };

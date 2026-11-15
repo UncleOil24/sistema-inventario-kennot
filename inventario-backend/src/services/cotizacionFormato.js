@@ -464,10 +464,8 @@ function pdfSolicitud(grupos, destino) {
     const clave = emp.clave === "tactics" ? "tactics" : "kenott";
     const fmt = FORMATOS[clave];
     const COLOR = `#${fmt.color}`; const CLARO = `#${fmt.claro}`; const LINEA = `#${fmt.linea}`; const BORDE = `#${BORDE_TABLA}`;
-    const conObs = g.lineas.some((l) => l.obs);
-    const col = conObs
-      ? [{ t: "N°", w: W * 0.06, a: "center" }, { t: "Material", w: W * 0.5, a: "left" }, { t: "Unidad", w: W * 0.1, a: "center" }, { t: "Cantidad", w: W * 0.1, a: "center" }, { t: "Observación interna", w: W * 0.24, a: "left" }]
-      : [{ t: "N°", w: W * 0.07, a: "center" }, { t: "Material", w: W * 0.65, a: "left" }, { t: "Unidad", w: W * 0.14, a: "center" }, { t: "Cantidad", w: W * 0.14, a: "center" }];
+    const conObs = false; // la formal va al proveedor: la observación interna solo sale en la versión sencilla
+    const col = [{ t: "N°", w: W * 0.07, a: "center" }, { t: "Material", w: W * 0.65, a: "left" }, { t: "Unidad", w: W * 0.14, a: "center" }, { t: "Cantidad", w: W * 0.14, a: "center" }];
     const cabecera = () => {
       doc.fillColor(COLOR).font("Helvetica-Bold").fontSize(14).text(emp.nombre, X, 36, { lineBreak: false });
       if (clave === "tactics") doc.moveTo(X, 56).lineTo(X + 270, 56).lineWidth(2).strokeColor(LINEA).stroke();
@@ -536,7 +534,7 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones }, destino) {
   doc.text(`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`, X, y, { width: W }); y = doc.y + 8;
   const fin = () => doc.page.height - 50;
   for (const sec of secciones) {
-    const conObs = sec.lineas.some((l) => l.obs);
+    const conObs = true; // versión interna: siempre con la columna de observación (detalle por proyecto o para anotar)
     const col = conObs
       ? [{ t: "", w: 16 }, { t: "N°", w: 24, a: "right" }, { t: "MATERIAL", w: W * 0.46 }, { t: "UNIDAD", w: 60 }, { t: "CANT.", w: 44, a: "right" }]
       : [{ t: "", w: 16 }, { t: "N°", w: 24, a: "right" }, { t: "MATERIAL", w: W - 16 - 24 - 70 - 54 }, { t: "UNIDAD", w: 70 }, { t: "CANT.", w: 54, a: "right" }];
