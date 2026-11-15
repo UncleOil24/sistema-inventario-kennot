@@ -129,14 +129,14 @@ export function imprimirHTML(titulo, cuerpo, { horizontal = null } = {}) {
   const d = f.contentWindow.document;
   d.open();
   d.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>
-    @page { ${horizontal === true ? "size: letter landscape; " : horizontal === false ? "size: letter portrait; " : ""}margin: 10mm; }
+    @page { ${horizontal === true ? "size: letter landscape; " : horizontal === false ? "size: letter portrait; " : ""}margin: 8mm; }
     * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #111; margin: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 9.5px; color: #111; margin: 0; }
     h1 { font-size: 15px; margin: 0 0 2px; } .sub { color: #444; margin-bottom: 8px; }
     h2 { font-size: 12px; margin: 12px 0 4px; padding: 4px 6px; background: #e6eeee; border-left: 4px solid #2b6f6f; display: flex; justify-content: space-between; }
     table { width: 100%; border-collapse: collapse; page-break-inside: auto; table-layout: fixed; } td, th { overflow-wrap: break-word; }
     tr { page-break-inside: avoid; } thead { display: table-header-group; }
-    th { text-align: left; font-size: 9.5px; text-transform: uppercase; border-bottom: 1.5px solid #333; padding: 3px 4px; }
+    th { text-align: left; font-size: 8.5px; text-transform: uppercase; border-bottom: 1.5px solid #333; padding: 3px 4px; white-space: nowrap; } th.cen, td.cen { text-align: center; white-space: nowrap; } td.num, tbody td:first-child { white-space: nowrap; } th.obs { text-align: center; padding-left: 10px; } td.obs { padding-left: 10px; }
     td { border-bottom: 1px solid #ccc; padding: 3px 4px; vertical-align: top; }
     .num { text-align: right; white-space: nowrap; } .chk { width: 18px; font-size: 13px; } .mini { color: #555; font-size: 9px; }
     .tot td { font-weight: bold; border-top: 1.5px solid #333; } .aviso { color: #a33; }
