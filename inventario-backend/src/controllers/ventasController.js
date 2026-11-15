@@ -684,6 +684,27 @@ const solicitudCotizacion = handler(async (req, res) => {
     lineas: [...g.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
       .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: g.proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
   }));
+  if (req.body?.formato === "excel") {
+    // Mismo contenido en Excel: una hoja por empresa
+    const wb = libro();
+    for (const g of grupos) {
+      const ws = wb.addWorksheet(nombreHoja(wb, g.emp.corto || g.emp.nombre));
+      ws.addRow([g.emp.nombre]).font = { bold: true, size: 14 };
+      ws.addRow([`R.U.T.: ${g.emp.rut || ""}`]);
+      if (g.emp.giro) ws.addRow([`Giro: ${g.emp.giro}`]);
+      ws.addRow([[g.emp.contacto ? `Contacto: ${g.emp.contacto}` : "", g.emp.email || "", g.emp.fono || ""].filter(Boolean).join(" · ")]);
+      ws.addRow([]);
+      ws.addRow(["SOLICITUD DE COTIZACIÓN"]).font = { bold: true, size: 13 };
+      ws.addRow([`${g.proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${g.proyectos.join(" · ")}`]).font = { bold: true };
+      ws.addRow([`Fecha: ${new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}`]);
+      ws.addRow([]);
+      const conObs = g.lineas.some((l) => l.obs);
+      encabezado(ws, ["N°", "Material", "Unidad", "Cantidad", ...(conObs ? ["Observación interna"] : [])], [6, 60, 12, 11, ...(conObs ? [40] : [])]);
+      g.lineas.forEach((l, k) => { const r = ws.addRow([k + 1, l.nombre, l.unidad || "", l.cantidad, ...(conObs ? [l.obs] : [])]); r.alignment = { wrapText: true, vertical: "top" }; });
+      ws.pageSetup = { orientation: "portrait", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+    }
+    return enviarLibro(res, wb, `Solicitud_cotizacion_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="Solicitud_cotizacion_${new Date().toISOString().slice(0, 10)}.pdf"`);
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");

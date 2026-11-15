@@ -1,6 +1,6 @@
 // Piezas compartidas por las vistas del ERP
 import { useState, useMemo, useEffect } from "react";
-import { fmt, fecha, hoyISO, sinTildes } from "./lib";
+import { fmt, fecha, hoyISO, sinTildes, imprimirPDF, descargarPost } from "./lib";
 
 export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
   return (
@@ -394,3 +394,25 @@ export const repartoParaEnviar = (l) => {
   if (suma < cant) r.push({ venta_id: null, cantidad: cant - suma });
   return r;
 };
+
+// Solicitud de cotización a proveedores: imprimir directo, PDF o Excel (lineas: [{ venta_id, indice, cantidad? }])
+export function BotonesSolicitud({ lineas, notify, sm = true, vacio = "Selecciona los productos para la solicitud de cotización" }) {
+  const [abierto, setAbierto] = useState(false);
+  const pedir = async (accion) => {
+    const ls = typeof lineas === "function" ? lineas() : lineas;
+    if (!ls.length) return notify(vacio, "danger");
+    const p = accion === "imprimir" ? imprimirPDF("/ventas/solicitud-cotizacion", { lineas: ls })
+      : descargarPost("/ventas/solicitud-cotizacion", { lineas: ls, formato: accion });
+    p.catch((e) => notify(e.message, "danger"));
+  };
+  const c = `btn btn-ghost${sm ? " btn-sm" : ""}`;
+  return !abierto
+    ? <button className={c} title="Materiales, unidad y cantidad con el encabezado de la empresa, para pedir precio a proveedores" onClick={() => setAbierto(true)}>Solicitud de cotización ▸</button>
+    : <span className="grupo-botones">
+        <span className="mini">Solicitud de cotización:</span>
+        <button className={c} onClick={() => pedir("imprimir")}>🖨 Imprimir</button>
+        <button className={c} onClick={() => pedir("pdf")}>↓ PDF</button>
+        <button className={c} onClick={() => pedir("excel")}>↓ Excel</button>
+        <button className="link mini" onClick={() => setAbierto(false)}>✕</button>
+      </span>;
+}

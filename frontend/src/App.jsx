@@ -185,6 +185,7 @@ const styles = `
   .estado-muted { color: var(--text3); border-color: var(--border); background: transparent; text-decoration: line-through; }
   .fila-anulada td { opacity: 0.45; }
   .fila-raro td { background: rgba(192, 57, 43, 0.10); }
+  .grupo-botones { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 6px; border: 1px dashed var(--border, #9ab); border-radius: 6px; }
   .reparto-linea { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 4px; } .reparto-linea label { display: inline-flex; gap: 4px; align-items: center; }
   .fila-stock td { opacity: 0.6; } .fila-stock td:nth-child(2), .fila-stock td.price-cell { text-decoration: line-through; }
   .aviso-envase { margin-top: 4px; padding: 5px 8px; border-radius: 6px; font-size: 12px; background: rgba(var(--accent-rgb), 0.10); border: 1px solid rgba(var(--accent-rgb), 0.35); }

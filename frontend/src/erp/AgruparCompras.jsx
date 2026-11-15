@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Modal, Cargando, confirmar } from "./ui";
+import { Modal, Cargando, confirmar, BotonesSolicitud } from "./ui";
 import { api, fmt, descargarPost, imprimirHTML, escaparHTML as h } from "./lib";
 
 // Agrupar compras de varias ventas (Operativo): se configura antes de imprimir o descargar.
@@ -105,11 +105,6 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
     imprimirHTML("Compras agrupadas", cuerpo);
   };
 
-  // Solicitud de cotización (PDF) con lo que se ve: se suman productos iguales y la observación interna dice de qué proyecto es
-  const solicitud = () => {
-    if (!filas.length) return notify("No hay productos con esta configuración", "danger");
-    descargarPost("/ventas/solicitud-cotizacion", { lineas: filas.map((f) => ({ venta_id: f.venta_id, indice: f.indice, cantidad: f.cantidad })) }).catch((e) => notify(e.message, "danger"));
-  };
 
   // Proveedores con productos por comprar (para crear sus órdenes)
   const provsFalta = [...new Set(filas.filter((f) => f.editable && f.estado === "por_comprar" && f.proveedor !== SIN).map((f) => f.proveedor))].sort();
@@ -131,7 +126,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
       footer={<>
         <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
         <button className="btn btn-ghost" onClick={excel}>↓ Excel</button>
-        <button className="btn btn-ghost" title="PDF solo con materiales y cantidades, con el encabezado de la empresa de cada venta" onClick={solicitud}>↓ Solicitud de cotización (PDF)</button>
+        <BotonesSolicitud notify={notify} sm={false} vacio="No hay productos con esta configuración" lineas={() => filas.map((f) => ({ venta_id: f.venta_id, indice: f.indice, cantidad: f.cantidad }))} />
         <button className="btn btn-primary" disabled={!provsFalta.length || ocupado} onClick={() => setCrear(new Set())}>Crear órdenes…</button>
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
