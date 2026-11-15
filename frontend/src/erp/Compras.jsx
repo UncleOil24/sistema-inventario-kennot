@@ -196,14 +196,16 @@ function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle }) {
   const total = vivas.reduce((s, o) => s + Number(o.total), 0);
   const recibidas = vivas.filter((o) => o.estado === "recibida").length;
   const saldo = vivas.filter((o) => o.estado === "recibida").reduce((s, o) => s + Number(o.total) - Number(o.monto_pagado), 0);
+  // Venta anulada, o todas sus órdenes anuladas: la fila se ve en gris
+  const dadaDeBaja = g.venta?.estado === "anulada" || (g.ordenes.length > 0 && vivas.length === 0);
   const titulo = g.venta
     ? <>Venta <strong>{g.venta.numero}</strong> · {g.venta.cliente_nombre || "Sin cliente"}{g.venta.orden_compra_cliente ? ` · OC cliente ${g.venta.orden_compra_cliente}` : ""}{g.venta.id_solicitud ? ` · ID ${g.venta.id_solicitud}` : ""}{g.venta.empresa === "tactics" ? " · Tactics" : ""}</>
     : <>Compras sueltas (sin venta)</>;
   return (
     <>
-      <tr className="fila-grupo" onClick={onToggle} style={{ cursor: "pointer" }}>
-        <td colSpan={3}>{abierto ? "▾" : "▸"} {titulo}</td>
-        <td className="mini">{vivas.length} orden(es) · {recibidas} recibida(s)</td>
+      <tr className={`fila-grupo${dadaDeBaja ? " grupo-baja" : ""}`} onClick={onToggle} style={{ cursor: "pointer" }}>
+        <td colSpan={3}>{abierto ? "▾" : "▸"} {titulo}{dadaDeBaja && <span className="estado estado-neutral" style={{ marginLeft: 8 }}>{g.venta?.estado === "anulada" ? "Venta anulada" : "Órdenes anuladas"}</span>}</td>
+        <td className="mini">{vivas.length} orden(es) · {recibidas} recibida(s){g.ordenes.length > vivas.length ? ` · ${g.ordenes.length - vivas.length} anulada(s)` : ""}</td>
         <td className="price-cell">{fmt(total)}</td>
         <td colSpan={2} className="mini">{recibidas === vivas.length && vivas.length ? "Todo recibido" : `${vivas.length - recibidas} por recibir`}{esAdmin && saldo > 0 ? ` · por pagar ${fmt(saldo)}` : ""}</td>
       </tr>
@@ -384,9 +386,9 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
     const its = orden.items || [];
     const cuerpo = `<h1>Orden de compra ${h(orden.numero)} · ${h(orden.proveedor_nombre || "")}</h1>
       <div class="sub">${[orden.empresa === "tactics" ? "Tactics Inversiones SpA" : orden.empresa === "kenott" ? "Inversiones Kenott SpA" : "", `fecha ${fecha(orden.fecha)}`, orden.notas || "", orden.documento ? `factura ${h(orden.documento)}` : ""].filter(Boolean).map(h).join(" · ")}</div>
-      <table><colgroup><col style="width:20px"><col style="width:30px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
-      <thead><tr><th class="chk"></th><th class="num">N°</th><th>Material</th><th>Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
-      ${its.map((i, k) => `<tr><td class="chk">☐</td><td class="num">${k + 1}</td><td>${h(i.nombre)}</td><td>${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
+      <table><colgroup><col style="width:30px"><col style="width:20px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
+      <thead><tr><th class="num">N°</th><th class="chk"></th><th>Material</th><th>Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
+      ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.nombre)}</td><td>${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
       </tbody></table>
       <div class="pie">Neto ${fmt(orden.subtotal)} · IVA ${fmt(orden.iva)} · <strong>Total ${fmt(orden.total)}</strong></div>`;
     imprimirHTML(`Orden de compra ${orden.numero}`, cuerpo);

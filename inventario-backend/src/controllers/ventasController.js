@@ -600,14 +600,14 @@ const cuadroExcel = handler(async (req, res) => {
   ws.addRow([`Cuadro de compra ${venta.numero} · ${venta.cliente_nombre || ""}`]).font = { bold: true, size: 13 };
   ws.addRow([[venta.orden_compra_cliente ? `OC ${venta.orden_compra_cliente}` : null, venta.id_solicitud ? `ID ${venta.id_solicitud}` : null, new Date().toLocaleDateString("es-CL")].filter(Boolean).join(" · ")]);
   ws.addRow([]);
-  encabezado(ws, ["✓", "N°", "Producto", "Unidad", "Cantidad", "Compra unit.", "Total", "Estado"], [5, 8, 55, 10, 10, 14, 14, 14]);
+  encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "Compra unit.", "Total", "Estado"], [8, 5, 55, 10, 10, 14, 14, 14]);
   const grupos = new Map();
   for (const l of d.lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
   for (const [prov, ls] of [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const r = ws.addRow(["", "", prov]); r.font = { bold: true }; r.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F5" } }; });
     const desde = r.number + 1;
     for (const l of ls) {
-      const x = ws.addRow(["☐", l.codigo || "", l.nombre + (l.no_vino ? ` (no vino en ${l.no_vino.orden})` : ""), l.unidad || "", l.cantidad, l.compra_unit, null, ESTADO_TXT[l.estado] || l.estado]);
+      const x = ws.addRow([l.codigo || "", l.estado === "stock" ? "✓" : "☐", l.nombre + (l.no_vino ? ` (no vino en ${l.no_vino.orden})` : ""), l.unidad || "", l.cantidad, l.compra_unit, null, ESTADO_TXT[l.estado] || l.estado]);
       x.getCell(7).value = { formula: `E${x.number}*F${x.number}`, result: l.total_compra };
     }
     const sub = ws.addRow(["", "", `Subtotal ${prov}`, "", "", "", null]); sub.font = { bold: true };
@@ -665,24 +665,27 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     const emp = datosEmpresa(empresas.size > 1 ? "tactics" : v.empresa === "tactics" ? "tactics" : "kenott", params);
     const o = ordenDe(v.id, it.producto_id);
     const pref = "";
-    const titulo = o ? `${pref}Orden de compra ${o.numero} · ${o.proveedor_nombre}${o.estado === "recibida" ? " (recibida)" : ""}` : `${pref}Solicitud de cotización`;
-    const orden = o ? o.id : 0;
-    const k = `${o ? `o${o.id}` : "s"}|${emp.clave}`;
+    // Todos los materiales marcados van en la lista (también los que ya tienen orden: se puede pedir otra cotización
+    // en cualquier momento); la orden queda anotada en la observación interna
+    const titulo = `${pref}Solicitud de cotización`;
+    const orden = 0;
+    const k = `s|${emp.clave}`;
     if (!secciones.has(k)) secciones.set(k, { titulo, orden, lineas: new Map(), proyectos: [] });
     const sec = secciones.get(k);
     const proy = proyectoDe(v);
     if (!sec.proyectos.includes(proy)) sec.proyectos.push(proy);
     if (!proyectos.includes(proy)) proyectos.push(proy);
     const pk = it.producto_id || it.nombre;
-    const x = sec.lineas.get(pk) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map() };
+    const x = sec.lineas.get(pk) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map(), ordenes: new Set() };
     x.cantidad += cant; x.detalle.set(v.numero, (x.detalle.get(v.numero) || 0) + cant); // de qué venta es cada cantidad
+    if (o) x.ordenes.add(`${o.numero} ${o.proveedor_nombre}${o.estado === "recibida" ? " (recibida)" : ""}`);
     sec.lineas.set(pk, x);
   }
   // Primero la solicitud de cotización, después las órdenes por número
   const lista = [...secciones.values()].sort((a, b) => (a.orden > 0) - (b.orden > 0) || a.orden - b.orden).map((sec) => ({
     titulo: sec.titulo, proyectos: sec.proyectos,
     lineas: [...sec.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
-      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: ventas.length > 1 ? [...x.detalle.entries()].map(([vn, c]) => `${String(c).padStart(2, "0")} de ${vn}`).join(" · ") : "" })),
+      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: [ventas.length > 1 ? [...x.detalle.entries()].map(([vn, c]) => `${String(c).padStart(2, "0")} de ${vn}`).join(" · ") : "", x.ordenes.size ? `ya en ${[...x.ordenes].join(", ")}` : ""].filter(Boolean).join(" · ") })),
   }));
   // Solo se detallan los materiales por cotizar; lo que ya tiene orden va al final como referencia (solo la orden)
   const porCotizar = lista.filter((x) => !/Orden de compra/.test(x.titulo));
@@ -824,16 +827,16 @@ const agruparExcel = handler(async (req, res) => {
         m.set(k, x);
       }
       filas = [...m.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
-      encabezado(ws, ["✓", "N°", "Producto", "Unidad", "Cantidad", "De qué ventas", "Precio unit.", "Total", "Estado"], [5, 8, 50, 10, 10, 30, 13, 14, 26]);
+      encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "De qué ventas", "Precio unit.", "Total", "Estado"], [8, 5, 50, 10, 10, 30, 13, 14, 26]);
       for (const l of filas) {
-        const r = ws.addRow(["☐", l.codigo || "", l.nombre, l.unidad || "", l.cantidad, l.detalle.join(" · "), Number(l.precio) || null, null,
+        const r = ws.addRow([l.codigo || "", "☐", l.nombre, l.unidad || "", l.cantidad, l.detalle.join(" · "), Number(l.precio) || null, null,
           [...l.estados].map((e) => ESTADO_TXT[e] || e).join(", ") + (l.ordenes.size ? ` · ${[...l.ordenes].join(", ")}` : "")]);
         r.getCell(8).value = { formula: `E${r.number}*G${r.number}`, result: Number(l.precio || 0) * l.cantidad };
       }
     } else {
-      encabezado(ws, ["✓", "N°", "Producto", "Unidad", "Cantidad", "Proveedor", "Precio unit.", "Total", "Estado"], [5, 8, 50, 10, 10, 22, 13, 14, 26]);
+      encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "Proveedor", "Precio unit.", "Total", "Estado"], [8, 5, 50, 10, 10, 22, 13, 14, 26]);
       for (const l of [...filas].sort((a, b) => String(a.proveedor).localeCompare(String(b.proveedor)))) {
-        const r = ws.addRow(["☐", l.codigo || "", l.nombre, l.unidad || "", Number(l.cantidad), l.proveedor, Number(l.precio) || null, null, (ESTADO_TXT[l.estado] || l.estado) + ((l.ordenes || []).length ? ` · ${l.ordenes.join(", ")}` : "")]);
+        const r = ws.addRow([l.codigo || "", "☐", l.nombre, l.unidad || "", Number(l.cantidad), l.proveedor, Number(l.precio) || null, null, (ESTADO_TXT[l.estado] || l.estado) + ((l.ordenes || []).length ? ` · ${l.ordenes.join(", ")}` : "")]);
         r.getCell(8).value = { formula: `E${r.number}*G${r.number}`, result: Number(l.precio || 0) * Number(l.cantidad) };
       }
     }
