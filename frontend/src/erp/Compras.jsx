@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando } from "./ui";
-import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago } from "./lib";
+import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago, imprimirHTML, escaparHTML as h } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
 import AgruparCompras from "./AgruparCompras";
@@ -374,22 +374,35 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
     if (await confirmar(`¿Anular la orden ${orden.numero}?`, { titulo: "Anular orden de compra", boton: "Anular", peligro: true })) accion(() => api(`/ordenes-compra/${orden.id}/anular`, { method: "POST" }), "Orden anulada");
   };
   const eliminar = async () => {
-    if (!(await confirmar(`¿Eliminar el borrador ${orden.numero}?`, { titulo: "Eliminar orden", boton: "Eliminar", peligro: true }))) return;
-    try { await api(`/ordenes-compra/${orden.id}`, { method: "DELETE" }); notify("Borrador eliminado", "danger"); onEliminada(); }
+    if (!(await confirmar(`¿Descartar el borrador ${orden.numero}? Se elimina y sus productos vuelven a "por comprar".`, { titulo: "Descartar orden", boton: "Descartar", peligro: true }))) return;
+    try { await api(`/ordenes-compra/${orden.id}`, { method: "DELETE" }); notify("Borrador descartado", "danger"); onEliminada(); }
     catch (e) { notify(e.message, "danger"); }
   };
+
+  // Hoja de la orden de compra (blanco y negro), para imprimir directo
+  const imprimir = () => {
+    const its = orden.items || [];
+    const cuerpo = `<h1>Orden de compra ${h(orden.numero)} · ${h(orden.proveedor_nombre || "")}</h1>
+      <div class="sub">${[orden.empresa === "tactics" ? "Tactics Inversiones SpA" : orden.empresa === "kenott" ? "Inversiones Kenott SpA" : "", `fecha ${fecha(orden.fecha)}`, orden.notas || "", orden.documento ? `factura ${h(orden.documento)}` : ""].filter(Boolean).map(h).join(" · ")}</div>
+      <table><colgroup><col style="width:20px"><col style="width:30px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
+      <thead><tr><th class="chk"></th><th class="num">N°</th><th>Material</th><th>Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
+      ${its.map((i, k) => `<tr><td class="chk">☐</td><td class="num">${k + 1}</td><td>${h(i.nombre)}</td><td>${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
+      </tbody></table>
+      <div class="pie">Neto ${fmt(orden.subtotal)} · IVA ${fmt(orden.iva)} · <strong>Total ${fmt(orden.total)}</strong></div>`;
+    imprimirHTML(`Orden de compra ${orden.numero}`, cuerpo);
+  };
+  // Un solo botón: un borrador se descarta (gerencia lo elimina; si no, queda anulado); una compra enviada o recibida se anula
+  const quitar = () => (orden.estado === "borrador" && esAdmin ? eliminar() : anular());
 
   return (
     <Modal titulo={`// Compra ${orden.numero}`} onClose={onClose} ancho={720}
       footer={<>
-        {orden.estado !== "anulada" && puedeOperar && !(orden.documentos || []).length && <button className="btn btn-primary" onClick={() => setSubir(true)}>⇪ Subir factura</button>}
+        <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
+        {orden.estado === "borrador" && puedeOperar && <button className="btn btn-ghost" onClick={onEditar}>Editar</button>}
         {orden.estado === "recibida" && puedeOperar && !(Number(orden.monto_pagado) > 0) && <button className="btn btn-ghost" title="Si esta compra cubre productos de varias ventas, o se cargó a la venta equivocada" onClick={() => setRepartirAbierto(true)}>Repartir entre ventas</button>}
-        {orden.estado === "borrador" && puedeOperar && <>
-          {esAdmin && <button className="btn btn-danger" onClick={eliminar}>Eliminar</button>}
-          <button className="btn btn-ghost" onClick={onEditar}>Editar</button>
-          <button className="btn btn-success" onClick={recibir}>✓ Marcar recibida</button>
-        </>}
-        {puedeOperar && orden.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular</button>}
+        {puedeOperar && orden.estado !== "anulada" && <button className="btn btn-ghost" style={{ color: "var(--danger)" }} onClick={quitar}>{orden.estado === "borrador" ? "Descartar" : "Anular"}</button>}
+        {orden.estado === "borrador" && puedeOperar && <button className="btn btn-success" onClick={recibir}>✓ Marcar recibida</button>}
+        {orden.estado !== "anulada" && puedeOperar && !(orden.documentos || []).length && <button className="btn btn-primary" onClick={() => setSubir(true)}>⇪ Subir factura</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
