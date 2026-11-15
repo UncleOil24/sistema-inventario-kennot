@@ -20,9 +20,25 @@ function Dato({ label, valor, notify, falta }) {
 
 export function FichaSII({ venta, notify, onClose }) {
   const [d, setD] = useState(null);
-  useEffect(() => { api(`/ventas/${venta.id}/sii`).then(setD).catch((e) => { notify(e.message, "danger"); onClose(); }); }, [venta.id, notify, onClose]);
+  const [modo, setModo] = useState(null); // "cotizacion" | "oc"
+  const [cargandoOC, setCargandoOC] = useState(false);
+  const cargarFicha = () => api(`/ventas/${venta.id}/sii`).then((x) => { setD(x); setModo((m) => (m && (m !== "oc" || x.items_oc) ? m : x.modo)); }).catch((e) => { notify(e.message, "danger"); onClose(); });
+  useEffect(() => { cargarFicha(); }, [venta.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const elegirModo = (m) => { setModo(m); api(`/ventas/${venta.id}/sii/modo`, { method: "POST", body: { modo: m } }).catch(() => {}); };
+  const subirOC = async (archivo) => {
+    if (!archivo) return;
+    setCargandoOC(true);
+    try {
+      const r = await subirArchivo(`/ventas/${venta.id}/oc`, archivo);
+      notify(`✓ OC${r.numero ? ` N° ${r.numero}` : ""} cargada: ${r.lineas} línea(s) · neto ${fmt(r.neto)}${Math.abs(r.neto - r.venta_neto) > 2 ? ` (la venta suma ${fmt(r.venta_neto)}: revisa)` : ""}`);
+      setModo("oc"); api(`/ventas/${venta.id}/sii/modo`, { method: "POST", body: { modo: "oc" } }).catch(() => {});
+      await cargarFicha();
+    } catch (e) { notify(e.message, "danger"); }
+    setCargandoOC(false);
+  };
   const r = d?.receptor || {};
-  const detalleTexto = d ? d.items.map((i) => `${i.descripcion}\t${i.cantidad}\t${i.unidad}\t${i.precio_neto}`).join("\n") : "";
+  const items = d ? (modo === "oc" && d.items_oc ? d.items_oc : d.items) : [];
+  const detalleTexto = d ? items.map((i) => `${i.descripcion}\t${i.cantidad}\t${i.unidad}\t${i.precio_neto}`).join("\n") : "";
   return (
     <Modal titulo={`// Copiar al SII · ${venta.numero}`} onClose={onClose} ancho={820}
       footer={<><a className="btn btn-ghost" href="https://www.sii.cl" target="_blank" rel="noreferrer">Abrir portal del SII ↗</a><button className="btn btn-ghost" onClick={onClose}>Cerrar</button></>}>
@@ -39,13 +55,26 @@ export function FichaSII({ venta, notify, onClose }) {
         <Dato label="Orden de compra" valor={d.referencias.oc} notify={notify} />
         <Dato label="ID solicitud" valor={d.referencias.id_solicitud} notify={notify} />
         <Dato label="Cotización" valor={d.referencias.cotizacion} notify={notify} />
+        <div className="panel-titulo" style={{ marginTop: 10 }}>Facturar según</div>
+        <div className="chips" style={{ alignItems: "center" }}>
+          <button className={`chip ${modo === "cotizacion" ? "activo" : ""}`} onClick={() => elegirModo("cotizacion")}>Cotización (detalle de la venta)</button>
+          <button className={`chip ${modo === "oc" ? "activo" : ""}`} disabled={!d.items_oc} title={d.items_oc ? "" : "Carga primero el PDF de la OC"} onClick={() => elegirModo("oc")}>Orden de compra{d.oc_detalle?.numero ? ` N° ${d.oc_detalle.numero}` : ""}</button>
+          <label className="btn btn-ghost btn-sm" style={{ cursor: "pointer" }}>{cargandoOC ? "Leyendo OC..." : d.items_oc ? "⇪ Cargar otra OC" : "⇪ Cargar OC (PDF)"}
+            <input type="file" accept=".pdf,image/*" style={{ display: "none" }} disabled={cargandoOC} onChange={(e) => subirOC(e.target.files?.[0])} /></label>
+        </div>
+        <div className="mini" style={{ marginTop: 4 }}>
+          {modo === "oc"
+            ? <>Líneas tal como vienen en la OC{d.oc_detalle?.archivo ? ` (${d.oc_detalle.archivo})` : ""}{d.oc_detalle && d.oc_detalle.cuadra === false ? <span style={{ color: "var(--warn)" }}> · ⚠ la OC suma {fmt(d.oc_detalle.neto)} neto y la venta {fmt(d.neto)}: revisa</span> : ""}.</>
+            : <>Si la OC viene con detalle, cárgala y factura según la OC; si viene en una sola línea, factura según la cotización.{d.oc_pendiente ? " La OC de esta venta aún está pendiente." : ""}</>}
+          {d.modo_cliente ? ` Este cliente suele facturarse según ${d.modo_cliente === "oc" ? "la OC" : "la cotización"}.` : ""}
+        </div>
         <div className="panel-titulo" style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
-          Detalle ({d.items.length} líneas, precios netos)
+          Detalle ({items.length} líneas, precios netos)
           <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => copiar(detalleTexto, notify)}>Copiar todo el detalle</button>
         </div>
         <table className="table table-compacta">
           <thead><tr><th>N°</th><th>Descripción</th><th>Cant.</th><th>Unidad</th><th>Precio neto</th><th>Total neto</th><th></th></tr></thead>
-          <tbody>{d.items.map((i) => (
+          <tbody>{items.map((i) => (
             <tr key={i.n}><td className="mini">{i.n}</td><td>{i.descripcion}</td><td>{i.cantidad}</td><td className="mini">{i.unidad}</td>
               <td className="price-cell">{fmt(i.precio_neto)}</td><td className="price-cell">{fmt(i.total_neto)}</td>
               <td><button className="btn btn-ghost btn-sm" onClick={() => copiar(i.descripcion, notify)}>Copiar</button></td></tr>

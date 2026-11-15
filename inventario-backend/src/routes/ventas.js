@@ -37,6 +37,8 @@ const subirSII = require("multer")({ storage: require("multer").memoryStorage(),
 router.get("/:id/sii", sii.ficha);
 router.post("/:id/sii/leer", permite("comercial", "operativo"), subirSII.single("archivo"), sii.leer);
 router.post("/:id/sii/registrar", permite("comercial", "operativo"), sii.registrar);
+router.post("/:id/oc", permite("comercial", "operativo"), subirSII.single("archivo"), sii.cargarOC);
+router.post("/:id/sii/modo", permite("comercial", "operativo"), sii.guardarModo);
 router.get("/:id/documentos/:docId", sii.descargar);
 router.delete("/:id/facturas/:facturaId", comercial, c.quitarFactura);
 router.post("/:id/despachar", operativo, c.despacharVenta);

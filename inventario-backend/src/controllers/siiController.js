@@ -43,6 +43,12 @@ const ficha = handler(async (req, res) => {
     precio_neto: Math.round(Number(i.precio)), total_neto: Math.round(Number(i.precio) * Number(i.cantidad)),
   }));
   const falta = Math.round(Number(v.total) - Number(v.monto_facturado || 0));
+  // Facturar según la OC (sus líneas, leídas del PDF) o según la cotización (líneas de la venta). Se recuerda por cliente.
+  const oc = v.oc_detalle || null;
+  const itemsOc = oc ? (oc.lineas || []).map((l, k) => ({ n: k + 1, descripcion: l.descripcion, cantidad: Number(l.cantidad), unidad: l.unidad || "",
+    precio_neto: Math.round(Number(l.precio_neto)), total_neto: Math.round(Number(l.total_neto ?? Number(l.precio_neto) * Number(l.cantidad))) })) : null;
+  const pref = v.factura_segun || cli?.factura_segun || null;
+  const modo = pref === "oc" && itemsOc ? "oc" : pref === "cotizacion" ? "cotizacion" : itemsOc ? "oc" : "cotizacion";
   res.json({ ok: true, data: {
     venta: { id: v.id, numero: v.numero, etapa: v.etapa, estado_factura: v.estado_factura, guia: v.guia_despacho },
     emisor: { empresa: emp.corto || v.empresa, razon_social: emp.nombre, rut: emp.rut, giro: emp.giro, actividad: emp.actividad || null },
@@ -53,7 +59,9 @@ const ficha = handler(async (req, res) => {
     },
     referencias: { oc: v.orden_compra_cliente || null, id_solicitud: v.id_solicitud || null, cotizacion: cot ? `${cot.empresa === "tactics" ? "Tactics" : "Kenott"} N°${cot.numero}` : null },
     entrega: { lugar: cot?.lugar_entrega || null, comuna: cli?.comuna || null },
-    items, neto: Math.round(Number(v.subtotal)), iva: Math.round(Number(v.iva)), total: Math.round(Number(v.total)),
+    items, items_oc: itemsOc, oc_detalle: oc ? { numero: oc.numero, fecha: oc.fecha, neto: oc.neto, archivo: oc.archivo, cuadra: oc.cuadra } : null,
+    modo, modo_cliente: cli?.factura_segun || null, oc_pendiente: !!v.oc_pendiente,
+    neto: Math.round(Number(v.subtotal)), iva: Math.round(Number(v.iva)), total: Math.round(Number(v.total)),
     falta_facturar: falta, plazo_pago: v.plazo_pago_dias,
     documentos: docs,
   } });
@@ -116,6 +124,38 @@ const registrar = handler(async (req, res) => {
   res.json({ ok: true, data: { id: venta.id, numero: venta.numero, estado_factura: venta.estado_factura, guia: venta.guia_despacho } });
 });
 
+// POST /api/ventas/:id/oc   (PDF o foto de la OC del cliente) -> lee sus líneas y las guarda para facturar según la OC
+const cargarOC = handler(async (req, res) => {
+  const v = await Venta.findByPk(req.params.id);
+  if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  if (!req.file) throw new ErrorNegocio("Adjunta el PDF de la orden de compra");
+  const r = await ia.extraerDocumentoProveedor(req.file, firma(req));
+  const lineas = r.lineas.map((l) => ({ descripcion: l.descripcion, cantidad: Number(l.cantidad), unidad: l.unidad || "",
+    precio_neto: Math.round(Number(l.precio_neto) || 0), total_neto: Math.round(Number(l.total_linea) || Number(l.precio_neto) * Number(l.cantidad)) }));
+  const neto = lineas.reduce((s, l) => s + l.total_neto, 0);
+  const numero = String(r.encabezado.numero_documento || "").trim() || v.orden_compra_cliente || null;
+  await sequelize.transaction(async (t) => {
+    const cambios = { oc_detalle: { numero, fecha: r.encabezado.fecha, lineas, neto, archivo: req.file.originalname, cuadra: Math.abs(neto - Number(v.subtotal)) <= Math.max(2, Number(v.subtotal) * 0.01) } };
+    // Si la OC estaba pendiente y el documento trae su N°, queda registrada
+    if (v.oc_pendiente && numero) Object.assign(cambios, { orden_compra_cliente: numero, oc_pendiente: false });
+    await v.update(cambios, { transaction: t });
+    await DocumentoVenta.create({ venta_id: v.id, tipo: "oc", folio: numero, fecha: r.encabezado.fecha, monto: neto || null,
+      nombre_archivo: String(req.file.originalname || `OC_${numero || v.numero}.pdf`).slice(0, 200), mime: req.file.mimetype || "application/pdf", datos: req.file.buffer, creado_por: firma(req) }, { transaction: t });
+    await require("../models/HistorialVenta").anotar(v, "paso", `Cargó la OC${numero ? ` N° ${numero}` : ""} (${lineas.length} línea(s))`, req, t);
+  });
+  res.json({ ok: true, data: { numero, lineas: lineas.length, neto, venta_neto: Math.round(Number(v.subtotal)) } });
+});
+
+// POST /api/ventas/:id/sii/modo   { modo: "oc" | "cotizacion" }  -> se recuerda en el cliente para la próxima factura
+const guardarModo = handler(async (req, res) => {
+  const v = await Venta.findByPk(req.params.id);
+  if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  const modo = req.body?.modo === "oc" ? "oc" : "cotizacion";
+  await v.update({ factura_segun: modo });
+  if (v.cliente_id) await Cliente.update({ factura_segun: modo }, { where: { id: v.cliente_id } });
+  res.json({ ok: true, data: { modo } });
+});
+
 const descargar = async (req, res) => {
   try {
     const d = await DocumentoVenta.findOne({ where: { id: req.params.docId, venta_id: req.params.id } });
@@ -126,4 +166,4 @@ const descargar = async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "No se pudo descargar" }); }
 };
 
-module.exports = { ficha, leer, registrar, descargar };
+module.exports = { ficha, leer, registrar, descargar, cargarOC, guardarModo };

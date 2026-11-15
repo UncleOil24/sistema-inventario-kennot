@@ -33,6 +33,7 @@ const Cliente = sequelize.define("Cliente", {
   // convenio (instituciones: compra x 1,30) | particular (compra x 1,50)
   tipo: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "convenio" },
   contacto: { type: DataTypes.STRING(150), allowNull: true },
+  factura_segun: { type: DataTypes.STRING(15), allowNull: true }, // cotizacion | oc  (cómo pide la factura este cliente; se recuerda)
   giro: { type: DataTypes.STRING(150), allowNull: true }, // giro del receptor (lo pide la factura del SII)
   comuna: { type: DataTypes.STRING(100), allowNull: true },
   // Institución a la que pertenece la unidad de compra (una municipalidad puede tener varios ID:
