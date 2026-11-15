@@ -395,24 +395,27 @@ export const repartoParaEnviar = (l) => {
   return r;
 };
 
-// Solicitud de cotización a proveedores: imprimir directo, PDF o Excel (lineas: [{ venta_id, indice, cantidad? }])
+// Solicitud de cotización a proveedores (lineas: [{ venta_id, indice, cantidad? }]).
+// Sencilla (blanco y negro, solo material, unidad y cantidad; lo que ya tiene orden sale bajo "Orden de compra C-00xx"):
+// imprimir directo, PDF o Excel. Formal: con logo y colores de la empresa (PDF).
 export function BotonesSolicitud({ lineas, notify, sm = true, vacio = "Selecciona los productos para la solicitud de cotización" }) {
   const [abierto, setAbierto] = useState(false);
-  const pedir = async (accion) => {
+  const pedir = (accion, estilo = "simple") => {
     const ls = typeof lineas === "function" ? lineas() : lineas;
     if (!ls.length) return notify(vacio, "danger");
-    const p = accion === "imprimir" ? imprimirPDF("/ventas/solicitud-cotizacion", { lineas: ls })
-      : descargarPost("/ventas/solicitud-cotizacion", { lineas: ls, formato: accion });
+    const body = { lineas: ls, estilo, formato: accion === "excel" ? "excel" : "pdf" };
+    const p = accion === "imprimir" ? imprimirPDF("/ventas/solicitud-cotizacion", body) : descargarPost("/ventas/solicitud-cotizacion", body);
     p.catch((e) => notify(e.message, "danger"));
   };
   const c = `btn btn-ghost${sm ? " btn-sm" : ""}`;
   return !abierto
-    ? <button className={c} title="Materiales, unidad y cantidad con el encabezado de la empresa, para pedir precio a proveedores" onClick={() => setAbierto(true)}>Solicitud de cotización ▸</button>
+    ? <button className={c} title="Lista de materiales con cantidades para pedir precio a proveedores (imprimir, PDF o Excel)" onClick={() => setAbierto(true)}>Solicitud de cotización ▸</button>
     : <span className="grupo-botones">
-        <span className="mini">Solicitud de cotización:</span>
-        <button className={c} onClick={() => pedir("imprimir")}>🖨 Imprimir</button>
+        <span className="mini">Solicitud:</span>
+        <button className={c} title="Sencilla, blanco y negro" onClick={() => pedir("imprimir")}>🖨 Imprimir</button>
         <button className={c} onClick={() => pedir("pdf")}>↓ PDF</button>
         <button className={c} onClick={() => pedir("excel")}>↓ Excel</button>
-        <button className="link mini" onClick={() => setAbierto(false)}>✕</button>
+        <button className={c} title="Con logo y colores de la empresa, para enviar formal" onClick={() => pedir("pdf", "formal")}>↓ Formal (logo)</button>
+        <button className="link mini" title="Cerrar" onClick={() => setAbierto(false)}>✕</button>
       </span>;
 }

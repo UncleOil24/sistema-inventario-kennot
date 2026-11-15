@@ -558,15 +558,14 @@ const pedidoExcel = handler(async (req, res) => {
   const ExcelJS = require("exceljs");
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Pedido");
-  ws.columns = [{ width: 6 }, { width: 60 }, { width: 12 }, { width: 10 }, { width: 16 }, { width: 16 }];
+  ws.columns = [{ width: 6 }, { width: 60 }, { width: 12 }, { width: 10 }];
   ws.addRow([`Pedido de materiales${prov ? ` · ${prov}` : ""}`]).font = { bold: true, size: 14 };
   ws.addRow([`${v.empresa === "tactics" ? "Tactics Inversiones" : "Inversiones Kenott"} · ${new Date().toLocaleDateString("es-CL")}`]);
   ws.addRow([]);
-  const h = ws.addRow(["N°", "Producto", "Unidad", "Cantidad", "Precio unit. neto", "Total"]);
+  const h = ws.addRow(["N°", "Producto", "Unidad", "Cantidad"]);
   h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDE7E7" } }; });
   items.forEach((i, n) => {
-    const r = ws.addRow([n + 1, i.nombre, i.unidad || "", Number(i.cantidad), null, null]);
-    r.getCell(6).value = { formula: `D${r.number}*E${r.number}` };
+    ws.addRow([n + 1, i.nombre, i.unidad || "", Number(i.cantidad)]);
   });
   const nombre = `Pedido_${prov || "materiales"}_${v.numero}.xlsx`.replace(/[^\w.-]+/g, "_");
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -644,6 +643,75 @@ const agruparDatos = handler(async (req, res) => {
   res.json({ ok: true, data: { ventas: out, proveedores: (await Proveedor.findAll({ attributes: ["nombre"] })).map((p) => p.nombre).sort() } });
 });
 
+// Versión sencilla (blanco y negro, como la hoja del cuadro de compra): lo que ya tiene orden va bajo
+// "Orden de compra C-00xx · proveedor" y lo que no, bajo "Solicitud de cotización". Solo material, unidad y cantidad.
+async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }) {
+  const CC = require("../services/cuadroCompra");
+  const ordenes = await OrdenCompra.findAll({ where: { venta_id: ventas.map((v) => v.id), estado: { [Op.ne]: "anulada" } }, order: [["id", "ASC"]] });
+  const ordenDe = (ventaId, pid) => {
+    const suyas = ordenes.filter((o) => o.venta_id === ventaId && (o.items || []).some((i) => i.producto_id === pid));
+    return suyas.find((o) => o.estado !== "recibida") || suyas[0] || null;
+  };
+  const empresas = new Set(ventas.map((v) => (v.empresa === "tactics" ? "tactics" : "kenott")));
+  const secciones = new Map();
+  const proyectos = [];
+  for (const l of pedidas) {
+    const v = ventas.find((x) => x.id === Number(l.venta_id));
+    const it = v?.items?.[Number(l.indice)];
+    if (!it) continue;
+    const cant = Number(l.cantidad) > 0 ? Number(l.cantidad) : Number(it.cantidad) - CC.stockDe(it);
+    if (cant <= 0) continue;
+    const emp = datosEmpresa(v.empresa === "tactics" ? "tactics" : "kenott", params);
+    const o = ordenDe(v.id, it.producto_id);
+    const pref = empresas.size > 1 ? `${emp.corto} · ` : "";
+    const titulo = o ? `${pref}Orden de compra ${o.numero} · ${o.proveedor_nombre}${o.estado === "recibida" ? " (recibida)" : ""}` : `${pref}Solicitud de cotización`;
+    const orden = o ? o.id : 0;
+    const k = `${o ? `o${o.id}` : "s"}|${emp.clave}`;
+    if (!secciones.has(k)) secciones.set(k, { titulo, orden, lineas: new Map(), proyectos: [] });
+    const sec = secciones.get(k);
+    const proy = proyectoDe(v);
+    if (!sec.proyectos.includes(proy)) sec.proyectos.push(proy);
+    if (!proyectos.includes(proy)) proyectos.push(proy);
+    const pk = it.producto_id || it.nombre;
+    const x = sec.lineas.get(pk) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map() };
+    x.cantidad += cant; x.detalle.set(proy, (x.detalle.get(proy) || 0) + cant);
+    sec.lineas.set(pk, x);
+  }
+  // Primero la solicitud de cotización, después las órdenes por número
+  const lista = [...secciones.values()].sort((a, b) => (a.orden > 0) - (b.orden > 0) || a.orden - b.orden).map((sec) => ({
+    titulo: sec.titulo, proyectos: sec.proyectos,
+    lineas: [...sec.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
+      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: sec.proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
+  }));
+  const hayOrden = lista.some((x) => /Orden de compra/.test(x.titulo)), haySol = lista.some((x) => /Solicitud/.test(x.titulo));
+  const titulo = hayOrden && haySol ? "Solicitud de cotización y órdenes de compra" : hayOrden ? "Pedido de materiales (órdenes de compra)" : "Solicitud de cotización";
+  const emps = [...empresas].map((e) => datosEmpresa(e, params).nombre).join(" / ");
+  const fecha = new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" });
+  const nombre = `${hayOrden && !haySol ? "Pedido_materiales" : "Solicitud_cotizacion"}_${new Date().toISOString().slice(0, 10)}`;
+  if (req.body?.formato === "excel") {
+    const wb = libro();
+    const ws = wb.addWorksheet("Materiales");
+    ws.columns = [{ width: 6 }, { width: 60 }, { width: 12 }, { width: 11 }, { width: 40 }];
+    ws.addRow([titulo]).font = { bold: true, size: 14 };
+    ws.addRow([`${emps} · ${fecha}`]);
+    ws.addRow([`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`]);
+    for (const sec of lista) {
+      ws.addRow([]);
+      const t = ws.addRow([sec.titulo]); t.font = { bold: true, size: 12 };
+      const conObs = sec.lineas.some((l) => l.obs);
+      const h = ws.addRow(["N°", "Material", "Unidad", "Cantidad", ...(conObs ? ["Observación interna"] : [])]);
+      h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6E6E6" } }; });
+      sec.lineas.forEach((l, n) => { const r = ws.addRow([n + 1, l.nombre, l.unidad || "", l.cantidad, ...(conObs ? [l.obs] : [])]); r.alignment = { wrapText: true, vertical: "top" }; });
+    }
+    ws.pageSetup = { orientation: "portrait", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+    return enviarLibro(res, wb, `${nombre}.xlsx`);
+  }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}.pdf"`);
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+  require("../services/cotizacionFormato").pdfMaterialesSimple({ titulo, sub: `${emps} · ${fecha}`, proyectos, secciones: lista }, res);
+}
+
 // POST /api/ventas/solicitud-cotizacion   { lineas: [{ venta_id, indice, cantidad? }] }
 // PDF para pedir cotización a proveedores nuevos: materiales, unidad y cantidad; encabezado de la empresa de cada venta,
 // nombre del proyecto (sin ID ni cliente). Mismo producto de varias ventas: se suma y la observación interna dice de cuál es.
@@ -679,6 +747,7 @@ const solicitudCotizacion = handler(async (req, res) => {
   }
   if (!porEmpresa.size) throw new ErrorNegocio("No hay productos por cotizar en lo seleccionado");
   const params = await getParametros();
+  if (req.body?.estilo !== "formal") return solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params });
   const grupos = [...porEmpresa.entries()].map(([emp, g]) => ({
     emp: datosEmpresa(emp, params), proyectos: g.proyectos,
     lineas: [...g.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
