@@ -7,7 +7,7 @@ import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envas
 // que aparece en el documento. Lo que no es mercadería (flete, combustible, otros) queda como gasto de la venta.
 const TIPOS_GASTO = [["flete", "Flete / despacho"], ["combustible", "Combustible / peajes"], ["comision", "Comisión"], ["general", "Otro gasto"]];
 
-export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], proveedores = [], notify, onClose }) {
+export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], ordenes = [], proveedores = [], notify, onClose }) {
   const productos = useProductos();
   const [archivos, setArchivos] = useState([]);
   const [docs, setDocs] = useState([]);       // [{ archivo, estado: leyendo|leido|error|guardado|omitido, res, enc, lineas, como, gasto, error, resultado }]
@@ -74,7 +74,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
           },
         });
         invalidarProductos();
-        resultado = { texto: `Compra ${r.orden.numero} · ${r.orden.proveedor_nombre} · ${fmt(r.orden.subtotal)}${r.alzas.length ? ` · ⚠ ${r.alzas.length} alza(s) de precio` : ""}`, alzas: r.alzas };
+        resultado = { texto: `Compra ${r.orden.numero} · ${r.orden.proveedor_nombre} · ${fmt(r.orden.subtotal)}${r.alzas.length ? ` · ⚠ ${r.alzas.length} alza(s) de precio` : ""}${r.no_vinieron?.length ? ` · ⚠ No vino: ${r.no_vinieron.map((x) => `${x.nombre} (${x.cantidad})`).join(", ")}. Vuelve a "por comprar" en el cuadro` : ""}`, alzas: r.alzas };
       }
       const nuevos = docs.map((x, k) => (k === actual ? { ...x, estado: "guardado", resultado } : x));
       setDocs(nuevos); siguientePendiente(nuevos);
@@ -175,6 +175,21 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
                 {d.res.sugeridas.map((o) => <option key={o.id} value={o.id}>{o.numero} · {o.proveedor_nombre} · {fmt(o.total)}</option>)}
               </select></div>
           </div>
+          {(() => {
+            // Comparación con la orden elegida: lo que no vino (sin stock) y lo que viene de más
+            const o = ordenes.find((x) => String(x.id) === String(d.enc.orden_id));
+            if (!o) return null;
+            const enDoc = new Map();
+            for (const l of d.lineas) if (!l.omitir && l.accion === "existente" && l.producto) enDoc.set(l.producto.id, (enDoc.get(l.producto.id) || 0) + Number(l.cantidad || 0));
+            const noVino = o.items.filter((it) => it.producto_id && (enDoc.get(it.producto_id) || 0) < it.cantidad).map((it) => `${it.nombre} (${it.cantidad - Math.min(it.cantidad, enDoc.get(it.producto_id) || 0)} de ${it.cantidad})`);
+            const extra = d.lineas.filter((l) => !l.omitir && !(l.accion === "existente" && l.producto && o.items.some((it) => it.producto_id === l.producto.id))).length;
+            return (noVino.length > 0 || extra > 0) && (
+              <div className="aviso">
+                {noVino.length > 0 && <div>⚠ <strong>No vino en el documento</strong> (pedido en {o.numero}): {noVino.join(" · ")}. Al guardar vuelve a "por comprar" en el cuadro, para comprarlo con otro proveedor.</div>}
+                {extra > 0 && <div>Trae {extra} producto(s) que no estaban en {o.numero}: se registran en esta compra y su costo suma a la venta. Si alguno no es de esta venta, quítale la marca.</div>}
+              </div>
+            );
+          })()}
           <div className="pago-form">
             {d.res.control.precios_incluyen_iva && <span className="estado estado-info">Precios con IVA: ya se dividieron por 1,19</span>}
             {d.res.control.cuadra === true && <span className="estado estado-ok">✓ Las líneas cuadran con el total</span>}
@@ -206,7 +221,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
                     </td>
                     <td className="mini">
                       {l.venta_linea ? <>✓ {l.venta_linea.nombre}<div>necesita {l.venta_linea.cantidad}{Number(l.cantidad) > l.venta_linea.cantidad ? ` · se compraron ${l.cantidad}: cuenta el total pagado` : Number(l.cantidad) < l.venta_linea.cantidad ? ` · faltan ${l.venta_linea.cantidad - Number(l.cantidad)}` : ""}</div></>
-                        : <span style={{ color: "var(--warn)" }}>no está en la venta</span>}
+                        : <span style={{ color: "var(--warn)" }}>no está en la venta: compra extra, su costo suma a la venta</span>}
                     </td>
                   </tr>
                 ); })}

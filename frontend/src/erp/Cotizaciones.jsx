@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, Totales, confirmar, modoPedido, motivoRechazo } from "./ui";
 import { conConfirmacion } from "./Recorrido";
-import { api, fmt, fecha, descargar, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
+import { api, fmt, fecha, descargar, imprimirPDF, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
 
 // Pestañas: En ejecución (borrador) · Esperando proveedor · Enviadas (con sus resultados)
 const SUB_ENVIADAS = [["cotizacion", "Sin respuesta"], ["aceptada", "Aceptadas"], ["rechazada", "Rechazadas"], ["vencida", "Vencidas"], ["enviadas", "Todas"]];
@@ -142,6 +142,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                       <button className="btn btn-ghost btn-sm" onClick={() => editar(c)}>Continuar sin esperar</button>
                     </>}
                     {!["borrador", "espera_proveedor"].includes(c.estado) && <>
+                      <button className="btn btn-ghost btn-sm" title="Imprime directo, en hoja Carta" onClick={() => imprimirPDF(`/cotizaciones/${c.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => pdf(c)}>↓ PDF</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => excel(c)}>↓ Excel</button>
                     </>}
@@ -162,7 +163,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
           </div>
         )}
 
-      {abierta && <DetalleCotizacion cot={abierta} esAdmin={esAdmin} onClose={() => setAbierta(null)} onVencer={() => { vencer(abierta); setAbierta(null); }} />}
+      {abierta && <DetalleCotizacion cot={abierta} esAdmin={esAdmin} notify={notify} onClose={() => setAbierta(null)} onVencer={() => { vencer(abierta); setAbierta(null); }} />}
       {seguimiento && <Seguimiento cot={seguimiento} notify={notify} onClose={() => setSeguimiento(null)} onHecho={() => { setSeguimiento(null); cargar(); }} />}
       {proveedorDe && <SubirProveedor cot={proveedorDe} notify={notify} onClose={() => setProveedorDe(null)}
         onHecho={(cot) => { setProveedorDe(null); cargar(); editar(cot); }} />}
@@ -172,10 +173,11 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
   );
 }
 
-function DetalleCotizacion({ cot, esAdmin, onClose, onVencer }) {
+function DetalleCotizacion({ cot, esAdmin, notify, onClose, onVencer }) {
   return (
     <Modal titulo={`// ${nombreCot(cot)}`} onClose={onClose} ancho={820}
       footer={<>
+        {!["borrador", "espera_proveedor"].includes(cot.estado) && <button className="btn btn-ghost" onClick={() => imprimirPDF(`/cotizaciones/${cot.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
         {cot.estado === "cotizacion" && <button className="btn btn-ghost" onClick={onVencer}>Marcar vencida</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>

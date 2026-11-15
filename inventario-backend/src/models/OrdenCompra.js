@@ -19,6 +19,7 @@ const OrdenCompra = sequelize.define("OrdenCompra", {
   estado: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "borrador" },
   // items: [{ producto_id, nombre, unidad, cantidad, precio }]
   items: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+  no_vinieron: { type: DataTypes.JSONB, allowNull: true }, // [{ producto_id, nombre, cantidad, pedido }] lo que no vino en la factura (sin stock)
   subtotal: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
   iva: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },
   total: { type: DataTypes.DECIMAL(14, 2), allowNull: false, defaultValue: 0 },

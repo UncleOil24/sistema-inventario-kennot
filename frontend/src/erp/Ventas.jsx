@@ -359,7 +359,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         onRegistrar={(body) => accion(() => api(`/ventas/${venta.id}/cobros`, { method: "POST", body }), "✓ Cobro registrado")}
         onEliminar={esAdmin ? async (p) => (await confirmar("¿Eliminar este cobro?", { titulo: "Eliminar cobro", boton: "Eliminar", peligro: true })) && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado") : null}
       />}
-      {cuadro && <CuadroCompra ventaId={venta.id} notify={notify} irACompra={irACompra} onClose={() => { setCuadro(false); onCambio(); }} />}
+      {cuadro && <CuadroCompra ventaId={venta.id} esAdmin={esAdmin} notify={notify} irACompra={irACompra} onClose={() => { setCuadro(false); onCambio(); }} />}
     </Modal>
   );
 }

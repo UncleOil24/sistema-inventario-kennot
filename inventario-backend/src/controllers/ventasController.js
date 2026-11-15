@@ -372,6 +372,11 @@ const actualizarDatos = handler(async (req, res) => {
 const getCuadroCompra = handler(async (req, res) => {
   const venta = await Venta.findByPk(req.params.id);
   if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
+  res.json({ ok: true, data: await datosCuadro(venta) });
+});
+
+// Datos del cuadro de compra de una venta (también para imprimir, el Excel y agrupar compras)
+async function datosCuadro(venta) {
   const CC = require("../services/cuadroCompra");
   const ids = venta.items.map((i) => i.producto_id);
   const [productos, proveedores, extra, opciones, ordenesFull] = await Promise.all([
@@ -403,6 +408,14 @@ const getCuadroCompra = handler(async (req, res) => {
       ...estados[indice],
     };
   });
+  // Productos que no vinieron en una compra recibida (sin stock): vuelven a "por comprar" con la marca
+  for (const l of lineas) {
+    if (l.estado === "comprado" || l.estado === "pedido") continue;
+    for (const o of ordenesFull) {
+      const nv = (o.no_vinieron || []).find((x) => x.producto_id && x.producto_id === l.producto_id);
+      if (nv) { l.no_vino = { orden: o.numero, proveedor: o.proveedor_nombre, cantidad: Number(nv.cantidad) }; break; }
+    }
+  }
   const sugerencias = CC.sugerir(lineas.filter((l) => l.estado === "por_comprar"));
 
   // Resumen por proveedor elegido (solo lo que falta comprar)
@@ -417,9 +430,7 @@ const getCuadroCompra = handler(async (req, res) => {
   const resumen_proveedores = [...porProv.values()].sort((a, b) => (a.proveedor === CC.SIN) - (b.proveedor === CC.SIN) || b.total - a.total)
     .map((x) => { const f = provMap.get(x.proveedor); return { ...x, total: redondear(x.total), contacto: f ? [f.contacto, f.telefono, f.email].filter(Boolean).join(" · ") : null }; });
 
-  res.json({
-    ok: true,
-    data: {
+  return {
       venta: { id: venta.id, numero: venta.numero, cliente_nombre: venta.cliente_nombre, fecha: venta.fecha, estado: venta.estado, orden_compra_cliente: venta.orden_compra_cliente, id_solicitud: venta.id_solicitud, etapa: venta.etapa, empresa: venta.empresa },
       lineas, sugerencias, resumen_proveedores,
       totales: (() => {
@@ -431,11 +442,11 @@ const getCuadroCompra = handler(async (req, res) => {
           falta_comprar: redondear(falta), utilidad_actual: redondear(actual), todo_comprado: todoComprado };
       })(),
       gastos: extra.gastos,
-      ordenes: ordenesFull.map((o) => ({ id: o.id, numero: o.numero, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: Number(o.subtotal), total: Number(o.total), documento: o.documento, lineas: (o.items || []).length })),
+      ordenes: ordenesFull.map((o) => ({ id: o.id, numero: o.numero, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: Number(o.subtotal), total: Number(o.total), documento: o.documento, lineas: (o.items || []).length,
+        items: (o.items || []).map((it) => ({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) })), no_vinieron: o.no_vinieron || [] })),
       proveedores: proveedores.map((p) => p.nombre).sort(),
-    },
-  });
-});
+  };
+}
 
 // Precio de un producto con un proveedor: su precio vigente en el historial (o el de la línea si es el mismo proveedor)
 async function precioCon(item, proveedor) {
@@ -473,12 +484,17 @@ const asignarProveedores = handler(async (req, res) => {
 // POST /api/ventas/:id/crear-orden   { indices: [..], proveedor }
 // Una orden (borrador) al proveedor que se elija, con las líneas marcadas. Las líneas quedan asignadas a ese proveedor.
 const crearOrdenVenta = handler(async (req, res) => {
-  const prov = normProv(req.body?.proveedor || "");
-  const indices = (req.body?.indices || []).map(Number).filter((n) => n >= 0);
+  const oc = await crearOrdenDe(req.params.id, req.body?.indices, req.body?.proveedor, req);
+  res.status(201).json({ ok: true, data: oc });
+});
+
+async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
+  const prov = normProv(proveedor || "");
+  const indices = (indicesBrutos || []).map(Number).filter((n) => n >= 0);
   if (!prov || prov === "SIN PROVEEDOR") throw new ErrorNegocio("Indica a qué proveedor va la orden");
   if (!indices.length) throw new ErrorNegocio("Marca los productos de la orden");
-  const oc = await sequelize.transaction(async (t) => {
-    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+  return sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(ventaId, { transaction: t, lock: t.LOCK.UPDATE });
     if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
     if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
     const items = [...v.items];
@@ -505,8 +521,7 @@ const crearOrdenVenta = handler(async (req, res) => {
     await v.update(cambios, { transaction: t });
     return orden;
   });
-  res.status(201).json({ ok: true, data: oc });
-});
+}
 
 // POST /api/ventas/:id/descartar-borradores   — anula las órdenes en borrador de la venta (las líneas vuelven a "por comprar")
 const descartarBorradores = handler(async (req, res) => {
@@ -543,6 +558,150 @@ const pedidoExcel = handler(async (req, res) => {
   res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
   await wb.xlsx.write(res); res.end();
+});
+
+const ESTADO_TXT = { por_comprar: "Por comprar", parcial: "Parcial", pedido: "Pedido", comprado: "Comprado" };
+const libro = () => { const ExcelJS = require("exceljs"); return new ExcelJS.Workbook(); };
+const encabezado = (ws, valores, anchos) => {
+  ws.columns = anchos.map((width) => ({ width }));
+  const h = ws.addRow(valores);
+  h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDE7E7" } }; c.alignment = { wrapText: true, vertical: "middle" }; });
+  return h;
+};
+const enviarLibro = async (res, wb, nombre) => {
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre.replace(/[^\w.-]+/g, "_")}"`);
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+  await wb.xlsx.write(res); res.end();
+};
+const nombreHoja = (wb, t) => { let n = String(t || "Hoja").replace(/[*?:\\/[\]]/g, " ").slice(0, 28).trim() || "Hoja"; let k = 2; const base = n; while (wb.getWorksheet(n)) n = `${base.slice(0, 25)} ${k++}`; return n; };
+
+// GET /api/ventas/:id/cuadro-excel   — hoja "Por proveedor" (como la impresa) y "Detalle" (con las opciones de precio)
+const cuadroExcel = handler(async (req, res) => {
+  const venta = await Venta.findByPk(req.params.id);
+  if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
+  const d = await datosCuadro(venta);
+  const wb = libro();
+  const ws = wb.addWorksheet("Por proveedor");
+  ws.addRow([`Cuadro de compra ${venta.numero} · ${venta.cliente_nombre || ""}`]).font = { bold: true, size: 13 };
+  ws.addRow([[venta.orden_compra_cliente ? `OC ${venta.orden_compra_cliente}` : null, venta.id_solicitud ? `ID ${venta.id_solicitud}` : null, new Date().toLocaleDateString("es-CL")].filter(Boolean).join(" · ")]);
+  ws.addRow([]);
+  encabezado(ws, ["✓", "N°", "Producto", "Unidad", "Cantidad", "Compra unit.", "Total", "Estado"], [5, 8, 55, 10, 10, 14, 14, 14]);
+  const grupos = new Map();
+  for (const l of d.lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
+  for (const [prov, ls] of [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const r = ws.addRow(["", "", prov]); r.font = { bold: true }; r.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F5" } }; });
+    const desde = r.number + 1;
+    for (const l of ls) {
+      const x = ws.addRow(["☐", l.codigo || "", l.nombre + (l.no_vino ? ` (no vino en ${l.no_vino.orden})` : ""), l.unidad || "", l.cantidad, l.compra_unit, null, ESTADO_TXT[l.estado] || l.estado]);
+      x.getCell(7).value = { formula: `E${x.number}*F${x.number}`, result: l.total_compra };
+    }
+    const sub = ws.addRow(["", "", `Subtotal ${prov}`, "", "", "", null]); sub.font = { bold: true };
+    sub.getCell(7).value = { formula: `SUM(G${desde}:G${sub.number - 1})`, result: ls.reduce((s2, l) => s2 + l.total_compra, 0) };
+  }
+  ws.getColumn(6).numFmt = '"$"#,##0'; ws.getColumn(7).numFmt = '"$"#,##0';
+  ws.pageSetup = { orientation: "landscape", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+  const det = wb.addWorksheet("Detalle");
+  encabezado(det, ["N°", "Producto", "Unidad", "Cantidad", "Proveedor elegido", "Compra unit.", "Total", "Estado", "Opción 1", "Opción 2", "Opción 3", "Opción 4"], [8, 50, 10, 10, 20, 13, 13, 12, 24, 24, 24, 24]);
+  for (const l of d.lineas) det.addRow([l.codigo || "", l.nombre, l.unidad || "", l.cantidad, l.proveedor, l.compra_unit, l.total_compra, ESTADO_TXT[l.estado] || l.estado,
+    ...l.opciones.slice(0, 4).map((o) => `${o.proveedor} · $${Math.round(o.precio).toLocaleString("es-CL")}${o.fecha ? ` (${new Date(o.fecha).toLocaleDateString("es-CL")})` : ""}`)]);
+  det.getColumn(6).numFmt = '"$"#,##0'; det.getColumn(7).numFmt = '"$"#,##0';
+  det.pageSetup = { orientation: "landscape", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  await enviarLibro(res, wb, `Cuadro_compra_${venta.numero}.xlsx`);
+});
+
+// GET /api/ventas/agrupar/datos   — lo que falta comprar y lo pedido sin recibir de las ventas en curso
+const agruparDatos = handler(async (req, res) => {
+  const ventas = await Venta.findAll({ where: { estado: { [Op.ne]: "anulada" }, etapa: ["registrada", "aceptada"] }, order: [["id", "ASC"]] });
+  const out = [];
+  for (const v of ventas) {
+    const d = await datosCuadro(v);
+    const pendientes = new Map(); // producto -> órdenes pedidas sin recibir
+    for (const o of d.ordenes) if (o.estado !== "recibida") for (const it of o.items) { if (!pendientes.has(it.producto_id)) pendientes.set(it.producto_id, []); pendientes.get(it.producto_id).push(`${o.numero} (${o.proveedor_nombre})`); }
+    const lineas = d.lineas.filter((l) => l.estado !== "comprado").map((l) => ({
+      indice: l.indice, producto_id: l.producto_id, codigo: l.codigo, nombre: l.nombre, unidad: l.unidad,
+      cantidad: l.cantidad, falta: Math.max(0, l.cantidad - (l.recibido || 0) - (l.pedido || 0)), pedido: l.pedido || 0,
+      estado: l.estado, proveedor: l.proveedor, compra_unit: l.compra_unit, opciones: l.opciones, no_vino: l.no_vino || null,
+      ordenes: pendientes.get(l.producto_id) || [],
+    }));
+    if (lineas.length) out.push({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, empresa: v.empresa, fecha: v.fecha, lineas });
+  }
+  res.json({ ok: true, data: { ventas: out, proveedores: (await Proveedor.findAll({ attributes: ["nombre"] })).map((p) => p.nombre).sort() } });
+});
+
+// POST /api/ventas/agrupar/excel   { orden: "proveedor"|"venta", lineas: [{ venta, cliente, codigo, nombre, unidad, cantidad, proveedor, precio, estado, ordenes }] }
+const agruparExcel = handler(async (req, res) => {
+  const porVenta = req.body?.orden === "venta";
+  const lineas = Array.isArray(req.body?.lineas) ? req.body.lineas : [];
+  if (!lineas.length) throw new ErrorNegocio("No hay productos para el Excel");
+  const wb = libro();
+  const clave = (l) => (porVenta ? `${l.venta}${l.cliente ? ` · ${l.cliente}` : ""}` : l.proveedor || "SIN PROVEEDOR");
+  const grupos = new Map();
+  for (const l of lineas) { const k = clave(l); if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(l); }
+  const orden = [...grupos.entries()].map(([k, ls]) => ({ k, ls, total: ls.reduce((s2, l) => s2 + Number(l.precio || 0) * Number(l.cantidad || 0), 0) }))
+    .sort((a, b) => (porVenta ? a.k.localeCompare(b.k) : b.total - a.total));
+  const res0 = wb.addWorksheet("Resumen");
+  res0.addRow([`Compras agrupadas por ${porVenta ? "venta" : "proveedor"} · ${new Date().toLocaleDateString("es-CL")}`]).font = { bold: true, size: 13 };
+  res0.addRow([]);
+  encabezado(res0, [porVenta ? "Venta" : "Proveedor", "Productos", "Total neto", porVenta ? "Proveedores" : "Ventas"], [40, 12, 16, 60]);
+  for (const g of orden) res0.addRow([g.k, g.ls.length, g.total, [...new Set(g.ls.map((l) => (porVenta ? l.proveedor : l.venta)))].join(", ")]);
+  res0.addRow(["Total", lineas.length, orden.reduce((s2, g) => s2 + g.total, 0)]).font = { bold: true };
+  res0.getColumn(3).numFmt = '"$"#,##0';
+  for (const g of orden) {
+    const ws = wb.addWorksheet(nombreHoja(wb, g.k));
+    ws.addRow([g.k]).font = { bold: true, size: 13 };
+    ws.addRow([]);
+    let filas = g.ls;
+    if (!porVenta) {
+      // Mismo producto en varias ventas: una fila con la cantidad sumada y el detalle por venta
+      const m = new Map();
+      for (const l of g.ls) {
+        const k = l.producto_id || `${l.nombre}`;
+        const x = m.get(k) || { ...l, cantidad: 0, detalle: [], estados: new Set(), ordenes: new Set() };
+        x.cantidad += Number(l.cantidad || 0); x.detalle.push(`${l.venta}: ${l.cantidad}`); x.estados.add(l.estado); (l.ordenes || []).forEach((o) => x.ordenes.add(o));
+        m.set(k, x);
+      }
+      filas = [...m.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+      encabezado(ws, ["✓", "N°", "Producto", "Unidad", "Cantidad", "De qué ventas", "Precio unit.", "Total", "Estado"], [5, 8, 50, 10, 10, 30, 13, 14, 26]);
+      for (const l of filas) {
+        const r = ws.addRow(["☐", l.codigo || "", l.nombre, l.unidad || "", l.cantidad, l.detalle.join(" · "), Number(l.precio) || null, null,
+          [...l.estados].map((e) => ESTADO_TXT[e] || e).join(", ") + (l.ordenes.size ? ` · ${[...l.ordenes].join(", ")}` : "")]);
+        r.getCell(8).value = { formula: `E${r.number}*G${r.number}`, result: Number(l.precio || 0) * l.cantidad };
+      }
+    } else {
+      encabezado(ws, ["✓", "N°", "Producto", "Unidad", "Cantidad", "Proveedor", "Precio unit.", "Total", "Estado"], [5, 8, 50, 10, 10, 22, 13, 14, 26]);
+      for (const l of [...filas].sort((a, b) => String(a.proveedor).localeCompare(String(b.proveedor)))) {
+        const r = ws.addRow(["☐", l.codigo || "", l.nombre, l.unidad || "", Number(l.cantidad), l.proveedor, Number(l.precio) || null, null, (ESTADO_TXT[l.estado] || l.estado) + ((l.ordenes || []).length ? ` · ${l.ordenes.join(", ")}` : "")]);
+        r.getCell(8).value = { formula: `E${r.number}*G${r.number}`, result: Number(l.precio || 0) * Number(l.cantidad) };
+      }
+    }
+    const t = ws.addRow(["", "", "Total", "", "", "", "", null]); t.font = { bold: true };
+    t.getCell(8).value = { formula: `SUM(H4:H${t.number - 1})`, result: g.total };
+    ws.getColumn(7).numFmt = '"$"#,##0'; ws.getColumn(8).numFmt = '"$"#,##0';
+    ws.pageSetup = { orientation: "landscape", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+  }
+  await enviarLibro(res, wb, `Compras_agrupadas_${new Date().toISOString().slice(0, 10)}.xlsx`);
+});
+
+// POST /api/ventas/agrupar/ordenes   { lineas: [{ venta_id, indice, proveedor }] }
+// Crea las órdenes (borrador) de los proveedores elegidos: una por venta y proveedor, para que cada compra siga cargada a su venta
+const agruparOrdenes = handler(async (req, res) => {
+  const lineas = Array.isArray(req.body?.lineas) ? req.body.lineas : [];
+  const grupos = new Map();
+  for (const l of lineas) {
+    const prov = normProv(l.proveedor || "");
+    if (!prov || prov === "SIN PROVEEDOR" || !Number(l.venta_id)) continue;
+    const k = `${l.venta_id}|${prov}`;
+    if (!grupos.has(k)) grupos.set(k, { venta_id: Number(l.venta_id), proveedor: prov, indices: [] });
+    grupos.get(k).indices.push(Number(l.indice));
+  }
+  if (!grupos.size) throw new ErrorNegocio("Elige el proveedor de los productos para crear las órdenes");
+  const creadas = [];
+  for (const g of grupos.values()) {
+    const o = await crearOrdenDe(g.venta_id, g.indices, g.proveedor, req);
+    creadas.push({ numero: o.numero, proveedor: o.proveedor_nombre, venta_id: g.venta_id, lineas: g.indices.length, total: Number(o.total) });
+  }
+  res.status(201).json({ ok: true, data: { creadas } });
 });
 
 // POST /api/ventas/:id/cambiar-proveedor   { indice, proveedor, costo }
@@ -778,5 +937,5 @@ module.exports = {
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
-  getCuadroCompra, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
+  getCuadroCompra, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
 };

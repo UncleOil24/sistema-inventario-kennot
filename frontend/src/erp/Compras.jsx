@@ -3,6 +3,7 @@ import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar } from "./ui
 import { api, fmt, fecha, useProductos, descargar } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
+import AgruparCompras from "./AgruparCompras";
 
 // Compras: las gestiona Operativo; Comercial solo consulta el avance. Los pagos a proveedores son de Finanzas (gerencia).
 export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
@@ -14,6 +15,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   const [detalle, setDetalle] = useState(null);
   const [documento, setDocumento] = useState(false);
   const [facturaNueva, setFacturaNueva] = useState(false);
+  const [agrupar, setAgrupar] = useState(false);
   // Una sola vista: por período (semana, mes o todo) y dentro, por venta. Lo antiguo queda cerrado.
   const [periodo, setPeriodo] = useState(() => { try { return localStorage.getItem("compras_periodo") || "mes"; } catch { return "mes"; } });
   const cambiarPeriodo = (v) => { setPeriodo(v); setAbiertos(new Set()); try { localStorage.setItem("compras_periodo", v); } catch { /* */ } };
@@ -72,6 +74,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
           {esAdmin && <option value="porpagar">Recibidas sin pagar</option>}
           <option value="anulada">Anuladas</option>
         </select>
+        {puedeOperar && <button className="btn btn-ghost" onClick={() => setAgrupar(true)} title="Junta lo que falta comprar (o lo pedido) de varias ventas: imprimir, Excel y crear órdenes por proveedor">Agrupar compras</button>}
         {puedeOperar && <button className="btn btn-primary" onClick={() => setFacturaNueva(true)} title="Factura de un proveedor: se asocia a una compra pendiente o crea una nueva, y los precios pasan al catálogo">⇪ Subir factura de compra</button>}
         {puedeOperar && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización del proveedor: actualiza el historial de precios">⇪ Cotización proveedor</button>}
         {puedeOperar && <button className="btn btn-ghost" onClick={() => setEditando("nueva")} disabled={proveedores.length === 0}
@@ -109,6 +112,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
         </table>
       </div>
 
+      {agrupar && <AgruparCompras notify={notify} onClose={() => setAgrupar(false)} onCreadas={() => cargar()} />}
       {facturaNueva && <FacturaCompra notify={notify} proveedores={proveedores} onClose={() => setFacturaNueva(false)} onListo={(o) => { onPreciosCambio?.(); refrescar(o?.id); }} />}
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} onClose={() => { setDocumento(false); onPreciosCambio?.(); }} />}
       {editando && (
