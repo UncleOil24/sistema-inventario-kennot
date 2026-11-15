@@ -523,10 +523,10 @@ function pdfSolicitud(grupos, destino) {
 // Lista de materiales sencilla, en blanco y negro (como la hoja impresa del cuadro de compra):
 // { titulo, sub, proyectos, secciones: [{ titulo, lineas: [{ nombre, unidad, cantidad, obs }] }] }
 function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = [], conOrden = [] }, destino) {
-  const doc = new PDFDocument({ size: "LETTER", margins: { top: 34, bottom: 34, left: 40, right: 40 }, info: { Title: titulo } });
+  const doc = new PDFDocument({ size: "LETTER", margins: { top: 30, bottom: 30, left: 30, right: 30 }, info: { Title: titulo } });
   doc.pipe(destino);
-  const X = 40;
-  const W = doc.page.width - 80;
+  const X = 30;
+  const W = doc.page.width - 60;
   let y = 40;
   // Datos de facturación: recuadro en la mitad derecha, alineado a la izquierda, con etiquetas
   const anchoF = W / 2 - 6;
@@ -555,11 +555,14 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
   doc.text(`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`, X, y, { width: anchoT }); y = Math.max(doc.y, yf) + 10;
   const fin = () => doc.page.height - 50;
   for (const sec of secciones) {
-    const conObs = true; // versión interna: siempre con la columna de observación (detalle por proyecto o para anotar)
-    const col = conObs
-      ? [{ t: "N°", w: 22, a: "right" }, { t: "", w: 16 }, { t: "MATERIAL", w: W * 0.46 }, { t: "UNIDAD", w: 60 }, { t: "CANT.", w: 44, a: "right" }]
-      : [{ t: "N°", w: 22, a: "right" }, { t: "", w: 16 }, { t: "MATERIAL", w: W - 16 - 22 - 70 - 54 }, { t: "UNIDAD", w: 70 }, { t: "CANT.", w: 54, a: "right" }];
-    if (conObs) col.push({ t: "OBSERVACIÓN INTERNA", w: W - col.reduce((s2, c) => s2 + c.w, 0) });
+    // Siempre con la columna de observación interna (versión interna). Si viene vacía (una sola venta) es angosta,
+    // para anotar a mano, y el material aprovecha el ancho de la hoja; si trae detalle, se mantiene ancha.
+    const conObs = true;
+    const obsLlena = sec.lineas.some((l) => l.obs);
+    const anchoObs = obsLlena ? W * 0.27 : 95;
+    const col = [{ t: "N°", w: 22, a: "right" }, { t: "", w: 16 }, { t: "MATERIAL", w: 0 }, { t: "UNIDAD", w: 58, a: "center" }, { t: "CANT.", w: 42, a: "right" },
+      { t: obsLlena ? "OBSERVACIÓN INTERNA" : "OBSERVACIÓN", w: anchoObs, a: "center", celda: obsLlena ? "left" : "center", pad: 10 }];
+    col[2].w = W - col.reduce((s2, c) => s2 + c.w, 0);
     const cabecera = () => {
       if (y + 50 > fin()) { doc.addPage(); y = 40; }
       doc.rect(X, y, 3, 16).fill("#333");
@@ -569,7 +572,7 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
       y += 20;
       let x = X;
       doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#222");
-      col.forEach((c) => { doc.text(c.t, x + 2, y, { width: c.w - 4, align: c.a || "left" }); x += c.w; });
+      col.forEach((c) => { const pd = c.pad || 2; doc.text(c.t, x + pd, y, { width: c.w - pd - 2, align: c.a || "left" }); x += c.w; });
       y += 11;
       doc.moveTo(X, y).lineTo(X + W, y).lineWidth(1).strokeColor("#333").stroke();
       y += 3;
@@ -578,12 +581,12 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
     sec.lineas.forEach((l, k) => {
       const vals = [String(k + 1), "☐", l.nombre || "", l.unidad || "", String(l.cantidad), ...(conObs ? [l.obs || ""] : [])];
       doc.font("Helvetica").fontSize(9);
-      const alto = Math.max(14, ...vals.map((v, i) => doc.heightOfString(v, { width: col[i].w - 4 }) + 5));
+      const alto = Math.max(14, ...vals.map((v, i) => doc.heightOfString(v, { width: col[i].w - (col[i].pad || 2) - 2 }) + 5));
       if (y + alto > fin()) { doc.addPage(); y = 40; cabecera(); }
       let x = X;
       vals.forEach((v, i) => {
         if (i === 1) doc.rect(x + 5, y + 2, 7, 7).lineWidth(0.7).strokeColor("#333").stroke();
-        else doc.fillColor(i === 5 ? "#555" : "black").font("Helvetica").fontSize(i === 5 ? 7.5 : 9).text(v, x + 2, y + 2, { width: col[i].w - 4, align: col[i].a || "left" });
+        else { const pd = col[i].pad || 2; doc.fillColor(i === 5 ? "#555" : "black").font("Helvetica").fontSize(i === 5 ? 7.5 : 9).text(v, x + pd, y + 2, { width: col[i].w - pd - 2, align: col[i].celda || col[i].a || "left" }); }
         x += col[i].w;
       });
       y += alto;
