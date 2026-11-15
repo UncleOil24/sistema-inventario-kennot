@@ -675,14 +675,14 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     if (!proyectos.includes(proy)) proyectos.push(proy);
     const pk = it.producto_id || it.nombre;
     const x = sec.lineas.get(pk) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map() };
-    x.cantidad += cant; x.detalle.set(proy, (x.detalle.get(proy) || 0) + cant);
+    x.cantidad += cant; x.detalle.set(v.numero, (x.detalle.get(v.numero) || 0) + cant); // de qué venta es cada cantidad
     sec.lineas.set(pk, x);
   }
   // Primero la solicitud de cotización, después las órdenes por número
   const lista = [...secciones.values()].sort((a, b) => (a.orden > 0) - (b.orden > 0) || a.orden - b.orden).map((sec) => ({
     titulo: sec.titulo, proyectos: sec.proyectos,
     lineas: [...sec.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
-      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
+      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: ventas.length > 1 ? [...x.detalle.entries()].map(([vn, c]) => `${String(c).padStart(2, "0")} de ${vn}`).join(" · ") : "" })),
   }));
   // Solo se detallan los materiales por cotizar; lo que ya tiene orden va al final como referencia (solo la orden)
   const porCotizar = lista.filter((x) => !/Orden de compra/.test(x.titulo));
