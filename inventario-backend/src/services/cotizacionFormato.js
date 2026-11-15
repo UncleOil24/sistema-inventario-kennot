@@ -528,14 +528,27 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
   const X = 40;
   const W = doc.page.width - 80;
   let y = 40;
-  // Datos de facturación arriba a la derecha
-  const anchoF = 230;
-  let yf = 40;
+  // Datos de facturación: recuadro en la mitad derecha, alineado a la izquierda, con etiquetas
+  const anchoF = W / 2 - 6;
+  const xf = X + W - anchoF;
+  let yf = 38;
   facturacion.forEach((f) => {
-    f.forEach((t, k) => { doc.fillColor(k ? "#333" : "black").font(k ? "Helvetica" : "Helvetica-Bold").fontSize(k ? 8 : 9).text(t, X + W - anchoF, yf, { width: anchoF, align: "right" }); yf = doc.y + 1; });
+    const y0 = yf;
+    yf += 6;
+    f.forEach((t, k) => {
+      const m = /^(RUT|Giro):?\s*(.*)$/i.exec(t);
+      if (k === 0) { doc.fillColor("black").font("Helvetica-Bold").fontSize(9.5).text(t, xf + 8, yf, { width: anchoF - 16 }); }
+      else if (m) {
+        doc.fillColor("black").font("Helvetica-Bold").fontSize(8).text(`${m[1].toUpperCase()}: `, xf + 8, yf, { width: anchoF - 16, continued: true })
+          .font("Helvetica").fillColor("#333").text(m[2]);
+      } else { doc.fillColor("#333").font("Helvetica").fontSize(8).text(t, xf + 8, yf, { width: anchoF - 16 }); }
+      yf = doc.y + 1.5;
+    });
     yf += 5;
+    doc.lineWidth(0.6).strokeColor("#999").rect(xf, y0, anchoF, yf - y0).stroke();
+    yf += 6;
   });
-  const anchoT = facturacion.length ? W - anchoF - 12 : W;
+  const anchoT = facturacion.length ? W - anchoF - 14 : W;
   doc.fillColor("black").font("Helvetica-Bold").fontSize(14).text(titulo, X, y, { width: anchoT });
   y = doc.y + 2;
   doc.font("Helvetica").fontSize(9).fillColor("#444").text(sub, X, y, { width: anchoT }); y = doc.y + 2;
