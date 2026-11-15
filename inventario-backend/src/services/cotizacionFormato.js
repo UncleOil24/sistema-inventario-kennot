@@ -123,7 +123,10 @@ async function excelCotizacion(cot, emp) {
     ws.getCell(`E${r}`).value = e;
     for (const c of ["A", "D", "E"]) ws.getCell(`${c}${r}`).fill = relleno(CLARO);
     ws.getCell(`A${r}`).font = f();
-    ws.getCell(`A${r}`).alignment = { vertical: "middle", shrinkToFit: true };
+    // Texto largo (descripción del proyecto): se ajusta a la celda en varias líneas en vez de achicarse
+    const largo = String(a || "").length;
+    if (largo > 70) alto(r, 20.1 * Math.min(4, Math.ceil(largo / 70)));
+    ws.getCell(`A${r}`).alignment = { vertical: "middle", wrapText: true };
     ws.getCell(`D${r}`).font = f({ bold: true, color: { argb: COLOR } });
     ws.getCell(`D${r}`).alignment = { horizontal: "right", vertical: "middle" };
     ws.getCell(`E${r}`).font = f();
@@ -310,16 +313,21 @@ function pdfCotizacion(cot, emp, destino) {
   doc.rect(X, y, W, altoTit).fill(COLOR);
   doc.fillColor("white").font("Helvetica-Bold").fontSize(clave === "tactics" ? 12 : 13.5).text(`COTIZACIÓN N° ${cot.numero}`, X, y + (altoTit - 12) / 2 + 1, { width: W, align: "center" });
   y += altoTit + 8;
-  // Recuadro del cliente
-  doc.rect(X, y, W, 54).fill(CLARO);
-  doc.lineWidth(1.2).strokeColor(COLOR).rect(X, y, W, 54).stroke();
-  filasCliente(fmt, cot).forEach(([a, d, e], k) => {
-    const yy = y + 5 + k * 17;
-    doc.fillColor("black").font("Helvetica").fontSize(8.5).text(a, X + 5, yy, { width: W * 0.58, height: 11, ellipsis: true });
+  // Recuadro del cliente: cada fila crece si el texto es largo (la descripción no se corta)
+  const filas = filasCliente(fmt, cot);
+  doc.font("Helvetica").fontSize(8.5);
+  const altos = filas.map(([a]) => Math.max(17, doc.heightOfString(a, { width: W * 0.58 }) + 6));
+  const altoCli = altos.reduce((s, h) => s + h, 0) + 3;
+  doc.rect(X, y, W, altoCli).fill(CLARO);
+  doc.lineWidth(1.2).strokeColor(COLOR).rect(X, y, W, altoCli).stroke();
+  let yy = y + 5;
+  filas.forEach(([a, d, e], k) => {
+    doc.fillColor("black").font("Helvetica").fontSize(8.5).text(a, X + 5, yy, { width: W * 0.58 });
     doc.fillColor(COLOR).font("Helvetica-Bold").text(d, X + W * 0.6, yy, { width: W * 0.17, align: "right" });
     doc.fillColor("black").font("Helvetica").text(e, X + W * 0.79, yy, { width: W * 0.2, align: "center" });
+    yy += altos[k];
   });
-  y += 64;
+  y += altoCli + 10;
   y = encabezadoTabla(y);
 
   (cot.items || []).forEach((it, idx) => {
