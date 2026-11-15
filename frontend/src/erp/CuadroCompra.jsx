@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Modal, Cargando, Estado, confirmar, pedirTexto } from "./ui";
-import { api, fmt, descargar, descargarPost, imprimirHTML, escaparHTML as h } from "./lib";
+import { Modal, Cargando, Estado, confirmar, pedirTexto, BotonesSolicitud } from "./ui";
+import { api, fmt, descargar, imprimirHTML, escaparHTML as h } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
 
 // Cuadro de compra de una venta (Operativo y gerencia): todos los materiales en una tabla, con quién comprar cada uno.
@@ -69,15 +69,24 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     const o = l.opciones.find((x) => x.proveedor === valor);
     asignar([{ indice: l.indice, proveedor: valor, costo: o ? o.precio : null }]);
   };
+  // Se puede marcar todo (para la solicitud, el pedido o imprimir), pero órdenes y proveedor solo para lo que falta comprar:
+  // lo que ya tiene orden o está comprado no se duplica
+  const sinOrden = (ls) => ls.filter((l) => l.estado === "por_comprar");
+  const avisoOmitidos = (n) => n > 0 ? ` · ${n} ya tenían orden o estaban compradas: se omitieron` : "";
   const asignarMarcadas = async () => {
     if (!sel.size) return notify(AVISO_SEL, "danger");
-    const prov = await pedirTexto(`¿A qué proveedor asignas los ${marcadas.length} producto(s) marcados?`, { titulo: "Asignar proveedor", sugerencias: [...new Set(marcadas.flatMap((l) => l.opciones.map((o) => o.proveedor)))].slice(0, 10) });
-    if (prov) asignar(marcadas.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${marcadas.length} producto(s) asignados a ${prov.toUpperCase()}`);
+    const ls = sinOrden(marcadas);
+    if (!ls.length) return notify("Los productos marcados ya tienen orden de compra o están comprados", "danger");
+    const prov = await pedirTexto(`¿A qué proveedor asignas los ${ls.length} producto(s) por comprar?`, { titulo: "Asignar proveedor", sugerencias: [...new Set(ls.flatMap((l) => l.opciones.map((o) => o.proveedor)))].slice(0, 10) });
+    if (prov) asignar(ls.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${ls.length} producto(s) asignados a ${prov.toUpperCase()}${avisoOmitidos(marcadas.length - ls.length)}`);
   };
   const crearOrden = () => {
     if (!sel.size) return notify(AVISO_SEL, "danger");
+    const ls = sinOrden(marcadas);
+    if (!ls.length) return notify("Los productos marcados ya tienen orden de compra o están comprados: no se duplican", "danger");
     if (!provOrden) return notify("Indica el proveedor de la orden", "danger");
-    ejecutar(() => api(`/ventas/${ventaId}/crear-orden`, { method: "POST", body: { indices: [...sel], proveedor: provOrden } }), (r) => `✓ Orden ${r.numero} creada a ${r.proveedor_nombre}`);
+    const omitidos = marcadas.length - ls.length;
+    ejecutar(() => api(`/ventas/${ventaId}/crear-orden`, { method: "POST", body: { indices: ls.map((l) => l.indice), proveedor: provOrden } }), (r) => `✓ Orden ${r.numero} creada a ${r.proveedor_nombre}${avisoOmitidos(omitidos)}`);
   };
   // Hoja para imprimir (Carta horizontal): productos agrupados por proveedor, con casilla para marcar a mano
   const imprimir = () => {
@@ -108,11 +117,6 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   };
   const quitarStock = (l) => ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: 0 } }), "Ya no sale de stock");
   const comprarConOtro = (l) => { setSel(new Set([l.indice])); setTimeout(() => document.getElementById("orden-a")?.focus(), 50); };
-  // Solicitud de cotización (PDF) para proveedores nuevos: solo materiales, unidad y cantidad
-  const solicitud = () => {
-    if (!sel.size) return notify("Selecciona los productos para la solicitud de cotización", "danger");
-    descargarPost("/ventas/solicitud-cotizacion", { lineas: marcadas.map((l) => ({ venta_id: ventaId, indice: l.indice })) }).catch((e) => notify(e.message, "danger"));
-  };
   const pedido = () => !sel.size ? notify(AVISO_SEL, "danger") : descargar(`/ventas/${ventaId}/pedido?proveedor=${encodeURIComponent(provOrden || "")}&indices=${[...sel].join(",")}`).catch((e) => notify(e.message, "danger"));
   const descartar = async () => {
     if (!(await confirmar(`¿Descartar ${borradores.length} orden(es) en borrador (${borradores.map((o) => o.numero).join(", ")})?\nSus productos vuelven a "por comprar".`, { titulo: "Descartar borradores", boton: "Descartar", peligro: true }))) return;
@@ -173,7 +177,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
             <datalist id="cuadro-provs">{data.proveedores.map((p) => <option key={p} value={p} />)}</datalist>
             <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={crearOrden}>Crear orden</button>
             <button className="btn btn-ghost btn-sm" onClick={pedido}>↓ Pedido (Excel)</button>
-            <button className="btn btn-ghost btn-sm" title="PDF con los materiales y cantidades, con el encabezado de la empresa, para pedir precio a proveedores nuevos" onClick={solicitud}>↓ Solicitud de cotización (PDF)</button>
+            <BotonesSolicitud notify={notify} lineas={() => marcadas.map((l) => ({ venta_id: ventaId, indice: l.indice }))} />
             {sel.size > 0 && <button className="link mini" onClick={() => setSel(new Set())}>Quitar marcas</button>}
           </div>
         )}
@@ -181,7 +185,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
         <div className="table-wrap">
           <table className="table table-compacta">
             <thead><tr>
-              <th><input type="checkbox" checked={porComprar.length > 0 && porComprar.every((l) => sel.has(l.indice))} onChange={(e) => setSel(e.target.checked ? new Set(porComprar.map((l) => l.indice)) : new Set())} title="Marcar todo lo por comprar" /></th>
+              <th><input type="checkbox" disabled={anulada} checked={lineas.length > 0 && lineas.every((l) => sel.has(l.indice))} onChange={(e) => setSel(e.target.checked ? new Set(lineas.map((l) => l.indice)) : new Set())} title="Marcar todo (las órdenes se crean solo con lo que falta comprar)" /></th>
               <th className="col-desc">Producto</th><th>Cant.</th><th>Comprar con</th><th>Compra unit.</th><th>Total compra</th><th>Venta unit.</th><th>Margen</th><th>Estado</th>
             </tr></thead>
             <tbody>
@@ -191,7 +195,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                 const real = l.estado === "comprado" ? l.compras.find((c) => c.estado === "recibida") : null;
                 return (
                   <tr key={l.indice} className={l.estado === "stock" ? "fila-stock" : !(l.compra_unit > 0) ? "fila-alerta" : ""}>
-                    <td><input type="checkbox" disabled={bloqueada} checked={sel.has(l.indice)} onChange={() => toggle(l.indice)} /></td>
+                    <td><input type="checkbox" disabled={anulada} checked={sel.has(l.indice)} onChange={() => toggle(l.indice)} /></td>
                     <td>{l.nombre}<div className="mini">{l.codigo ? `N° ${l.codigo}` : ""}</div></td>
                     <td className="mini">{l.cantidad} {l.unidad}</td>
                     <td>

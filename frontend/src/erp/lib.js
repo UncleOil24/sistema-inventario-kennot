@@ -104,8 +104,8 @@ export async function descargarPost(path, body, nombre) {
 }
 
 // Imprime directo un PDF del sistema (sin descargarlo): se abre la ventana de impresión con el tamaño de hoja del PDF
-export async function imprimirPDF(path) {
-  const res = await authFetch(`${API_URL}/api${path}`);
+export async function imprimirPDF(path, body) {
+  const res = await authFetch(`${API_URL}/api${path}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!res.ok) { let msg = `Error ${res.status}`; try { msg = (await res.json()).error || msg; } catch { /* binario */ } throw new Error(msg); }
   const url = URL.createObjectURL(new Blob([await res.blob()], { type: "application/pdf" }));
   const viejo = document.getElementById("marco-impresion"); if (viejo) viejo.remove();
