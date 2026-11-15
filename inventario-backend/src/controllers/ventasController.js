@@ -683,25 +683,34 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     lineas: [...sec.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
       .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
   }));
-  const hayOrden = lista.some((x) => /Orden de compra/.test(x.titulo)), haySol = lista.some((x) => /Solicitud/.test(x.titulo));
-  const titulo = hayOrden && haySol ? "Solicitud de cotización y órdenes de compra" : hayOrden ? "Pedido de materiales (órdenes de compra)" : "Solicitud de cotización";
-  const emps = [...empresas].map((e) => datosEmpresa(e, params).nombre).join(" / ");
+  // Solo se detallan los materiales por cotizar; lo que ya tiene orden va al final como referencia (solo la orden)
+  const porCotizar = lista.filter((x) => !/Orden de compra/.test(x.titulo));
+  const conOrden = lista.filter((x) => /Orden de compra/.test(x.titulo)).map((x) => ({ titulo: x.titulo, productos: x.lineas.length }));
+  const titulo = "Solicitud de cotización";
+  // Datos de facturación (esquina superior derecha)
+  const facturacion = [...empresas].map((e) => { const d = datosEmpresa(e, params); return [d.nombre, d.rut ? `RUT ${d.rut}` : "", d.giro ? `Giro: ${d.giro}` : "", d.direccion || "", [d.contacto, d.fono].filter(Boolean).join(" · "), d.email || ""].filter(Boolean); });
   const fecha = new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" });
-  const nombre = `${hayOrden && !haySol ? "Pedido_materiales" : "Solicitud_cotizacion"}_${new Date().toISOString().slice(0, 10)}`;
+  const nombre = `Solicitud_cotizacion_${new Date().toISOString().slice(0, 10)}`;
   if (req.body?.formato === "excel") {
     const wb = libro();
-    const ws = wb.addWorksheet("Materiales");
+    const ws = wb.addWorksheet("Solicitud");
     ws.columns = [{ width: 6 }, { width: 60 }, { width: 12 }, { width: 11 }, { width: 40 }];
     ws.addRow([titulo]).font = { bold: true, size: 14 };
-    ws.addRow([`${emps} · ${fecha}`]);
+    ws.addRow([`Fecha: ${fecha}`]);
     ws.addRow([`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`]);
-    for (const sec of lista) {
+    for (const f of facturacion) { ws.addRow([]); f.forEach((t, k) => { const r = ws.addRow(["", t]); if (!k) r.font = { bold: true }; }); }
+    for (const sec of porCotizar) {
       ws.addRow([]);
-      const t = ws.addRow([sec.titulo]); t.font = { bold: true, size: 12 };
-      const conObs = true; // versión interna: siempre con observación
-      const h = ws.addRow(["N°", "Material", "Unidad", "Cantidad", ...(conObs ? ["Observación interna"] : [])]);
+      if (porCotizar.length > 1) ws.addRow([sec.titulo]).font = { bold: true, size: 12 };
+      const h = ws.addRow(["N°", "Material", "Unidad", "Cantidad", "Observación interna"]);
       h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE6E6E6" } }; });
-      sec.lineas.forEach((l, n) => { const r = ws.addRow([n + 1, l.nombre, l.unidad || "", l.cantidad, ...(conObs ? [l.obs] : [])]); r.alignment = { wrapText: true, vertical: "top" }; });
+      sec.lineas.forEach((l, n) => { const r = ws.addRow([n + 1, l.nombre, l.unidad || "", l.cantidad, l.obs]); r.alignment = { wrapText: true, vertical: "top" }; });
+    }
+    if (!porCotizar.length) { ws.addRow([]); ws.addRow(["", "Todos los productos marcados ya tienen orden de compra."]); }
+    if (conOrden.length) {
+      ws.addRow([]);
+      ws.addRow(["", "Ya tienen orden de compra (no se cotizan):"]).font = { bold: true };
+      conOrden.forEach((o) => ws.addRow(["", `${o.titulo} · ${o.productos} producto(s)`]));
     }
     ws.pageSetup = { orientation: "portrait", paperSize: 1, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
     return enviarLibro(res, wb, `${nombre}.xlsx`);
@@ -709,7 +718,7 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${nombre}.pdf"`);
   res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
-  require("../services/cotizacionFormato").pdfMaterialesSimple({ titulo, sub: `${emps} · ${fecha}`, proyectos, secciones: lista }, res);
+  require("../services/cotizacionFormato").pdfMaterialesSimple({ titulo, sub: `Fecha: ${fecha}`, proyectos, secciones: porCotizar, facturacion, conOrden }, res);
 }
 
 // POST /api/ventas/solicitud-cotizacion   { lineas: [{ venta_id, indice, cantidad? }] }
