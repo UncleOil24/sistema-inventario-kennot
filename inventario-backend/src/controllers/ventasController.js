@@ -661,9 +661,10 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     if (!it) continue;
     const cant = Number(l.cantidad) > 0 ? Number(l.cantidad) : Number(it.cantidad) - CC.stockDe(it);
     if (cant <= 0) continue;
-    const emp = datosEmpresa(v.empresa === "tactics" ? "tactics" : "kenott", params);
+    // Si se juntan ventas de las dos empresas, la solicitud sale solo a nombre de Tactics
+    const emp = datosEmpresa(empresas.size > 1 ? "tactics" : v.empresa === "tactics" ? "tactics" : "kenott", params);
     const o = ordenDe(v.id, it.producto_id);
-    const pref = empresas.size > 1 ? `${emp.corto} · ` : "";
+    const pref = "";
     const titulo = o ? `${pref}Orden de compra ${o.numero} · ${o.proveedor_nombre}${o.estado === "recibida" ? " (recibida)" : ""}` : `${pref}Solicitud de cotización`;
     const orden = o ? o.id : 0;
     const k = `${o ? `o${o.id}` : "s"}|${emp.clave}`;
@@ -688,7 +689,7 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
   const conOrden = lista.filter((x) => /Orden de compra/.test(x.titulo)).map((x) => ({ titulo: x.titulo, productos: x.lineas.length }));
   const titulo = "Solicitud de cotización";
   // Datos de facturación (esquina superior derecha)
-  const facturacion = [...empresas].map((e) => { const d = datosEmpresa(e, params); return [d.nombre, d.rut ? `RUT ${d.rut}` : "", d.giro ? `Giro: ${d.giro}` : "", d.direccion || "", [d.contacto, d.fono].filter(Boolean).join(" · "), d.email || ""].filter(Boolean); });
+  const facturacion = (empresas.size > 1 ? ["tactics"] : [...empresas]).map((e) => { const d = datosEmpresa(e, params); return [d.nombre, d.rut ? `RUT ${d.rut}` : "", d.giro ? `Giro: ${d.giro}` : "", d.direccion || "", [d.contacto, d.fono].filter(Boolean).join(" · "), d.email || ""].filter(Boolean); });
   const fecha = new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" });
   const nombre = `Solicitud_cotizacion_${new Date().toISOString().slice(0, 10)}`;
   if (req.body?.formato === "excel") {
@@ -744,7 +745,8 @@ const solicitudCotizacion = handler(async (req, res) => {
     if (!it) continue;
     const cant = Number(l.cantidad) > 0 ? Number(l.cantidad) : Number(it.cantidad) - CC.stockDe(it);
     if (cant <= 0) continue;
-    const emp = v.empresa === "tactics" ? "tactics" : "kenott";
+    const mixto = new Set(ventas.map((x) => x.empresa === "tactics" ? "tactics" : "kenott")).size > 1;
+    const emp = mixto || v.empresa === "tactics" ? "tactics" : "kenott"; // mezcla de empresas: solo Tactics
     if (!porEmpresa.has(emp)) porEmpresa.set(emp, { proyectos: [], lineas: new Map() });
     const g = porEmpresa.get(emp);
     const proy = proyectoDe(v);
