@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar } from "./ui";
+import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar, pedirTexto } from "./ui";
 import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
 import { AccionesVenta, PanelFacturas, HistorialVenta, conConfirmacion } from "./Recorrido";
@@ -118,7 +118,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
                     <td className="id-cell">{v.numero}{v.empresa === "tactics" && <div><Estado valor="tactics" /></div>}</td>
                     <td className="mini">{fecha(v.fecha)}</td>
                     <td>{v.cliente_nombre || <span className="mini">Sin cliente</span>}</td>
-                    <td className="mini">{v.orden_compra_cliente || "—"}{v.id_solicitud && <div className="id-solicitud">ID {v.id_solicitud}</div>}</td>
+                    <td className="mini">{v.orden_compra_cliente || (v.oc_pendiente ? <span className="estado estado-warn">OC pendiente</span> : "—")}{v.id_solicitud && <div className="id-solicitud">ID {v.id_solicitud}</div>}</td>
                     <td>{v.estado === "anulada" ? <Estado valor="anulada" /> : <Etapa valor={v.etapa} />}</td>
                     {modo !== "operativo" && <td className="mini"><EstadoFactura valor={v.estado_factura} />{v.documento && <div>{v.documento}</div>}</td>}
                     <td className="price-cell">{fmt(v.total)}</td>
@@ -266,6 +266,11 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         {venta.fecha_vencimiento && <span>Vence {fecha(venta.fecha_vencimiento)}</span>}
         {venta.creado_por && <span>Por {venta.creado_por}</span>}
         {venta.orden_compra_cliente && <span>OC {venta.orden_compra_cliente}</span>}
+        {venta.oc_pendiente && <span className="estado estado-warn" title="Se sabe que viene la OC, pero aún no llega">OC pendiente</span>}
+        {venta.oc_pendiente && venta.estado !== "anulada" && editaDatos && <button className="btn btn-primary btn-sm" onClick={async () => {
+          const oc = await pedirTexto(`N° de orden de compra de ${venta.numero}`, { titulo: "Registrar OC", placeholder: "Ej: 3385-400-SE26", obligatorio: true });
+          if (oc) accion(() => api(`/ventas/${venta.id}/datos`, { method: "PUT", body: { orden_compra_cliente: oc } }), `✓ OC ${oc} registrada`);
+        }}>Registrar OC</button>}
         <Estado valor={venta.empresa || "kenott"} /> {venta.estado === "anulada" && <Estado valor="anulada" />} {verCobros && <Estado valor={venta.estado_pago} />}
       </div>
       {venta.notas && <div className="mini">{venta.notas}</div>}

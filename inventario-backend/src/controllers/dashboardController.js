@@ -261,6 +261,9 @@ const getDashboard = handler(async (req, res) => {
   // Comprar a proveedores
   const oc = (v) => (v.orden_compra_cliente ? ` · OC ${v.orden_compra_cliente}` : "");
   if (comercial) {
+    // OC pendiente: se sabe que viene, pero aún no llega
+    const ocPend = await Venta.findAll({ where: { oc_pendiente: true, estado: { [Op.ne]: "anulada" } }, attributes: ["id", "numero", "cliente_nombre", "fecha", "total"], order: [["id", "ASC"]], limit: 10, raw: true });
+    for (const v of ocPend) tareas.push({ tipo: "oc_pendiente", urgencia: 1, texto: `Registrar la OC de ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `OC pendiente · vendida el ${new Date(`${v.fecha}T12:00:00`).toLocaleDateString("es-CL")} · $${n(v.total).toLocaleString("es-CL")}`, vista: "ventas", id: v.id, boton: "Registrar OC" });
     for (const v of porFacturar.slice(0, 8)) tareas.push({ tipo: "facturar", urgencia: 0, texto: `Facturar ${v.numero} · ${v.cliente_nombre || "cliente"}`, detalle: `${v.estado_factura === "parcial" ? `Falta facturar $${n(Number(v.total) - Number(v.monto_facturado)).toLocaleString("es-CL")}` : `Total $${n(v.total).toLocaleString("es-CL")}`}${oc(v)} · ${v.etapa === "lista" ? "productos listos" : v.etapa === "despachada" ? "ya despachada" : "ya entregada"}`, vista: "facturacion", id: v.id, boton: "Facturar" });
   }
   if (operativo) {

@@ -82,6 +82,17 @@ export async function descargar(path, nombre) {
   URL.revokeObjectURL(url);
 }
 
+// Tipo de pago de una compra
+export const TIPOS_PAGO = [["contado", "Contado"], ["credito_empresa", "Crédito empresa (tarjeta o línea)"], ["credito_proveedor", "Crédito proveedor (plazo)"]];
+export const nombreTipoPago = (t) => (TIPOS_PAGO.find(([v]) => v === t)?.[1] || "Crédito proveedor (plazo)");
+
+// Ficha del proceso en Mercado Público (Compra Ágil: código terminado en COT; si no, licitación)
+export const fichaMP = (codigo) => {
+  const c = String(codigo || "").trim();
+  if (!/^\d+-\d+-[A-Z0-9]+$/i.test(c)) return null;
+  return /-COT\d*$/i.test(c) ? `https://buscador.mercadopublico.cl/ficha?code=${encodeURIComponent(c)}` : `https://www.mercadopublico.cl/Procurement/Modules/RFB/DetailsAcquisition.aspx?idlicitacion=${encodeURIComponent(c)}`;
+};
+
 // Descarga un archivo pidiéndolo con POST (cuando lo que va en el archivo se arma en pantalla)
 export async function descargarPost(path, body, nombre) {
   const res = await authFetch(`${API_URL}/api${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -109,7 +120,8 @@ export async function imprimirPDF(path) {
 // Imprime una hoja armada para papel (Carta, vertical u horizontal), sin los botones de la pantalla
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 export { esc as escaparHTML };
-export function imprimirHTML(titulo, cuerpo, { horizontal = true } = {}) {
+// Sin orientación forzada: sale vertical y en la ventana de impresión se puede elegir Diseño (vertical u horizontal)
+export function imprimirHTML(titulo, cuerpo, { horizontal = null } = {}) {
   const viejo = document.getElementById("marco-impresion"); if (viejo) viejo.remove();
   const f = document.createElement("iframe");
   f.id = "marco-impresion"; f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
@@ -117,7 +129,7 @@ export function imprimirHTML(titulo, cuerpo, { horizontal = true } = {}) {
   const d = f.contentWindow.document;
   d.open();
   d.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>
-    @page { size: letter ${horizontal ? "landscape" : "portrait"}; margin: 10mm; }
+    @page { ${horizontal === true ? "size: letter landscape; " : horizontal === false ? "size: letter portrait; " : ""}margin: 10mm; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #111; margin: 0; }
     h1 { font-size: 15px; margin: 0 0 2px; } .sub { color: #444; margin-bottom: 8px; }

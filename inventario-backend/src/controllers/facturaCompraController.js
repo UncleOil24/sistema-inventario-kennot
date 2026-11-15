@@ -197,6 +197,7 @@ const registrarFactura = handler(async (req, res) => {
     const venta = ventaId ? await Venta.findByPk(ventaId, { transaction: t, attributes: ["id", "empresa", "numero"] }) : null;
     const empresa = ["kenott", "tactics"].includes(b.empresa) ? b.empresa : venta?.empresa || null;
     const nota = partes.length > 1 ? ` (1 de ${partes.length})` : "";
+    const tipoPago = ["contado", "credito_empresa", "credito_proveedor"].includes(b.tipo_pago) ? b.tipo_pago : "contado";
     if (b.orden_id) {
       orden = ordenPrevia;
       if (!orden) throw new ErrorNegocio("Compra no encontrada", 404);
@@ -214,7 +215,7 @@ const registrarFactura = handler(async (req, res) => {
       resumen.no_vinieron = noVinieron;
       await orden.update({
         no_vinieron: noVinieron.length ? noVinieron : null,
-        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total,
+        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total, tipo_pago: tipoPago,
         documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa: empresa || orden.empresa,
         estado: "recibida", fecha_recepcion: orden.fecha_recepcion || new Date(),
         fecha_vencimiento: orden.fecha_vencimiento || vence,
@@ -223,7 +224,7 @@ const registrarFactura = handler(async (req, res) => {
     } else {
       orden = await OrdenCompra.create({
         proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: venta?.id || null, fecha,
-        items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa,
+        items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa, tipo_pago: tipoPago,
         estado: "recibida", fecha_recepcion: new Date(), fecha_vencimiento: vence,
         notas: (b.gasto_id ? "Registrada desde Gastos (compra de materiales)" : `Registrada desde la ${boleta ? "boleta" : "factura"} del proveedor`) + nota, creado_por: usuario,
       }, { transaction: t });
@@ -239,7 +240,7 @@ const registrarFactura = handler(async (req, res) => {
         const o2 = await OrdenCompra.create({
           proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v2?.id || null, fecha,
           items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha,
-          empresa: empresa || v2?.empresa || null, estado: "recibida", fecha_recepcion: new Date(), fecha_vencimiento: vence, factura_grupo: grupo,
+          empresa: empresa || v2?.empresa || null, estado: "recibida", fecha_recepcion: new Date(), fecha_vencimiento: vence, factura_grupo: grupo, tipo_pago: tipoPago,
           notas: `${doc} repartida entre ventas (${n + 2} de ${partes.length})`, creado_por: usuario,
         }, { transaction: t });
         await o2.update({ numero: numeroCompra(o2.id) }, { transaction: t });
