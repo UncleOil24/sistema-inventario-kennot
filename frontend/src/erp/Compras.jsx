@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando } from "./ui";
-import { api, fmt, fecha, useProductos, descargar } from "./lib";
+import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
 import AgruparCompras from "./AgruparCompras";
@@ -357,9 +357,9 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
   const [repartirAbierto, setRepartirAbierto] = useState(false);
   const [registrarPrecios, setRegistrarPrecios] = useState(true);
   const [factura, setFactura] = useState(orden.documento || "");
-  const [fact, setFact] = useState({ fecha_factura: orden.fecha_factura || "", fecha_vencimiento: orden.fecha_vencimiento || "", empresa: orden.empresa || "" });
+  const [fact, setFact] = useState({ fecha_factura: orden.fecha_factura || "", fecha_vencimiento: orden.fecha_vencimiento || "", empresa: orden.empresa || "", tipo_pago: orden.tipo_pago || "credito_proveedor" });
   const guardarFactura = () => accion(
-    () => api(`/ordenes-compra/${orden.id}/factura`, { method: "PUT", body: { documento: factura, fecha_factura: fact.fecha_factura || undefined, fecha_vencimiento: fact.fecha_vencimiento || undefined, empresa: fact.empresa || null } }),
+    () => api(`/ordenes-compra/${orden.id}/factura`, { method: "PUT", body: { documento: factura, fecha_factura: fact.fecha_factura || undefined, fecha_vencimiento: fact.fecha_vencimiento || undefined, empresa: fact.empresa || null, tipo_pago: fact.tipo_pago } }),
     factura ? "✓ Factura del proveedor guardada" : "✓ Guardado"
   );
 
@@ -399,6 +399,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
         {orden.documento && <span>Factura {orden.documento}{orden.fecha_factura ? ` del ${fecha(orden.fecha_factura)}` : ""}</span>}
         {orden.grupo?.length > 1 && <span className="estado estado-info" title="Misma factura repartida entre ventas: se paga junta">Factura repartida: {orden.grupo.map((g) => `${g.numero}${g.venta_numero ? ` (${g.venta_numero})` : " (sin venta)"}`).join(" + ")}</span>}
         {orden.empresa && <span>{orden.empresa === "kenott" ? "Kenott" : "Tactics"}</span>}
+        <span title="Tipo de pago">{nombreTipoPago(orden.tipo_pago)}</span>
         {orden.fecha_recepcion && <span>Recibida {fecha(orden.fecha_recepcion)}</span>}
         {orden.fecha_vencimiento && <span>Vence {fecha(orden.fecha_vencimiento)}</span>}
         {orden.creado_por && <span>Por {orden.creado_por}</span>}
@@ -447,6 +448,11 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
               </select></div>
             <div className="field"><label>Vence el pago</label><input type="date" value={fact.fecha_vencimiento} onChange={(e) => setFact({ ...fact, fecha_vencimiento: e.target.value })} /></div>
           </div>
+          <div className="field"><label>Tipo de pago</label>
+            <select value={fact.tipo_pago} onChange={(e) => setFact({ ...fact, tipo_pago: e.target.value })}>
+              {TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+            </select>
+            <div className="mini">{fact.tipo_pago === "credito_proveedor" ? "Queda en Por pagar con el plazo del proveedor." : "Al recibir la compra queda pagada al proveedor (no aparece en Por pagar)."}</div></div>
           <div className="mini">Si dejas el vencimiento vacío se calcula con el plazo de pago del proveedor. El IVA de la factura se descuenta en el mes de la factura, en la empresa que compra.</div>
           <div style={{ textAlign: "right", marginTop: 6 }}><button className="btn btn-ghost btn-sm" onClick={guardarFactura}>Guardar factura</button></div>
         </div>

@@ -7,6 +7,7 @@ const c = require("../controllers/ventasController");
 router.get("/", c.getVentas);
 router.get("/facturas/lista", c.listarFacturas);
 router.get("/agrupar/datos", operativo, c.agruparDatos);
+router.post("/solicitud-cotizacion", operativo, c.solicitudCotizacion);
 router.post("/agrupar/excel", operativo, c.agruparExcel);
 router.post("/agrupar/ordenes", operativo, c.agruparOrdenes);
 router.get("/:id", c.getVenta);

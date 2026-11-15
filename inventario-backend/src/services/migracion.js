@@ -50,6 +50,7 @@ async function migrar() {
   await q(`UPDATE ventas SET plazo_pago_dias = GREATEST(fecha_vencimiento - fecha, 0) WHERE plazo_pago_dias IS NULL AND fecha_vencimiento IS NOT NULL`);
   await borradoresV0004(q);
   await postuladasV1(q);
+  await ocPendienteV1(q);
   await protegerTablas(q);
 }
 
@@ -82,6 +83,16 @@ async function postuladasV1(q) {
     FROM c WHERE UPPER(l.codigo) = c.sol AND l.estado_interno <> 'descartada' AND l.estado_interno <> 'postulada' RETURNING l.codigo`);
   if (filas.length) console.log(`✓ ${filas.length} licitación(es) marcadas como postuladas (tenían cotización finalizada)`);
   await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_postuladas_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// OC pendiente (gerencia, 15-nov-2026): las ventas con "pendiente" escrito como N° de OC quedan sin N° y marcadas como OC pendiente
+async function ocPendienteV1(q) {
+  const [[hecho]] = await q(`SELECT valor FROM parametros WHERE clave = 'migracion_oc_pendiente_v1'`);
+  if (hecho) return;
+  const [filas] = await q(`UPDATE ventas SET oc_pendiente = true, orden_compra_cliente = NULL
+    WHERE orden_compra_cliente ~* '^\\s*(pendiente|por llegar|sin\\s*oc|s/?\\s*oc|-+|\\?)\\s*$' RETURNING numero`);
+  if (filas.length) console.log(`✓ OC pendiente: ${filas.map((f) => f.numero).join(", ")}`);
+  await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_oc_pendiente_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)

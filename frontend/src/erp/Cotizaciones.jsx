@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, Totales, confirmar, modoPedido, motivoRechazo } from "./ui";
 import { conConfirmacion } from "./Recorrido";
-import { api, fmt, fecha, descargar, imprimirPDF, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
+import { api, fmt, fecha, descargar, imprimirPDF, fichaMP, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
 
 // Pestañas: En ejecución (borrador) · Esperando proveedor · Enviadas (con sus resultados)
 const SUB_ENVIADAS = [["cotizacion", "Sin respuesta"], ["aceptada", "Aceptadas"], ["rechazada", "Rechazadas"], ["vencida", "Vencidas"], ["enviadas", "Todas"]];
@@ -47,7 +47,6 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
     if (!modo) return;
     descargar(`/cotizaciones/${c.id}/pedido-proveedor?modo=${modo}`, `Pedido_cotizacion_${idCot(c)}.xlsx`).catch((e) => notify(e.message, "danger"));
   };
-  const vencer = (c) => accion(() => api(`/cotizaciones/${c.id}/estado`, { method: "POST", body: { estado: "vencida" } }), "Cotización marcada como vencida");
   const eliminar = async (c) => (await confirmar(`¿Eliminar la ${nombreCot(c)}?\nEs mejor marcarla rechazada o vencida para no perder el historial.`, { titulo: "Eliminar cotización", boton: "Eliminar", peligro: true }))
     && accion(() => api(`/cotizaciones/${c.id}`, { method: "DELETE" }), "Cotización eliminada");
 
@@ -102,7 +101,9 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                   <div className="hist-nombre">{nombreCot(c)} · {c.nombre_cotizacion || "Sin nombre"}</div>
                   <div className="hist-meta">
                     {c.id_solicitud
-                      ? <span className="id-solicitud" title="ID del cliente o de la solicitud de Mercado Público">ID {c.id_solicitud}</span>
+                      ? (fichaMP(c.id_solicitud)
+                        ? <a className="id-solicitud" href={fichaMP(c.id_solicitud)} target="_blank" rel="noreferrer" title="Abrir la ficha en Mercado Público">ID {c.id_solicitud} ↗</a>
+                        : <span className="id-solicitud" title="ID del cliente">ID {c.id_solicitud}</span>)
                       : <span className="mini" style={{ color: "var(--warn)" }} title="Edítala para agregar el ID del cliente o de la solicitud">sin ID</span>}
                     {c.creado_por && <span title="Quién la hizo">por {c.creado_por}</span>}
                     {c.postulada && <span className="estado estado-ok" title="Confirmado en Licitaciones">✓ Postulada en Mercado Público {c.postulada.codigo}{c.postulada.fecha ? ` el ${fecha(c.postulada.fecha)}` : ""}</span>}
@@ -141,15 +142,8 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
                       <button className="btn btn-ghost btn-sm" onClick={() => pedido(c)}>↓ Pedido a proveedor</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => editar(c)}>Continuar sin esperar</button>
                     </>}
-                    {!["borrador", "espera_proveedor"].includes(c.estado) && <>
-                      <button className="btn btn-ghost btn-sm" title="Imprime directo, en hoja Carta" onClick={() => imprimirPDF(`/cotizaciones/${c.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => pdf(c)}>↓ PDF</button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => excel(c)}>↓ Excel</button>
-                    </>}
-                    {esAdmin && <button className="btn btn-ghost btn-sm" title="Hoja de referencia interna con costos y productos usados: no se envía al cliente" onClick={() => descargar(`/cotizaciones/${c.id}/interna`, `INTERNA_${idCot(c)}.xlsx`).catch((e) => notify(e.message, "danger"))}>↓ Interna</button>}
                     {c.estado === "cotizacion" && <button className="btn btn-ghost btn-sm" onClick={() => editar(c)}>Editar</button>}
                     {c.estado === "cotizacion" && <>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setSeguimiento(c)}>☎ Seguimiento</button>
                       <button className="btn btn-success btn-sm" onClick={() => setAceptar(c)}>✓ Aceptada → Venta</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => rechazar(c)}>Rechazada</button>
                     </>}
@@ -163,7 +157,9 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
           </div>
         )}
 
-      {abierta && <DetalleCotizacion cot={abierta} esAdmin={esAdmin} notify={notify} onClose={() => setAbierta(null)} onVencer={() => { vencer(abierta); setAbierta(null); }} />}
+      {abierta && <DetalleCotizacion cot={abierta} esAdmin={esAdmin} notify={notify} onClose={() => setAbierta(null)}
+        acciones={{ pdf: () => pdf(abierta), excel: () => excel(abierta), interna: () => descargar(`/cotizaciones/${abierta.id}/interna`, `INTERNA_${idCot(abierta)}.xlsx`).catch((e) => notify(e.message, "danger")),
+          seguimiento: () => { const c = abierta; setAbierta(null); setSeguimiento(c); } }} />}
       {seguimiento && <Seguimiento cot={seguimiento} notify={notify} onClose={() => setSeguimiento(null)} onHecho={() => { setSeguimiento(null); cargar(); }} />}
       {proveedorDe && <SubirProveedor cot={proveedorDe} notify={notify} onClose={() => setProveedorDe(null)}
         onHecho={(cot) => { setProveedorDe(null); cargar(); editar(cot); }} />}
@@ -173,12 +169,18 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
   );
 }
 
-function DetalleCotizacion({ cot, esAdmin, notify, onClose, onVencer }) {
+function DetalleCotizacion({ cot, esAdmin, notify, onClose, acciones }) {
+  const enviada = !["borrador", "espera_proveedor"].includes(cot.estado);
+  const mp = fichaMP(cot.id_solicitud);
   return (
     <Modal titulo={`// ${nombreCot(cot)}`} onClose={onClose} ancho={820}
       footer={<>
-        {!["borrador", "espera_proveedor"].includes(cot.estado) && <button className="btn btn-ghost" onClick={() => imprimirPDF(`/cotizaciones/${cot.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
-        {cot.estado === "cotizacion" && <button className="btn btn-ghost" onClick={onVencer}>Marcar vencida</button>}
+        {enviada && <button className="btn btn-ghost" onClick={() => imprimirPDF(`/cotizaciones/${cot.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
+        {enviada && <button className="btn btn-ghost" onClick={acciones.pdf}>↓ PDF</button>}
+        {enviada && <button className="btn btn-ghost" onClick={acciones.excel}>↓ Excel</button>}
+        {esAdmin && <button className="btn btn-ghost" title="Hoja interna con costos: no se envía al cliente" onClick={acciones.interna}>↓ Interna</button>}
+        {cot.estado === "cotizacion" && <button className="btn btn-ghost" onClick={acciones.seguimiento}>☎ Seguimiento</button>}
+        {mp && <a className="btn btn-ghost" href={mp} target="_blank" rel="noreferrer">↗ Mercado Público</a>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">
@@ -219,7 +221,7 @@ function DetalleCotizacion({ cot, esAdmin, notify, onClose, onVencer }) {
 }
 
 export function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
-  const [form, setForm] = useState({ orden_compra_cliente: "", dias_credito: 30, pagada_al_contado: false, medio_pago: "transferencia" });
+  const [form, setForm] = useState({ orden_compra_cliente: "", oc_pendiente: false, dias_credito: 30, pagada_al_contado: false, medio_pago: "transferencia" });
   const [cliente, setCliente] = useState(null);
   // El plazo de pago viene de la ficha del cliente
   useEffect(() => {
@@ -234,7 +236,7 @@ export function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
     setEnviando(true);
     try {
       const venta = await conConfirmacion(`/ventas/desde-cotizacion/${cot.id}`, {
-        orden_compra_cliente: form.orden_compra_cliente || null,
+        orden_compra_cliente: form.oc_pendiente ? null : form.orden_compra_cliente || null, oc_pendiente: form.oc_pendiente,
         ...(form.pagada_al_contado ? { pagada_al_contado: true, medio_pago: form.medio_pago } : { dias_credito: Number(form.dias_credito) || 0 }),
       });
       notify(`✓ Venta ${venta.numero} creada — Operativo la verá para aceptarla y comprar`);
@@ -251,7 +253,11 @@ export function AceptarCotizacion({ cot, notify, onClose, onHecho }) {
       <div className="mini">{cot.cliente || "Sin cliente"} · {fmt(cot.total)} con IVA. La venta copia los mismos precios y costos de la cotización.</div>
       <div className="field">
         <label>N° orden de compra del cliente</label>
-        <input value={form.orden_compra_cliente} onChange={(e) => setForm({ ...form, orden_compra_cliente: e.target.value })} placeholder="Ej: 2401-55-SE26 (Mercado Público)" />
+        <input value={form.oc_pendiente ? "" : form.orden_compra_cliente} disabled={form.oc_pendiente} onChange={(e) => setForm({ ...form, orden_compra_cliente: e.target.value })} placeholder={form.oc_pendiente ? "Se registra cuando llegue" : "Ej: 2401-55-SE26 (Mercado Público)"} />
+        <label className="check" style={{ marginTop: 6 }}>
+          <input type="checkbox" checked={form.oc_pendiente} onChange={(e) => setForm({ ...form, oc_pendiente: e.target.checked })} />
+          OC pendiente (aún no llega): la venta queda marcada y se registra la OC después
+        </label>
       </div>
       <label className="check">
         <input type="checkbox" checked={form.pagada_al_contado} onChange={(e) => setForm({ ...form, pagada_al_contado: e.target.checked })} />
@@ -306,7 +312,8 @@ function Seguimiento({ cot, notify, onClose, onHecho }) {
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={enviando} onClick={guardar}>{enviando ? "Guardando..." : "Registrar contacto"}</button>
       </>}>
-      <div className="mini">{cot.cliente || "Sin cliente"} · {cot.nombre_cotizacion} · {fmt(cot.total)} · válida hasta {fecha(cot.fecha_validez)}</div>
+      <div className="mini">{cot.cliente || "Sin cliente"} · {cot.nombre_cotizacion} · {fmt(cot.total)} · válida hasta {fecha(cot.fecha_validez)}
+        {fichaMP(cot.id_solicitud) && <> · <a href={fichaMP(cot.id_solicitud)} target="_blank" rel="noreferrer">↗ revisar en Mercado Público ({cot.id_solicitud})</a></>}</div>
       <div className="field">
         <label>¿Qué dijo el cliente?</label>
         <textarea className="textarea" rows={3} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: La está revisando la directora, responden el lunes" />

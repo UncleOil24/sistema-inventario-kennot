@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
+import { TIPOS_PAGO } from "./lib";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
 
 // "Subir facturas y boletas" de una venta: se suben todos los documentos juntos; el sistema lee cada uno
@@ -153,6 +154,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
         <div className="fields-row tres">
           <div className="field"><label>N° {d.enc.tipo_documento === "boleta" ? "boleta (opcional)" : "factura"}</label><input value={d.enc.documento} onChange={(e) => setEnc({ documento: e.target.value })} /></div>
           <div className="field"><label>Fecha</label><input type="date" value={d.enc.fecha} onChange={(e) => setEnc({ fecha: e.target.value })} /></div>
+          {d.como !== "gasto" && <div className="field"><label>Tipo de pago</label><select value={d.enc.tipo_pago || "contado"} onChange={(e) => setEnc({ tipo_pago: e.target.value })}>{TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>}
           <div className="field"><label>Total pagado</label><input type="number" value={d.enc.total} onChange={(e) => setEnc({ total: e.target.value })} /></div>
         </div>
         {d.enc.tipo_documento === "boleta" && <div className="mini">Boleta: el costo de la venta es el total pagado (no hay crédito de IVA). Los precios pasan al catálogo sin IVA.</div>}

@@ -19,7 +19,7 @@ const {
 const { getParametros, precioVenta } = require("../services/parametros");
 const { normProv } = require("../services/precios");
 const { esAdmin, tieneRol } = require("../middlewares/auth");
-const { validarEmpresa } = require("../services/empresas");
+const { validarEmpresa, datosEmpresa } = require("../services/empresas");
 
 const SIN_PROVEEDOR = "SIN PROVEEDOR";
 
@@ -40,9 +40,11 @@ const numeroVenta = (id) => `V-${String(id).padStart(4, "0")}`;
 // datos.items: [{ producto_id, cantidad, precio?, costo?, proveedor?, nombre? }]
 // Si vienen costo/proveedor (desde la cotización) se respetan; si no, se toman del catálogo.
 // Una OC = una venta: el N° de OC del cliente no puede estar en otra venta vigente
+// "pendiente", "sin OC", "s/oc", "-": la OC aún no llega (no es un N° de OC)
+const esOcPendiente = (oc) => /^\s*(pendiente|por llegar|sin\s*oc|s\/?\s*oc|-+|\?)\s*$/i.test(String(oc || ""));
 const ocLibre = async (oc, ventaId, t) => {
   const n = String(oc || "").trim();
-  if (!n) return;
+  if (!n || esOcPendiente(n)) return;
   const otra = await Venta.findOne({ where: { orden_compra_cliente: { [Op.iLike]: n }, estado: { [Op.ne]: "anulada" }, ...(ventaId ? { id: { [Op.ne]: ventaId } } : {}) }, transaction: t });
   if (otra) throw new ErrorNegocio(`La OC ${n} ya está registrada en la venta ${otra.numero}. Una OC es una sola venta: si tiene varias facturas, regístralas en esa venta.`);
 };
@@ -104,7 +106,8 @@ const crearVentaEnTransaccion = async (datos, t) => {
     cliente_nombre,
     cotizacion_id: datos.cotizacion_id || null,
     empresa: validarEmpresa(datos.empresa),
-    orden_compra_cliente: String(datos.orden_compra_cliente || "").trim() || null,
+    orden_compra_cliente: esOcPendiente(datos.orden_compra_cliente) || datos.oc_pendiente ? null : String(datos.orden_compra_cliente || "").trim() || null,
+    oc_pendiente: !!datos.oc_pendiente || esOcPendiente(datos.orden_compra_cliente),
     // ID del cliente o de la solicitud (ventas sin OC se identifican con él)
     id_solicitud: String(datos.id_solicitud || "").trim() || (codigo_cliente && codigo_cliente !== "P-001" ? codigo_cliente : null),
     fecha_vencimiento: venc,
@@ -334,6 +337,13 @@ const actualizarDatos = handler(async (req, res) => {
   if ("orden_compra_cliente" in req.body) await ocLibre(req.body.orden_compra_cliente, v.id);
   const cambios = {};
   for (const c of ["orden_compra_cliente", "id_solicitud", "fecha_vencimiento", "notas"]) if (c in req.body) cambios[c] = String(req.body[c] ?? "").trim() || null;
+  // OC: si llega el N°, deja de estar pendiente; "pendiente" (o la casilla) la deja pendiente sin N°
+  if ("orden_compra_cliente" in req.body || "oc_pendiente" in req.body) {
+    const pend = !!req.body.oc_pendiente || esOcPendiente(req.body.orden_compra_cliente);
+    if (pend) { cambios.orden_compra_cliente = null; cambios.oc_pendiente = true; }
+    else if (cambios.orden_compra_cliente) cambios.oc_pendiente = false;
+    else if ("oc_pendiente" in req.body) cambios.oc_pendiente = false;
+  }
   // Plazo de pago de esta venta (si la OC o las bases dicen otro): recalcula el vencimiento
   if ("plazo_pago_dias" in req.body || "base_vencimiento" in req.body) {
     const plazo = "plazo_pago_dias" in req.body ? Math.max(0, Math.round(Number(req.body.plazo_pago_dias) || 0)) : v.plazo_pago_dias;
@@ -632,6 +642,52 @@ const agruparDatos = handler(async (req, res) => {
     if (lineas.length) out.push({ id: v.id, numero: v.numero, cliente: v.cliente_nombre, empresa: v.empresa, fecha: v.fecha, lineas });
   }
   res.json({ ok: true, data: { ventas: out, proveedores: (await Proveedor.findAll({ attributes: ["nombre"] })).map((p) => p.nombre).sort() } });
+});
+
+// POST /api/ventas/solicitud-cotizacion   { lineas: [{ venta_id, indice, cantidad? }] }
+// PDF para pedir cotización a proveedores nuevos: materiales, unidad y cantidad; encabezado de la empresa de cada venta,
+// nombre del proyecto (sin ID ni cliente). Mismo producto de varias ventas: se suma y la observación interna dice de cuál es.
+const solicitudCotizacion = handler(async (req, res) => {
+  const pedidas = Array.isArray(req.body?.lineas) ? req.body.lineas : [];
+  if (!pedidas.length) throw new ErrorNegocio("Selecciona productos para la solicitud");
+  const ventas = await Venta.findAll({ where: { id: [...new Set(pedidas.map((l) => Number(l.venta_id)))] } });
+  const cots = await Cotizacion.findAll({ where: { id: ventas.map((v) => v.cotizacion_id).filter(Boolean) }, attributes: ["id", "nombre_cotizacion"] });
+  const proyectoDe = (v) => {
+    const c = cots.find((x) => x.id === v.cotizacion_id);
+    const id = String(v.id_solicitud || "").trim();
+    let n = String(c?.nombre_cotizacion || v.notas || "").trim();
+    if (id) n = n.replace(new RegExp(`^\\s*(compra\\s+[áa]gil|licitaci[óo]n)?\\s*${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[–—-]?\\s*`, "i"), "").trim();
+    return n || `Venta ${v.numero}`;
+  };
+  const CC = require("../services/cuadroCompra");
+  const porEmpresa = new Map();
+  for (const l of pedidas) {
+    const v = ventas.find((x) => x.id === Number(l.venta_id));
+    const it = v?.items?.[Number(l.indice)];
+    if (!it) continue;
+    const cant = Number(l.cantidad) > 0 ? Number(l.cantidad) : Number(it.cantidad) - CC.stockDe(it);
+    if (cant <= 0) continue;
+    const emp = v.empresa === "tactics" ? "tactics" : "kenott";
+    if (!porEmpresa.has(emp)) porEmpresa.set(emp, { proyectos: [], lineas: new Map() });
+    const g = porEmpresa.get(emp);
+    const proy = proyectoDe(v);
+    if (!g.proyectos.includes(proy)) g.proyectos.push(proy);
+    const k = it.producto_id || it.nombre;
+    const x = g.lineas.get(k) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map() };
+    x.cantidad += cant; x.detalle.set(proy, (x.detalle.get(proy) || 0) + cant);
+    g.lineas.set(k, x);
+  }
+  if (!porEmpresa.size) throw new ErrorNegocio("No hay productos por cotizar en lo seleccionado");
+  const params = await getParametros();
+  const grupos = [...porEmpresa.entries()].map(([emp, g]) => ({
+    emp: datosEmpresa(emp, params), proyectos: g.proyectos,
+    lineas: [...g.lineas.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)))
+      .map((x) => ({ nombre: x.nombre, unidad: x.unidad, cantidad: x.cantidad, obs: g.proyectos.length > 1 ? [...x.detalle.entries()].map(([p, c]) => `${p}: ${c}`).join(" · ") : "" })),
+  }));
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="Solicitud_cotizacion_${new Date().toISOString().slice(0, 10)}.pdf"`);
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
+  require("../services/cotizacionFormato").pdfSolicitud(grupos, res);
 });
 
 // POST /api/ventas/agrupar/excel   { orden: "proveedor"|"venta", lineas: [{ venta, cliente, codigo, nombre, unidad, cantidad, proveedor, precio, estado, ordenes }] }
@@ -964,5 +1020,5 @@ module.exports = {
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
-  getCuadroCompra, marcarStock, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
+  getCuadroCompra, marcarStock, solicitudCotizacion, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
 };

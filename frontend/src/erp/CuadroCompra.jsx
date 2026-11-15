@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Modal, Cargando, Estado, confirmar, pedirTexto } from "./ui";
-import { api, fmt, descargar, imprimirHTML, escaparHTML as h } from "./lib";
+import { api, fmt, descargar, descargarPost, imprimirHTML, escaparHTML as h } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
 
 // Cuadro de compra de una venta (Operativo y gerencia): todos los materiales en una tabla, con quién comprar cada uno.
@@ -10,6 +10,7 @@ const ESTADO_LINEA = {
   por_comprar: ["Por comprar", "warn"], pedido: ["Pedido", "info"], parcial: ["Parcial", "warn"], comprado: ["Comprado", "ok"], stock: ["Stock", "neutral"],
 };
 
+const AVISO_SEL = "Selecciona productos para generar la orden";
 export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAdmin }) {
   const [data, setData] = useState(null);
   const [sel, setSel] = useState(new Set());
@@ -69,10 +70,12 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     asignar([{ indice: l.indice, proveedor: valor, costo: o ? o.precio : null }]);
   };
   const asignarMarcadas = async () => {
+    if (!sel.size) return notify(AVISO_SEL, "danger");
     const prov = await pedirTexto(`¿A qué proveedor asignas los ${marcadas.length} producto(s) marcados?`, { titulo: "Asignar proveedor", sugerencias: [...new Set(marcadas.flatMap((l) => l.opciones.map((o) => o.proveedor)))].slice(0, 10) });
     if (prov) asignar(marcadas.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${marcadas.length} producto(s) asignados a ${prov.toUpperCase()}`);
   };
   const crearOrden = () => {
+    if (!sel.size) return notify(AVISO_SEL, "danger");
     if (!provOrden) return notify("Indica el proveedor de la orden", "danger");
     ejecutar(() => api(`/ventas/${ventaId}/crear-orden`, { method: "POST", body: { indices: [...sel], proveedor: provOrden } }), (r) => `✓ Orden ${r.numero} creada a ${r.proveedor_nombre}`);
   };
@@ -91,7 +94,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
           <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td>${txt[l.estado] || l.estado}${l.compras.length ? `<div class="mini">${l.compras.map((c) => h(c.numero)).join(", ")}</div>` : ""}</td></tr>`).join("")}
         </tbody></table></div>`).join("")}
       <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;
-    imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo, { horizontal: true });
+    imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo);
   };
   const excelCuadro = () => descargar(`/ventas/${ventaId}/cuadro-excel`).catch((e) => notify(e.message, "danger"));
   // OK stock: la línea (o parte) sale de bodega; costo $0 para la venta (ya está en gastos generales)
@@ -105,7 +108,12 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   };
   const quitarStock = (l) => ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: 0 } }), "Ya no sale de stock");
   const comprarConOtro = (l) => { setSel(new Set([l.indice])); setTimeout(() => document.getElementById("orden-a")?.focus(), 50); };
-  const pedido = () => descargar(`/ventas/${ventaId}/pedido?proveedor=${encodeURIComponent(provOrden || "")}&indices=${[...sel].join(",")}`).catch((e) => notify(e.message, "danger"));
+  // Solicitud de cotización (PDF) para proveedores nuevos: solo materiales, unidad y cantidad
+  const solicitud = () => {
+    if (!sel.size) return notify("Selecciona los productos para la solicitud de cotización", "danger");
+    descargarPost("/ventas/solicitud-cotizacion", { lineas: marcadas.map((l) => ({ venta_id: ventaId, indice: l.indice })) }).catch((e) => notify(e.message, "danger"));
+  };
+  const pedido = () => !sel.size ? notify(AVISO_SEL, "danger") : descargar(`/ventas/${ventaId}/pedido?proveedor=${encodeURIComponent(provOrden || "")}&indices=${[...sel].join(",")}`).catch((e) => notify(e.message, "danger"));
   const descartar = async () => {
     if (!(await confirmar(`¿Descartar ${borradores.length} orden(es) en borrador (${borradores.map((o) => o.numero).join(", ")})?\nSus productos vuelven a "por comprar".`, { titulo: "Descartar borradores", boton: "Descartar", peligro: true }))) return;
     ejecutar(() => api(`/ventas/${ventaId}/descartar-borradores`, { method: "POST" }), (r) => `✓ Descartadas: ${r.descartadas.join(", ")}`);
@@ -156,16 +164,17 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
           </div>
         )}
 
-        {sel.size > 0 && !anulada && (
+        {!anulada && (
           <div className="panel barra-seleccion">
-            <strong>{sel.size} marcado(s)</strong>
+            {sel.size ? <strong>{sel.size} marcado(s)</strong> : <strong style={{ color: "var(--warn)" }}>{AVISO_SEL} ↓</strong>}
             <button className="btn btn-ghost btn-sm" disabled={ocupado} onClick={asignarMarcadas}>Asignar proveedor…</button>
             <span className="mini">Orden a</span>
             <input id="orden-a" list="cuadro-provs" className="input-mini" value={provOrden} onChange={(e) => setProvOrden(e.target.value.toUpperCase())} style={{ width: 200, padding: "5px 8px" }} />
             <datalist id="cuadro-provs">{data.proveedores.map((p) => <option key={p} value={p} />)}</datalist>
-            <button className="btn btn-primary btn-sm" disabled={ocupado || !provOrden} onClick={crearOrden}>Crear orden</button>
+            <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={crearOrden}>Crear orden</button>
             <button className="btn btn-ghost btn-sm" onClick={pedido}>↓ Pedido (Excel)</button>
-            <button className="link mini" onClick={() => setSel(new Set())}>Quitar marcas</button>
+            <button className="btn btn-ghost btn-sm" title="PDF con los materiales y cantidades, con el encabezado de la empresa, para pedir precio a proveedores nuevos" onClick={solicitud}>↓ Solicitud de cotización (PDF)</button>
+            {sel.size > 0 && <button className="link mini" onClick={() => setSel(new Set())}>Quitar marcas</button>}
           </div>
         )}
 

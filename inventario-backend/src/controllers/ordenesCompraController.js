@@ -96,6 +96,7 @@ const repartir = handler(async (req, res) => {
     const oc = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!oc) throw new ErrorNegocio("Orden no encontrada", 404);
     if (oc.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
+    await OrdenCompra.quitarPagosAutomaticos(oc, t); // contado / crédito empresa: se vuelven a pagar solas por parte
     if (Number(oc.monto_pagado) > 0) throw new ErrorNegocio("La compra ya tiene pagos: repártela antes de pagar, o quita el pago primero");
     const porIndice = new Map((req.body?.items || []).map((x) => [Number(x.indice), x.reparto]));
     const lineas = (oc.items || []).map((it, k) => ({ ...it, reparto: porIndice.get(k) }));
@@ -111,7 +112,7 @@ const repartir = handler(async (req, res) => {
       const o2 = await OrdenCompra.create({
         proveedor_id: oc.proveedor_id, proveedor_nombre: oc.proveedor_nombre, venta_id: v2?.id || null, fecha: oc.fecha, empresa: oc.empresa || v2?.empresa || null,
         items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total, documento: oc.documento, fecha_factura: oc.fecha_factura,
-        estado: oc.estado, fecha_recepcion: oc.fecha_recepcion, fecha_vencimiento: oc.fecha_vencimiento, factura_grupo: grupo,
+        estado: oc.estado, fecha_recepcion: oc.fecha_recepcion, fecha_vencimiento: oc.fecha_vencimiento, factura_grupo: grupo, tipo_pago: oc.tipo_pago,
         notas: `Repartida desde ${oc.numero} (${n + 2} de ${partes.length})`, creado_por: firma(req),
       }, { transaction: t });
       await o2.update({ numero: `C-${String(o2.id).padStart(4, "0")}` }, { transaction: t });
@@ -232,7 +233,10 @@ const registrarFactura = handler(async (req, res) => {
     if (documento && !empresa) throw new ErrorNegocio("Indica qué empresa compra (Kenott o Tactics): el IVA de la factura se descuenta en esa empresa");
     let vence = b.fecha_vencimiento || null;
     if (!vence && fechaFactura) vence = await vencimientoDe(orden.proveedor_id, fechaFactura, t);
-    await orden.update({ documento, fecha_factura: fechaFactura, empresa, fecha_vencimiento: vence || orden.fecha_vencimiento }, { transaction: t });
+    const tipo = ["contado", "credito_empresa", "credito_proveedor"].includes(b.tipo_pago) ? b.tipo_pago : orden.tipo_pago;
+    // Pasa a crédito proveedor: se quitan los pagos automáticos y vuelve a Por pagar
+    if (tipo === "credito_proveedor" && orden.tipo_pago !== "credito_proveedor") await OrdenCompra.quitarPagosAutomaticos(orden, t);
+    await orden.update({ documento, fecha_factura: fechaFactura, empresa, fecha_vencimiento: vence || orden.fecha_vencimiento, tipo_pago: tipo }, { transaction: t });
     return orden;
   });
   res.json({ ok: true, data: oc });

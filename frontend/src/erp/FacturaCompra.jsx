@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
-import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura } from "./lib";
+import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
 // o se crea una compra nueva. Los precios entran al catálogo con la fecha de la factura y el PDF queda en la compra.
@@ -34,7 +34,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
       setEnc({
         proveedor: e.proveedor || orden?.proveedor_nombre || "", documento: e.numero_documento || "", fecha: e.fecha || hoyISO(),
         neto: r.totales.neto, iva: r.totales.iva, total: r.control.precios_incluyen_iva && r.control.total_documento ? r.control.total_documento : r.totales.total,
-        orden_id: orden?.id || "", empresa: orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut,
+        orden_id: orden?.id || "", empresa: orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut, tipo_pago: orden?.tipo_pago || "contado",
       });
       setLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })));
     } catch (e) { notify(e.message, "danger"); }
@@ -123,6 +123,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
             </div>
             <div className="field"><label>N° factura</label><input value={enc.documento} onChange={(e) => setEnc({ ...enc, documento: e.target.value })} /></div>
             <div className="field"><label>Fecha factura</label><input type="date" value={enc.fecha} onChange={(e) => setEnc({ ...enc, fecha: e.target.value })} /></div>
+            <div className="field"><label>Tipo de pago</label><select value={enc.tipo_pago} onChange={(e) => setEnc({ ...enc, tipo_pago: e.target.value })}>{TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
           </div>
           <div className="fields-row tres">
             <div className="field"><label>Neto</label><input type="number" value={enc.neto} onChange={(e) => setEnc({ ...enc, neto: e.target.value })} /></div>

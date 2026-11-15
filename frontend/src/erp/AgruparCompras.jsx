@@ -95,14 +95,20 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
           ls = [...m.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
         }
         return `<div class="grupo"><h2><span>${h(g.k === SIN ? "Sin proveedor elegido" : g.k)}</span><span>${ls.length} prod. · ${fmt(g.total)}</span></h2>
-        <table><colgroup><col style="width:20px"><col><col style="width:45px"><col style="width:45px"><col style="width:72px"><col style="width:170px"><col style="width:80px"><col style="width:85px"><col style="width:110px"></colgroup><thead><tr><th class="chk"></th><th>Producto</th><th>N°</th><th class="num">Cant.</th><th>Unidad</th><th>${porVenta ? "Proveedor" : "De qué ventas"}</th><th class="num">Precio unit.</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>
+        <table><colgroup><col style="width:18px"><col><col style="width:40px"><col style="width:40px"><col style="width:62px"><col style="width:22%"><col style="width:70px"><col style="width:78px"><col style="width:80px"></colgroup><thead><tr><th class="chk"></th><th>Producto</th><th>N°</th><th class="num">Cant.</th><th>Unidad</th><th>${porVenta ? "Proveedor" : "De qué ventas"}</th><th class="num">Precio unit.</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>
         ${ls.map((f) => `<tr><td class="chk">☐</td><td>${h(f.nombre)}${f.no_vino ? `<div class="aviso">no vino en ${h(f.no_vino.orden)}</div>` : ""}</td><td>${h(f.codigo || "")}</td><td class="num">${f.cantidad}</td><td>${h(f.unidad || "")}</td>
           <td>${h(porVenta ? f.proveedor : f.detalle.join(" · "))}</td><td class="num">${f.precio > 0 ? fmt(f.precio) : "sin precio"}</td><td class="num">${fmt(Number(f.precio || 0) * f.cantidad)}</td>
           <td>${TXT[f.estado] || f.estado}${f.ordenes?.length ? `<div class="mini">${h(f.ordenes.join(", "))}</div>` : ""}</td></tr>`).join("")}
         </tbody></table></div>`;
       }).join("")}
       <div class="pie">Total: <strong>${fmt(grupos.reduce((s, g) => s + g.total, 0))}</strong> neto · ${filas.length} línea(s)</div>`;
-    imprimirHTML("Compras agrupadas", cuerpo, { horizontal: true });
+    imprimirHTML("Compras agrupadas", cuerpo);
+  };
+
+  // Solicitud de cotización (PDF) con lo que se ve: se suman productos iguales y la observación interna dice de qué proyecto es
+  const solicitud = () => {
+    if (!filas.length) return notify("No hay productos con esta configuración", "danger");
+    descargarPost("/ventas/solicitud-cotizacion", { lineas: filas.map((f) => ({ venta_id: f.venta_id, indice: f.indice, cantidad: f.cantidad })) }).catch((e) => notify(e.message, "danger"));
   };
 
   // Proveedores con productos por comprar (para crear sus órdenes)
@@ -125,6 +131,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
       footer={<>
         <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
         <button className="btn btn-ghost" onClick={excel}>↓ Excel</button>
+        <button className="btn btn-ghost" title="PDF solo con materiales y cantidades, con el encabezado de la empresa de cada venta" onClick={solicitud}>↓ Solicitud de cotización (PDF)</button>
         <button className="btn btn-primary" disabled={!provsFalta.length || ocupado} onClick={() => setCrear(new Set())}>Crear órdenes…</button>
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>

@@ -443,4 +443,75 @@ async function excelInterno(cot, params, precioVenta) {
 // Nombre visible y de archivo: Cotizacion_KENOTT_N100  (las de antes del cambio: "Kenott N276 (anterior)")
 const idCotizacion = (cot) => `Cotizacion_${String(cot.empresa || "kenott").toUpperCase()}_N${cot.numero}`;
 
-module.exports = { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion, PLAZO_DEFECTO };
+// Solicitud de cotización a proveedores: solo materiales, unidad y cantidad (sin precios, sin proveedor, sin ID).
+// grupos: [{ emp, proyectos: [nombre], lineas: [{ nombre, unidad, cantidad, obs }] }] -> una sección por empresa (página aparte)
+function pdfSolicitud(grupos, destino) {
+  const doc = new PDFDocument({ size: "LETTER", margins: { top: 30, bottom: 30, left: 36, right: 36 }, bufferPages: true, info: { Title: "Solicitud de cotización" } });
+  doc.pipe(destino);
+  const X = 36;
+  const W = doc.page.width - 72;
+  grupos.forEach((g, gi) => {
+    if (gi > 0) doc.addPage();
+    const emp = g.emp;
+    const clave = emp.clave === "tactics" ? "tactics" : "kenott";
+    const fmt = FORMATOS[clave];
+    const COLOR = `#${fmt.color}`; const CLARO = `#${fmt.claro}`; const LINEA = `#${fmt.linea}`; const BORDE = `#${BORDE_TABLA}`;
+    const conObs = g.lineas.some((l) => l.obs);
+    const col = conObs
+      ? [{ t: "N°", w: W * 0.06, a: "center" }, { t: "Material", w: W * 0.5, a: "left" }, { t: "Unidad", w: W * 0.1, a: "center" }, { t: "Cantidad", w: W * 0.1, a: "center" }, { t: "Observación interna", w: W * 0.24, a: "left" }]
+      : [{ t: "N°", w: W * 0.07, a: "center" }, { t: "Material", w: W * 0.65, a: "left" }, { t: "Unidad", w: W * 0.14, a: "center" }, { t: "Cantidad", w: W * 0.14, a: "center" }];
+    const cabecera = () => {
+      doc.fillColor(COLOR).font("Helvetica-Bold").fontSize(14).text(emp.nombre, X, 36, { lineBreak: false });
+      if (clave === "tactics") doc.moveTo(X, 56).lineTo(X + 270, 56).lineWidth(2).strokeColor(LINEA).stroke();
+      doc.fillColor("black").font("Helvetica").fontSize(8.5);
+      let y = clave === "tactics" ? 64 : 58;
+      lineasEmpresa(clave, emp).forEach((t) => { doc.text(t, X, y, { width: 290 }); y = doc.y + 3; });
+      if (emp.logo && fs.existsSync(emp.logo)) {
+        if (clave === "tactics") doc.image(emp.logo, X + W - 185, 46, { width: 180 });
+        else doc.image(emp.logo, X + W - 150, 32, { height: 100 });
+      }
+      const yl = Math.max(y + 2, clave === "tactics" ? 140 : 136);
+      if (clave === "tactics") doc.moveTo(X, yl).lineTo(X + W, yl).lineWidth(2).strokeColor(LINEA).stroke();
+      return yl + 8;
+    };
+    const encabezadoTabla = (y) => {
+      let x = X;
+      col.forEach((c) => {
+        doc.rect(x, y, c.w, 20).fillAndStroke(COLOR, BORDE);
+        doc.fillColor("white").font("Helvetica-Bold").fontSize(8.5).text(c.t, x + 4, y + 6, { width: c.w - 8, align: c.a });
+        x += c.w;
+      });
+      return y + 20;
+    };
+    let y = cabecera();
+    const altoTit = clave === "tactics" ? 20 : 24;
+    doc.rect(X, y, W, altoTit).fill(COLOR);
+    doc.fillColor("white").font("Helvetica-Bold").fontSize(clave === "tactics" ? 12 : 13.5).text("SOLICITUD DE COTIZACIÓN", X, y + (altoTit - 12) / 2 + 1, { width: W, align: "center" });
+    y += altoTit + 8;
+    const proy = `${g.proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${g.proyectos.join(" · ") || "—"}`;
+    doc.font("Helvetica").fontSize(9);
+    const altoP = Math.max(34, doc.heightOfString(proy, { width: W - 150 }) + 14);
+    doc.rect(X, y, W, altoP).fill(CLARO);
+    doc.lineWidth(1.2).strokeColor(COLOR).rect(X, y, W, altoP).stroke();
+    doc.fillColor("black").font("Helvetica-Bold").fontSize(9).text(proy, X + 6, y + 7, { width: W - 150 });
+    doc.font("Helvetica").text(`Fecha: ${new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}`, X + W - 140, y + 7, { width: 134, align: "right" });
+    y += altoP + 10;
+    y = encabezadoTabla(y);
+    g.lineas.forEach((l, k) => {
+      const vals = [String(k + 1), l.nombre || "", l.unidad || "", String(l.cantidad), ...(conObs ? [l.obs || ""] : [])];
+      doc.font("Helvetica").fontSize(8.5);
+      const alto = Math.max(17, ...vals.map((v, i) => doc.heightOfString(v, { width: col[i].w - 8 }) + 8));
+      if (y + alto > doc.page.height - 50) { doc.addPage(); y = encabezadoTabla(cabecera()); }
+      let x = X;
+      vals.forEach((v, i) => {
+        doc.lineWidth(0.6).strokeColor(BORDE).rect(x, y, col[i].w, alto).stroke();
+        doc.fillColor(i === 4 ? "#555555" : "black").font("Helvetica").fontSize(i === 4 ? 7.5 : 8.5).text(v, x + 4, y + 4, { width: col[i].w - 8, align: col[i].a });
+        x += col[i].w;
+      });
+      y += alto;
+    });
+  });
+  doc.end();
+}
+
+module.exports = { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion, pdfSolicitud, PLAZO_DEFECTO };

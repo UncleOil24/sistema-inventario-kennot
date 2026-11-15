@@ -17,6 +17,7 @@ const Venta = sequelize.define("Venta", {
   empresa: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "kenott" }, // kenott | tactics
   id_solicitud: { type: DataTypes.STRING(60), allowNull: true }, // ID del cliente o de la solicitud (viene de la cotización)
   orden_compra_cliente: { type: DataTypes.STRING(60), allowNull: true }, // N° OC que envía el cliente
+  oc_pendiente: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // se sabe que viene la OC, pero aún no llega
   fecha: { type: DataTypes.DATEONLY, allowNull: false, defaultValue: DataTypes.NOW },
   fecha_vencimiento: { type: DataTypes.DATEONLY, allowNull: true },
   // Plazo de pago (se copia del cliente): el vencimiento se cuenta desde la factura o desde la recepción conforme
