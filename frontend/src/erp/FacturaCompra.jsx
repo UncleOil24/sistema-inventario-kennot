@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -36,7 +36,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
         neto: r.totales.neto, iva: r.totales.iva, total: r.control.precios_incluyen_iva && r.control.total_documento ? r.control.total_documento : r.totales.total,
         orden_id: orden?.id || "", empresa: orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut,
       });
-      setLineas(r.lineas.map((l) => ({ ...l, omitir: false, accion: l.producto ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })));
+      setLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })));
     } catch (e) { notify(e.message, "danger"); }
     finally { setLeyendo(false); }
   };
@@ -55,6 +55,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
           lineas: activas.map((l) => ({
             producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
             descripcion: l.descripcion, cantidad: Number(l.cantidad), precio: Number(l.precio_neto), unidad: l.unidad, marca: l.marca, calce: l.calce,
+            reparto: repartoParaEnviar(l),
           })),
         },
       });
@@ -72,6 +73,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
         <div className="mini">
           Compra <strong>{resultado.orden.numero}</strong> recibida con la factura {resultado.orden.documento} · {resultado.precios} precios al catálogo (fecha de la factura)
           {resultado.productos_nuevos ? ` · ${resultado.productos_nuevos} productos nuevos en POR CLASIFICAR` : ""}{gasto ? " · el gasto se reemplazó por esta compra" : ""}.
+          {resultado.reparto?.length > 1 && <div>Repartida entre ventas: {resultado.reparto.map((p) => `${p.numero} ${fmt(p.total)}`).join(" · ")} (misma factura, se paga junta).</div>}
+          {resultado.no_vinieron?.length > 0 && <div style={{ color: "var(--danger)" }}>No vino: {resultado.no_vinieron.map((x) => `${x.nombre} (${x.cantidad})`).join(", ")}. Vuelve a "por comprar" en el cuadro de su venta.</div>}
         </div>
         {resultado.alzas.length > 0 && (
           <div className="aviso" style={{ marginTop: 8 }}>
@@ -144,6 +147,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
             {res.control.cuadra === true && <span className="estado estado-ok">✓ La suma de las líneas cuadra con el total de la factura</span>}
             {res.control.cuadra === false && <span className="estado estado-warn">⚠ La suma de las líneas ({fmt(res.control.suma_lineas)}) no cuadra con la factura ({fmt(res.control.total_documento)}): revisa</span>}
           </div>
+          {res.ya_registrada?.length > 0 && <div className="aviso" style={{ color: "var(--danger)" }}>⚠ Este documento ya está registrado: {res.ya_registrada.map((o) => o.numero).join(", ")}. Revisa antes de guardarlo otra vez.</div>}
           {res.orden && res.faltan.length > 0 && <div className="aviso">En la compra {res.orden.numero} y no en la factura: {res.faltan.map((f) => `${f.nombre} (${f.cantidad})`).join(" · ")}</div>}
           {res.truncado && <div className="aviso">La factura es muy larga y la lectura pudo quedar incompleta.</div>}
           <div className="table-wrap">
@@ -165,6 +169,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => set(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
+                      <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} />
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
                         <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
                           <button className="link" onClick={() => set(l.i, { cantidad: e.cantidad, precio_neto: e.precio, envase_ok: true })}>Convertir</button>{" · "}

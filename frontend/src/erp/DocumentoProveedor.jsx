@@ -31,7 +31,8 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
         razon_social: e.razon_social, rut: e.rut,
       });
       setLineas(r.lineas.map((l, i) => ({
-        ...l, i, omitir: false,
+        // Mismo precio que el último de este proveedor: ya está cargado (queda desmarcado)
+        ...l, i, omitir: !!l.ya_cargado,
         accion: l.producto ? "existente" : "nuevo",
         nuevo: { nombre: l.descripcion.toUpperCase(), categoria: categorias[0]?.categoria || "GENERAL", unidad: (l.unidad || "UNIDAD").toUpperCase() },
       })));
@@ -48,8 +49,9 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
       const r = await api("/ia/documento-proveedor/aprobar", {
         method: "POST",
         body: {
-          ...enc,
+          ...enc, hash: res.hash, archivo: res.archivo,
           lineas: activas.map((l) => ({
+            antes: l.anterior?.precio ?? null,
             producto_id: l.accion === "existente" ? l.producto.id : null,
             nuevo: l.accion === "nuevo" ? l.nuevo : null,
             precio: Number(l.precio_neto), descripcion_proveedor: l.descripcion, marca: l.marca, unidad: l.unidad,
@@ -85,7 +87,7 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{activas.length} de {lineas.length} líneas se guardarán</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || guardando} onClick={aprobar}>{guardando ? "Guardando..." : "Aprobar y guardar precios"}</button>
+        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || guardando} onClick={aprobar}>{guardando ? "Guardando..." : lineas.some((l) => l.ya_cargado) ? "Aplicar solo lo que cambió" : "Aprobar y guardar precios"}</button>
       </> : <>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={!archivo || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo con Claude...</> : "Leer documento"}</button>
@@ -106,6 +108,18 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
             <div className="field"><label>N° documento</label><input value={enc.documento} onChange={(e) => setEnc({ ...enc, documento: e.target.value })} /></div>
             <div className="field"><label>Fecha</label><input type="date" value={enc.fecha} onChange={(e) => setEnc({ ...enc, fecha: e.target.value })} /></div>
           </div>
+          {(() => {
+            const rep = res.repetido; const ya = lineas.filter((l) => l.ya_cargado).length; const cambian = lineas.filter((l) => l.anterior && !l.ya_cargado).length;
+            if (!rep && !ya) return null;
+            return (
+              <div className="aviso" style={{ borderColor: rep ? "var(--danger)" : undefined }}>
+                {rep?.motivo === "archivo" && <div>⚠ <strong>Este archivo ya se subió</strong> el {new Date(rep.fecha).toLocaleDateString("es-CL")}{rep.usuario ? ` por ${rep.usuario}` : ""} ({rep.proveedor}{rep.documento ? `, N° ${rep.documento}` : ""}).</div>}
+                {rep?.motivo === "numero" && <div>⚠ <strong>Ya está cargado</strong> el documento N° {rep.documento} de {rep.proveedor}{rep.fecha ? ` (${new Date(rep.fecha).toLocaleDateString("es-CL")}${rep.usuario ? `, ${rep.usuario}` : ""})` : ""}.</div>}
+                {rep?.motivo === "precios" && <div>⚠ <strong>Parece repetido:</strong> {rep.iguales} de {rep.total} productos ya tienen este mismo precio de {rep.proveedor}.</div>}
+                {ya > 0 && <div>{ya} línea(s) con el mismo precio quedaron desmarcadas ("ya cargado"){cambian ? `; ${cambian} traen otro monto y quedan marcadas` : ""}. Se guarda solo lo marcado.</div>}
+              </div>
+            );
+          })()}
           <div className="pago-form">
             <label className="check"><input type="checkbox" checked={enc.origen === "web"} onChange={(e) => setEnc({ ...enc, origen: e.target.checked ? "web" : "proveedor" })} />Es tienda web</label>
             {res.control.precios_incluyen_iva && <span className="estado estado-info">Precios venían con IVA: ya se dividieron por 1,19</span>}
@@ -123,7 +137,9 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
                   return (
                     <tr key={l.i} className={l.omitir ? "fila-anulada" : alerta ? "fila-alerta" : ""}>
                       <td><input type="checkbox" checked={!l.omitir} onChange={(e) => set(l.i, { omitir: !e.target.checked })} title="Incluir" /></td>
-                      <td>{l.descripcion}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div></td>
+                      <td>{l.descripcion}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div>
+                        {l.ya_cargado && <div className="mini"><span className="estado estado-neutral">ya cargado</span> {fmt(l.anterior.precio)}{l.anterior.documento ? ` · ${l.anterior.documento}` : ""}</div>}
+                        {l.anterior && !l.ya_cargado && <div className="mini" style={{ color: "var(--warn)" }}>cambió: antes {fmt(l.anterior.precio)} → ahora {fmt(l.precio_neto)}</div>}</td>
                       <td className="mini">{l.cantidad}</td>
                       <td><input className="qty-input" style={{ width: 90 }} type="number" value={l.precio_neto} onChange={(e) => set(l.i, { precio_neto: e.target.value })} /></td>
                       <td><Estado valor={l.accion === "nuevo" ? "sin_producto" : l.calce} />{l.nota && <div className="mini" style={{ maxWidth: 180 }}>{l.nota}</div>}</td>

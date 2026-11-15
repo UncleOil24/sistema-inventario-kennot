@@ -12,6 +12,7 @@ const { handler, ErrorNegocio } = require("../services/erp");
 const { recalcular, origenDe, normProv, registrar } = require("../services/precios");
 const { unidadDeProducto } = require("../services/unidades");
 const ia = require("../services/ia");
+const { pendientesPorProducto, repartoInicial, dividir } = require("../services/repartoCompra");
 
 // "Subir factura de compra" (Operativo): Claude lee la factura del proveedor, se compara con nuestra compra
 // (C-0001...) o se crea una compra nueva, y los precios entran al catálogo con la fecha de la factura.
@@ -61,7 +62,7 @@ const leer = handler(async (req, res) => {
   if (ordenId && !orden) throw new ErrorNegocio("Compra no encontrada", 404);
   // Subida desde el cuadro de compra de una venta: cada producto se calza con las líneas de la venta
   const ventaId = Number(req.body?.venta_id) || null;
-  const venta = ventaId ? await Venta.findByPk(ventaId, { attributes: ["id", "numero", "items", "empresa"] }) : null;
+  const venta = ventaId ? await Venta.findByPk(ventaId, { attributes: ["id", "numero", "items", "empresa", "cliente_nombre"] }) : null;
   const usadosVenta = new Set();
 
   const ver = (p) => (p ? { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor } : null);
@@ -93,6 +94,17 @@ const leer = handler(async (req, res) => {
       alza: antes > 0 && precio > antes * (1 + ALZA) ? Math.round((precio / antes - 1) * 100) : null,
     };
   });
+  // Qué ventas necesitan cada producto (primero la venta desde la que se sube, después las más antiguas) y reparto propuesto
+  const pend = await pendientesPorProducto(lineas.map((l) => l.producto?.id), ventaId, { excluirOrdenId: orden?.id || null });
+  for (const l of lineas) {
+    l.ventas_pendientes = l.producto ? pend.get(l.producto.id) || [] : [];
+    l.reparto = repartoInicial(l.cantidad, l.ventas_pendientes, ventaId || orden?.venta_id || null);
+    // La venta desde donde se sube aparece con su número aunque no necesite el producto (compra extra)
+    for (const r of l.reparto) if (r.venta_id && !l.ventas_pendientes.some((c) => c.venta_id === r.venta_id)) {
+      const v = r.venta_id === venta?.id ? venta : await Venta.findByPk(r.venta_id, { attributes: ["id", "numero", "cliente_nombre"] });
+      l.ventas_pendientes = [...l.ventas_pendientes, { venta_id: r.venta_id, numero: v?.numero || `venta ${r.venta_id}`, cliente: v?.cliente_nombre || null, falta: 0 }];
+    }
+  }
   const faltan = orden ? orden.items.filter((_, j) => !usados.has(j)).map((it) => ({ nombre: it.nombre, cantidad: Number(it.cantidad), precio: Number(it.precio) })) : [];
 
   // Proveedor y compras pendientes del mismo proveedor (para asociar la factura)
@@ -102,6 +114,10 @@ const leer = handler(async (req, res) => {
   const donde = venta
     ? { estado: "borrador", [Op.or]: [{ venta_id: venta.id }, ...(prov ? [{ proveedor_id: prov.id }] : [])] }
     : prov ? { proveedor_id: prov.id, estado: "borrador" } : null;
+  // ¿Ya está registrada? (mismo proveedor y mismo N° de documento)
+  const folioDoc = String(e.numero_documento || "").trim();
+  const yaRegistrada = prov && folioDoc ? await OrdenCompra.findAll({ where: { proveedor_id: prov.id, estado: { [Op.ne]: "anulada" },
+    documento: { [Op.in]: [folioDoc, `BOL ${folioDoc}`] } }, attributes: ["id", "numero", "fecha_factura", "venta_id", "total"], raw: true }) : [];
   const sugeridas = !orden && donde ? await OrdenCompra.findAll({ where: donde, attributes: ["id", "numero", "fecha", "total", "venta_id", "proveedor_nombre"], order: [["id", "DESC"]], limit: 15, raw: true }) : [];
   const neto = lineas.reduce((s, l) => s + Math.round(l.precio_neto * l.cantidad), 0);
   res.json({
@@ -110,7 +126,7 @@ const leer = handler(async (req, res) => {
       archivo_token: guardarPendiente(req.file), archivo: req.file.originalname,
       encabezado: { ...e, proveedor: prov?.nombre || e.proveedor },
       proveedor_existente: prov ? { id: prov.id, nombre: prov.nombre } : null,
-      control: r.control, truncado: r.truncado, lineas, faltan, sugeridas,
+      control: r.control, truncado: r.truncado, lineas, faltan, sugeridas, ya_registrada: yaRegistrada,
       totales: { neto, iva: Math.round(neto * 0.19), total: neto + Math.round(neto * 0.19) },
       orden: orden ? { id: orden.id, numero: orden.numero, total: Number(orden.total), estado: orden.estado, documento: orden.documento } : null,
       venta: venta ? { id: venta.id, numero: venta.numero, empresa: venta.empresa } : null,
@@ -162,6 +178,7 @@ const registrarFactura = handler(async (req, res) => {
       items.push({ p, l });
     }
     const itemsOrden = items.map(({ p, l }) => ({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: Number(l.cantidad), precio: Math.round(Number(l.precio)) }));
+    const repartos = items.map(({ l }) => l.reparto);
     const netoLineas = itemsOrden.reduce((s, i) => s + i.precio * i.cantidad, 0);
     let neto = Number(b.neto) > 0 ? Math.round(Number(b.neto)) : netoLineas;
     let iva = Number(b.iva) >= 0 && b.iva !== "" && b.iva != null ? Math.round(Number(b.iva)) : Math.round(neto * 0.19);
@@ -170,13 +187,18 @@ const registrarFactura = handler(async (req, res) => {
     if (boleta) { neto = total; iva = 0; }
     const vence = sumarDias(fecha, ficha.plazo_pago_dias || 0);
 
-    // Compra: la que ya existía (se completa con la factura y queda recibida) o una nueva
+    // Reparto entre ventas: una compra por venta (mismo N° de factura). La parte principal es la de la orden o la venta desde donde se sube.
     let orden;
-    const ventaId = Number(b.venta_id) || null;
-    const venta = ventaId ? await Venta.findByPk(ventaId, { transaction: t, attributes: ["id", "empresa"] }) : null;
+    const ordenPrevia = b.orden_id ? await OrdenCompra.findByPk(b.orden_id, { transaction: t, lock: t.LOCK.UPDATE }) : null;
+    const ventaBase = Number(b.venta_id) || ordenPrevia?.venta_id || null;
+    const partes = dividir(itemsOrden.map((it, k) => ({ ...it, reparto: repartos[k] })), { neto, iva, total, principal: ventaBase, ventaPorDefecto: ventaBase });
+    const p0 = partes[0];
+    const ventaId = p0.venta_id;
+    const venta = ventaId ? await Venta.findByPk(ventaId, { transaction: t, attributes: ["id", "empresa", "numero"] }) : null;
     const empresa = ["kenott", "tactics"].includes(b.empresa) ? b.empresa : venta?.empresa || null;
+    const nota = partes.length > 1 ? ` (1 de ${partes.length})` : "";
     if (b.orden_id) {
-      orden = await OrdenCompra.findByPk(b.orden_id, { transaction: t, lock: t.LOCK.UPDATE });
+      orden = ordenPrevia;
       if (!orden) throw new ErrorNegocio("Compra no encontrada", 404);
       if (orden.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
       // Lo pedido que no vino en la factura (sin stock o vino menos): vuelve a "por comprar" en el cuadro de la venta
@@ -192,20 +214,38 @@ const registrarFactura = handler(async (req, res) => {
       resumen.no_vinieron = noVinieron;
       await orden.update({
         no_vinieron: noVinieron.length ? noVinieron : null,
-        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: itemsOrden, subtotal: neto, iva, total,
+        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total,
         documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa: empresa || orden.empresa,
         estado: "recibida", fecha_recepcion: orden.fecha_recepcion || new Date(),
         fecha_vencimiento: orden.fecha_vencimiento || vence,
-        ...(venta ? { venta_id: venta.id } : {}),
+        venta_id: venta ? venta.id : orden.venta_id,
       }, { transaction: t });
     } else {
       orden = await OrdenCompra.create({
         proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: venta?.id || null, fecha,
-        items: itemsOrden, subtotal: neto, iva, total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa,
+        items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa,
         estado: "recibida", fecha_recepcion: new Date(), fecha_vencimiento: vence,
-        notas: b.gasto_id ? "Registrada desde Gastos (compra de materiales)" : `Registrada desde la ${boleta ? "boleta" : "factura"} del proveedor`, creado_por: usuario,
+        notas: (b.gasto_id ? "Registrada desde Gastos (compra de materiales)" : `Registrada desde la ${boleta ? "boleta" : "factura"} del proveedor`) + nota, creado_por: usuario,
       }, { transaction: t });
       await orden.update({ numero: numeroCompra(orden.id) }, { transaction: t });
+    }
+    // Las otras partes: una compra por venta (o sin venta), con el mismo documento
+    const otras = [];
+    if (partes.length > 1) {
+      const grupo = `F${orden.id}`;
+      await orden.update({ factura_grupo: grupo }, { transaction: t });
+      for (const [n, pt] of partes.slice(1).entries()) {
+        const v2 = pt.venta_id ? await Venta.findByPk(pt.venta_id, { transaction: t, attributes: ["id", "empresa", "numero"] }) : null;
+        const o2 = await OrdenCompra.create({
+          proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v2?.id || null, fecha,
+          items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha,
+          empresa: empresa || v2?.empresa || null, estado: "recibida", fecha_recepcion: new Date(), fecha_vencimiento: vence, factura_grupo: grupo,
+          notas: `${doc} repartida entre ventas (${n + 2} de ${partes.length})`, creado_por: usuario,
+        }, { transaction: t });
+        await o2.update({ numero: numeroCompra(o2.id) }, { transaction: t });
+        otras.push(o2);
+      }
+      resumen.reparto = [orden, ...otras].map((o, k) => ({ numero: o.numero, venta_id: o.venta_id, total: Number(o.total), parte: k + 1 }));
     }
 
     // Precios al catálogo con la fecha de la factura
@@ -231,7 +271,7 @@ const registrarFactura = handler(async (req, res) => {
     // PDF guardado en la compra
     const archivo = b.archivo_token ? pendientes.get(b.archivo_token) : null;
     if (archivo) {
-      await DocumentoCompra.create({ orden_id: orden.id, folio, fecha, monto: total, nombre_archivo: archivo.nombre, mime: archivo.mime, datos: archivo.buf, creado_por: usuario }, { transaction: t });
+      for (const o of [orden, ...otras]) await DocumentoCompra.create({ orden_id: o.id, folio, fecha, monto: total, nombre_archivo: archivo.nombre, mime: archivo.mime, datos: archivo.buf, creado_por: usuario }, { transaction: t });
       pendientes.delete(b.archivo_token);
     }
     return { orden, resumen };

@@ -21,6 +21,7 @@ router.get("/:id/cuadro-compra", operativo, c.getCuadroCompra);
 router.post("/:id/cambiar-proveedor", operativo, c.cambiarProveedorLinea);
 router.post("/:id/generar-ordenes", operativo, c.generarOrdenes);
 router.post("/:id/asignar", operativo, c.asignarProveedores);
+router.post("/:id/stock", operativo, c.marcarStock);
 router.post("/:id/crear-orden", operativo, c.crearOrdenVenta);
 router.post("/:id/descartar-borradores", operativo, c.descartarBorradores);
 router.get("/:id/pedido", operativo, c.pedidoExcel);

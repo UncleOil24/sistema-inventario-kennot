@@ -4,6 +4,11 @@ const PrecioProveedor = require("../models/PrecioProveedor");
 const Proveedor = require("../models/Proveedor");
 const { vigentesPorProveedor, normProv, REFERENCIA } = require("./precios");
 
+// Cantidad de la línea que se cubre con stock de bodega (comprado antes, va en gastos generales: costo $0 para la venta)
+const stockDe = (i) => Math.min(Number(i?.stock?.cantidad) || 0, Number(i?.cantidad) || 0);
+// Costo de compra de la venta: lo de stock no suma
+const costoItems = (items) => (items || []).reduce((s, x) => s + Number(x.costo || 0) * Math.max(0, Number(x.cantidad || 0) - stockDe(x)), 0);
+
 const TOLERANCIA = 0.10; // "Menos proveedores": se junta en un proveedor si cuesta hasta 10% más que el más barato
 const SIN = "SIN PROVEEDOR";
 
@@ -83,14 +88,17 @@ function estadoLineas(items, ordenes) {
     }
   }
   return items.map((i) => {
-    const necesita = Number(i.cantidad) || 0;
+    // Lo que se cubre con stock de bodega no se compra
+    const stock = stockDe(i);
+    const necesita = Math.max(0, (Number(i.cantidad) || 0) - stock);
+    if (stock > 0 && necesita === 0) return { estado: "stock", recibido: 0, pedido: 0, stock, compras: docs.get(i.producto_id) || [] };
     const r = recibido.get(i.producto_id) || 0;
     const p = pedido.get(i.producto_id) || 0;
     const usaR = Math.min(r, necesita); recibido.set(i.producto_id, r - usaR);
     const usaP = Math.min(p, necesita - usaR); pedido.set(i.producto_id, p - usaP);
     const estado = usaR >= necesita && necesita > 0 ? "comprado" : usaR + usaP >= necesita && necesita > 0 ? "pedido" : usaR + usaP > 0 ? "parcial" : "por_comprar";
-    return { estado, recibido: usaR, pedido: usaP, compras: docs.get(i.producto_id) || [] };
+    return { estado, recibido: usaR, pedido: usaP, stock, compras: docs.get(i.producto_id) || [] };
   });
 }
 
-module.exports = { opcionesPorProducto, sugerir, estadoLineas, TOLERANCIA, SIN };
+module.exports = { opcionesPorProducto, sugerir, estadoLineas, stockDe, costoItems, TOLERANCIA, SIN };

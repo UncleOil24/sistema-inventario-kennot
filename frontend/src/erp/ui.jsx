@@ -353,3 +353,44 @@ export const modoPedido = async (items) => {
   return elegir("¿Qué líneas van en el pedido?\nEl Excel sale sin nuestros valores, con una hoja General y una hoja por especialidad (pinturas, eléctrico, gasfitería...).",
     [{ valor: "todas", texto: `Todas las líneas (${tot})` }, { valor: "sin_precio", texto: `Solo sin precio (${sin})` }], { titulo: "Pedido a proveedor" });
 };
+
+// Reparto de una línea de factura entre ventas (la misma factura puede cubrir productos de varias ventas).
+// l.ventas_pendientes: [{ venta_id, numero, cliente, falta }]; l.reparto: [{ venta_id | null, cantidad }]
+export function RepartoLinea({ l, onChange }) {
+  if (!l.producto || l.producto.id !== l.reparto_de) return null;
+  const cands = [...(l.ventas_pendientes || [])];
+  for (const r of l.reparto || []) if (r.venta_id && !cands.some((c) => c.venta_id === r.venta_id)) cands.push({ venta_id: r.venta_id, numero: `venta ${r.venta_id}`, falta: 0 });
+  if (!cands.length) return <div className="mini" style={{ color: "var(--warn)" }}>Ninguna venta en curso lo necesita: queda como compra sin venta</div>;
+  const cant = Number(l.cantidad) || 0;
+  const de = (vid) => Number((l.reparto || []).find((r) => r.venta_id === vid)?.cantidad || 0);
+  const suma = cands.reduce((s, c) => s + de(c.venta_id), 0);
+  const sin = cant - suma;
+  const cambiar = (vid, v) => {
+    const otros = (l.reparto || []).filter((r) => r.venta_id !== vid && r.venta_id);
+    onChange([...otros, { venta_id: vid, cantidad: Math.max(0, Number(v) || 0) }].filter((r) => r.cantidad > 0));
+  };
+  const sencillo = cands.length === 1 && de(cands[0].venta_id) === cant;
+  return (
+    <div className="mini reparto-linea">
+      {sencillo ? <>→ {cands[0].numero}{cands[0].cliente ? ` · ${cands[0].cliente}` : ""}</> : <>
+        <span>Para:</span>
+        {cands.map((c) => (
+          <label key={c.venta_id} title={c.cliente || ""}>{c.numero}{c.falta ? ` (falta ${c.falta})` : ""}
+            <input type="number" min="0" className="qty-input" style={{ width: 56 }} value={de(c.venta_id)} onChange={(e) => cambiar(c.venta_id, e.target.value)} /></label>
+        ))}
+        {sin > 0 && <span>· sin venta: {sin}</span>}
+        {sin < 0 && <span style={{ color: "var(--danger)" }}>· reparte {suma} y la línea trae {cant}</span>}
+      </>}
+    </div>
+  );
+}
+// Reparto que se manda al registrar (lo que no se asignó queda sin venta)
+export const repartoParaEnviar = (l) => {
+  if (!l.producto || l.producto.id !== l.reparto_de || !(l.reparto || []).length) return undefined;
+  const cant = Number(l.cantidad) || 0;
+  const r = (l.reparto || []).filter((x) => Number(x.cantidad) > 0).map((x) => ({ venta_id: x.venta_id, cantidad: Number(x.cantidad) }));
+  const suma = r.reduce((s, x) => s + x.cantidad, 0);
+  if (suma > cant) return undefined;
+  if (suma < cant) r.push({ venta_id: null, cantidad: cant - suma });
+  return r;
+};

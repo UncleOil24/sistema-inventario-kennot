@@ -7,7 +7,7 @@ import SubirDocumentosVenta from "./SubirDocumentosVenta";
 // El sistema sugiere ("más barato" o "menos proveedores", hasta 10% más caro para juntar), tú eliges, y las órdenes
 // se crean solo cuando las pides. Las facturas y boletas se suben todas juntas y quedan con el proveedor real.
 const ESTADO_LINEA = {
-  por_comprar: ["Por comprar", "warn"], pedido: ["Pedido", "info"], parcial: ["Parcial", "warn"], comprado: ["Comprado", "ok"],
+  por_comprar: ["Por comprar", "warn"], pedido: ["Pedido", "info"], parcial: ["Parcial", "warn"], comprado: ["Comprado", "ok"], stock: ["Stock", "neutral"],
 };
 
 export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAdmin }) {
@@ -82,18 +82,28 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     for (const l of lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
     const prov = [...grupos.entries()].sort((a, b) => (a[0] === "SIN PROVEEDOR") - (b[0] === "SIN PROVEEDOR") || a[0].localeCompare(b[0]));
     const contacto = Object.fromEntries((data.resumen_proveedores || []).map((p) => [p.proveedor, p.contacto]));
-    const txt = { por_comprar: "Por comprar", pedido: "Pedido", parcial: "Parcial", comprado: "Comprado" };
+    const txt = { por_comprar: "Por comprar", pedido: "Pedido", parcial: "Parcial", comprado: "Comprado", stock: "Stock" };
     const cuerpo = `<h1>Cuadro de compra · ${h(venta.numero)} · ${h(venta.cliente_nombre || "Sin cliente")}</h1>
       <div class="sub">${[venta.orden_compra_cliente ? `OC ${h(venta.orden_compra_cliente)}` : "", venta.id_solicitud ? `ID ${h(venta.id_solicitud)}` : "", `impreso el ${new Date().toLocaleDateString("es-CL")}`].filter(Boolean).join(" · ")}</div>
       ${prov.map(([p, ls]) => `<div class="grupo"><h2><span>${h(p === "SIN PROVEEDOR" ? "Sin proveedor elegido" : p)}${contacto[p] ? ` <span class="mini">· ${h(contacto[p])}</span>` : ""}</span><span>${ls.length} prod. · ${fmt(ls.reduce((s2, l) => s2 + l.total_compra, 0))}</span></h2>
         <table><colgroup><col style="width:20px"><col><col style="width:50px"><col style="width:45px"><col style="width:72px"><col style="width:80px"><col style="width:85px"><col style="width:110px"></colgroup><thead><tr><th class="chk"></th><th>Producto</th><th>N°</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Precio unit.</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>
-        ${ls.map((l) => `<tr><td class="chk">☐</td><td>${h(l.nombre)}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}</td><td>${h(l.codigo || "")}</td><td class="num">${l.cantidad}</td><td>${h(l.unidad || "")}</td>
+        ${ls.map((l) => `<tr${l.estado === "stock" ? ' style="text-decoration:line-through;color:#777"' : ""}><td class="chk">${l.estado === "stock" ? "✓" : "☐"}</td><td>${h(l.nombre)}${l.stock > 0 && l.estado !== "stock" ? `<div class="mini">${l.stock} de stock · comprar ${l.cantidad - l.stock}</div>` : ""}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}</td><td>${h(l.codigo || "")}</td><td class="num">${l.cantidad}</td><td>${h(l.unidad || "")}</td>
           <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td>${txt[l.estado] || l.estado}${l.compras.length ? `<div class="mini">${l.compras.map((c) => h(c.numero)).join(", ")}</div>` : ""}</td></tr>`).join("")}
         </tbody></table></div>`).join("")}
       <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;
     imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo, { horizontal: true });
   };
   const excelCuadro = () => descargar(`/ventas/${ventaId}/cuadro-excel`).catch((e) => notify(e.message, "danger"));
+  // OK stock: la línea (o parte) sale de bodega; costo $0 para la venta (ya está en gastos generales)
+  const okStock = async (l) => {
+    const falta = Math.max(0, l.cantidad - (l.stock || 0) - (l.recibido || 0) - (l.pedido || 0)) + (l.stock || 0);
+    const r = await pedirTexto(`¿Cuántos de "${l.nombre}" salen de stock? (pide ${l.cantidad} ${l.unidad || ""})`, { titulo: "OK stock", valor: String(falta || l.cantidad) });
+    if (r == null) return;
+    const n = Number(String(r).replace(",", "."));
+    if (!(n > 0) || n > l.cantidad) return notify(`Cantidad entre 1 y ${l.cantidad}`, "danger");
+    ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: n } }), n < l.cantidad ? `${n} de stock: faltan ${l.cantidad - n} por comprar` : "✓ Sale de stock");
+  };
+  const quitarStock = (l) => ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: 0 } }), "Ya no sale de stock");
   const comprarConOtro = (l) => { setSel(new Set([l.indice])); setTimeout(() => document.getElementById("orden-a")?.focus(), 50); };
   const pedido = () => descargar(`/ventas/${ventaId}/pedido?proveedor=${encodeURIComponent(provOrden || "")}&indices=${[...sel].join(",")}`).catch((e) => notify(e.message, "danger"));
   const descartar = async () => {
@@ -168,10 +178,10 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
             <tbody>
               {lineas.map((l) => {
                 const [txt, tono] = ESTADO_LINEA[l.estado] || [l.estado, "neutral"];
-                const bloqueada = anulada || l.estado === "comprado";
+                const bloqueada = anulada || l.estado === "comprado" || l.estado === "stock";
                 const real = l.estado === "comprado" ? l.compras.find((c) => c.estado === "recibida") : null;
                 return (
-                  <tr key={l.indice} className={!(l.compra_unit > 0) ? "fila-alerta" : ""}>
+                  <tr key={l.indice} className={l.estado === "stock" ? "fila-stock" : !(l.compra_unit > 0) ? "fila-alerta" : ""}>
                     <td><input type="checkbox" disabled={bloqueada} checked={sel.has(l.indice)} onChange={() => toggle(l.indice)} /></td>
                     <td>{l.nombre}<div className="mini">{l.codigo ? `N° ${l.codigo}` : ""}</div></td>
                     <td className="mini">{l.cantidad} {l.unidad}</td>
@@ -187,11 +197,13 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                       {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); return o ? <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}</div> : null; })()}
                     </td>
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
-                    <td className="price-cell compra">{fmt(real ? real.precio * l.cantidad : l.total_compra)}</td>
+                    <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
                     <td className="price-cell">{fmt(l.venta_unit)}</td>
                     <td className="mini" style={{ color: l.margen < 0 ? "var(--danger)" : undefined }}>{fmt(l.margen)} · {l.margen_pct}%</td>
                     <td>
                       <span className={`estado estado-${tono}`}>{txt}</span>
+                      {l.stock > 0 && <div className="mini">{l.stock} de stock{l.stock < l.cantidad ? ` · faltan ${l.cantidad - l.stock}` : ""}{!anulada && <> · <button className="link mini" onClick={() => quitarStock(l)}>deshacer</button></>}</div>}
+                      {!anulada && ["por_comprar", "parcial"].includes(l.estado) && <div><button className="link mini" title="Se cubre con lo que hay en bodega (va en gastos generales: costo $0 para la venta)" onClick={() => okStock(l)}>OK stock</button></div>}
                       {l.no_vino && <div className="mini" style={{ color: "var(--danger)" }}>no vino en {l.no_vino.orden} ({l.no_vino.proveedor})
                         {!anulada && <div><button className="link mini" onClick={() => comprarConOtro(l)}>Comprar con otro proveedor</button></div>}</div>}
                       {l.compras.map((c) => <div key={c.id + c.numero}><button className="link mini" onClick={() => irACompra?.(c.id)}>{c.numero} {c.proveedor}</button></div>)}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, SelectorCategoria, confirmar, pedirTexto } from "./ui";
 import DocumentoProveedor from "./DocumentoProveedor";
+import DocumentosCargados from "./DocumentosCargados";
 import { api, fmt, fecha, hoyISO, invalidarProductos, haceMeses, descargar, contenidoDeNombre } from "./lib";
 
 // Unidad de medida: lista cerrada (M11)
@@ -33,6 +34,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
   const [editar, setEditar] = useState(null);
   const [precios, setPrecios] = useState(null);
   const [documento, setDocumento] = useState(false);
+  const [cargados, setCargados] = useState(false);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -88,6 +90,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
           {FILTROS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
         </select>
         {esAdmin && <button className="btn btn-ghost" onClick={() => setDocumento(true)} title="Cotización o factura de proveedor (PDF o foto)">⇪ Documento proveedor</button>}
+        {esAdmin && <button className="btn btn-ghost" onClick={() => setCargados(true)} title="Los últimos documentos de proveedores subidos, para no volver a subirlos">Documentos cargados</button>}
         {esAdmin && <button className="btn btn-ghost" title="Excel con los productos agregados en el sistema que aún no tienen precio, para cotizarlos" onClick={() => descargar("/productos/exportar/para-cotizar", `Productos_nuevos_para_cotizar_${hoyISO()}.xlsx`).catch((e) => notify(e.message, "danger"))}>↓ Para cotizar</button>}
         {esGerencia && <button className="btn btn-ghost" title="Catálogo completo en el formato LISTADO_CONSOLIDADO_FERRETERIA (siguiente versión), con hojas por categoría, resumen, registro de cambios, extras y cotizaciones" onClick={() => descargar("/productos/exportar/planilla").then(() => notify("✓ Planilla descargada")).catch((e) => notify(e.message, "danger"))}>↓ Planilla actualizada</button>}
         <button className="btn btn-primary" onClick={() => setEditar({ nombre: "", categoria: categoria !== "Todas" ? categoria : (categorias[0]?.categoria || ""), unidad: "UNIDAD" })}>+ Nuevo producto</button>
@@ -171,6 +174,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
 
       {editar && <EditarProducto producto={editar} esAdmin={esAdmin} esGerencia={esGerencia} categorias={categorias} proveedores={proveedores} notify={notify}
         onClose={() => setEditar(null)} onGuardado={() => { setEditar(null); refrescar(); }} />}
+      {cargados && <DocumentosCargados notify={notify} onClose={() => setCargados(false)} />}
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} onClose={() => { setDocumento(false); refrescar(); }} />}
       {precios && <PreciosProducto producto={precios} puedeConfirmar={esGerencia} proveedores={proveedores} notify={notify}
         onClose={() => setPrecios(null)} onCambio={refrescar} />}

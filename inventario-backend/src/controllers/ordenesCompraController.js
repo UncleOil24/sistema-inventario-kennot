@@ -66,7 +66,61 @@ const getOrden = handler(async (req, res) => {
   if (!oc) throw new ErrorNegocio("Orden no encontrada", 404);
   const pagos = await Pago.findAll({ where: { orden_compra_id: oc.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
   const documentos = await require("../models/DocumentoCompra").findAll({ where: { orden_id: oc.id }, attributes: ["id", "tipo", "folio", "fecha", "monto", "nombre_archivo", "creado_por", "createdAt"], order: [["id", "ASC"]] });
-  res.json({ ok: true, data: { ...oc.toJSON(), pagos, documentos } });
+  const grupo = oc.factura_grupo ? await sequelize.query(`SELECT o.id, o.numero, o.total::float AS total, o.monto_pagado::float AS pagado, v.numero AS venta_numero FROM ordenes_compra o LEFT JOIN ventas v ON v.id = o.venta_id
+    WHERE o.factura_grupo = :g AND o.estado <> 'anulada' ORDER BY o.id`, { replacements: { g: oc.factura_grupo }, type: sequelize.QueryTypes.SELECT }) : [];
+  res.json({ ok: true, data: { ...oc.toJSON(), pagos, documentos, grupo } });
+});
+
+// GET /api/ordenes-compra/:id/repartir   -> qué ventas necesitan cada producto de esta compra (para repartirla)
+const datosRepartir = handler(async (req, res) => {
+  const oc = await OrdenCompra.findByPk(req.params.id);
+  if (!oc) throw new ErrorNegocio("Orden no encontrada", 404);
+  const { pendientesPorProducto, repartoInicial } = require("../services/repartoCompra");
+  const pend = await pendientesPorProducto((oc.items || []).map((i) => i.producto_id), oc.venta_id, { excluirOrdenId: oc.id });
+  const actual = oc.venta_id ? await Venta.findByPk(oc.venta_id, { attributes: ["id", "numero", "cliente_nombre"] }) : null;
+  const items = (oc.items || []).map((i, indice) => {
+    const cands = [...(pend.get(Number(i.producto_id)) || [])];
+    // La venta actual de la compra siempre es opción; el reparto parte como está hoy (todo a esa venta)
+    if (actual && !cands.some((c) => c.venta_id === actual.id)) cands.unshift({ venta_id: actual.id, numero: actual.numero, cliente: actual.cliente_nombre, falta: 0 });
+    return { indice, producto_id: i.producto_id, nombre: i.nombre, unidad: i.unidad, cantidad: Number(i.cantidad), precio: Number(i.precio), ventas_pendientes: cands,
+      reparto: actual ? [{ venta_id: actual.id, cantidad: Number(i.cantidad) }] : repartoInicial(i.cantidad, cands, null) };
+  });
+  res.json({ ok: true, data: { orden: { id: oc.id, numero: oc.numero, venta_id: oc.venta_id, estado: oc.estado, monto_pagado: Number(oc.monto_pagado), documento: oc.documento }, items } });
+});
+
+// POST /api/ordenes-compra/:id/repartir   { items: [{ indice, reparto: [{ venta_id | null, cantidad }] }] }
+// Corrige una compra registrada en el lugar equivocado: se divide en una compra por venta (mismo documento, IVA en proporción)
+const repartir = handler(async (req, res) => {
+  const { dividir } = require("../services/repartoCompra");
+  const out = await sequelize.transaction(async (t) => {
+    const oc = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!oc) throw new ErrorNegocio("Orden no encontrada", 404);
+    if (oc.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
+    if (Number(oc.monto_pagado) > 0) throw new ErrorNegocio("La compra ya tiene pagos: repártela antes de pagar, o quita el pago primero");
+    const porIndice = new Map((req.body?.items || []).map((x) => [Number(x.indice), x.reparto]));
+    const lineas = (oc.items || []).map((it, k) => ({ ...it, reparto: porIndice.get(k) }));
+    const partes = dividir(lineas, { neto: Number(oc.subtotal), iva: Number(oc.iva), total: Number(oc.total), principal: oc.venta_id, ventaPorDefecto: oc.venta_id });
+    const p0 = partes[0];
+    const grupo = partes.length > 1 ? oc.factura_grupo || `F${oc.id}` : oc.factura_grupo;
+    await oc.update({ items: p0.items, subtotal: p0.neto, iva: p0.iva, total: p0.total, venta_id: p0.venta_id, factura_grupo: grupo }, { transaction: t });
+    const DocumentoCompra = require("../models/DocumentoCompra");
+    const docs = await DocumentoCompra.findAll({ where: { orden_id: oc.id }, transaction: t });
+    const nuevas = [];
+    for (const [n, pt] of partes.slice(1).entries()) {
+      const v2 = pt.venta_id ? await Venta.findByPk(pt.venta_id, { transaction: t, attributes: ["id", "empresa"] }) : null;
+      const o2 = await OrdenCompra.create({
+        proveedor_id: oc.proveedor_id, proveedor_nombre: oc.proveedor_nombre, venta_id: v2?.id || null, fecha: oc.fecha, empresa: oc.empresa || v2?.empresa || null,
+        items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total, documento: oc.documento, fecha_factura: oc.fecha_factura,
+        estado: oc.estado, fecha_recepcion: oc.fecha_recepcion, fecha_vencimiento: oc.fecha_vencimiento, factura_grupo: grupo,
+        notas: `Repartida desde ${oc.numero} (${n + 2} de ${partes.length})`, creado_por: firma(req),
+      }, { transaction: t });
+      await o2.update({ numero: `C-${String(o2.id).padStart(4, "0")}` }, { transaction: t });
+      for (const d of docs) await DocumentoCompra.create({ orden_id: o2.id, folio: d.folio, fecha: d.fecha, monto: d.monto, nombre_archivo: d.nombre_archivo, mime: d.mime, datos: d.datos, creado_por: firma(req), tipo: d.tipo }, { transaction: t });
+      nuevas.push(o2);
+    }
+    return [oc, ...nuevas].map((o) => ({ id: o.id, numero: o.numero, venta_id: o.venta_id, total: Number(o.total) }));
+  });
+  res.json({ ok: true, data: { partes: out } });
 });
 
 // PUT /api/ordenes-compra/:id/venta   { venta_id | null }   -> para qué venta se compró (sirve en cualquier estado)
@@ -212,6 +266,27 @@ const registrarPago = handler(async (req, res) => {
     const orden = await OrdenCompra.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
     if (!orden) throw new ErrorNegocio("Orden no encontrada", 404);
     if (orden.estado === "anulada") throw new ErrorNegocio("No se puede pagar una orden anulada");
+    // Factura repartida entre ventas: el pago se reparte entre sus compras (se paga la factura completa)
+    if (orden.factura_grupo) {
+      const grupo = await OrdenCompra.findAll({ where: { factura_grupo: orden.factura_grupo, estado: { [Op.ne]: "anulada" } }, order: [["id", "ASC"]], transaction: t, lock: t.LOCK.UPDATE });
+      const monto = Number(req.body.monto);
+      const saldoG = grupo.reduce((s, o) => s + Number(o.total) - Number(o.monto_pagado), 0);
+      if (!(monto > 0)) throw new ErrorNegocio("Monto inválido");
+      if (monto > saldoG + 0.5) throw new ErrorNegocio(`El monto supera el saldo de la factura (${Math.round(saldoG)})`);
+      let resto = monto; const pagos = [];
+      for (const [k, o] of grupo.entries()) {
+        const saldo = Number(o.total) - Number(o.monto_pagado);
+        if (saldo <= 0.5) continue;
+        const parte = k === grupo.length - 1 ? resto : Math.min(resto, Math.round(monto * saldo / saldoG));
+        if (parte <= 0) continue;
+        resto -= parte;
+        pagos.push(await Pago.create({ tipo: "pago", orden_compra_id: o.id, monto: parte, fecha: req.body.fecha || new Date(), medio: req.body.medio || "transferencia",
+          nota: [req.body.nota, `factura ${o.documento} repartida (${grupo.map((x) => x.numero).join(" + ")})`].filter(Boolean).join(" · "), creado_por: firma(req) }, { transaction: t }));
+        const pagado = Number(o.monto_pagado) + parte;
+        await o.update({ monto_pagado: pagado, estado_pago: estadoPago(pagado, o.total) }, { transaction: t });
+      }
+      return { orden, pago: pagos[0], pagos };
+    }
     const monto = Number(req.body.monto);
     const saldo = Number(orden.total) - Number(orden.monto_pagado);
     if (!(monto > 0)) throw new ErrorNegocio("Monto inválido");
@@ -229,6 +304,6 @@ const registrarPago = handler(async (req, res) => {
 });
 
 module.exports = {
-  asignarVenta, registrarFactura,
+  asignarVenta, registrarFactura, datosRepartir, repartir,
   getOrdenes, getOrden, crearOrden, actualizarOrden, recibirOrden, anularOrden, eliminarOrden, registrarPago,
 };

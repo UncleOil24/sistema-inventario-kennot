@@ -179,11 +179,14 @@ const styles = `
   .estado { display: inline-block; border-radius: 4px; padding: 2px 8px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; border: 1px solid; white-space: nowrap; }
   .estado-ok { color: var(--success); border-color: rgba(76,175,125,0.35); background: rgba(76,175,125,0.08); }
   .estado-warn { color: var(--warn); border-color: rgba(232,163,61,0.35); background: rgba(232,163,61,0.08); }
+  .estado-danger { color: var(--danger); border-color: rgba(192,57,43,0.35); background: rgba(192,57,43,0.08); }
   .estado-info { color: var(--info); border-color: rgba(91,155,213,0.35); background: rgba(91,155,213,0.08); }
   .estado-neutral { color: var(--text2); border-color: var(--border2); background: var(--surface2); }
   .estado-muted { color: var(--text3); border-color: var(--border); background: transparent; text-decoration: line-through; }
   .fila-anulada td { opacity: 0.45; }
   .fila-raro td { background: rgba(192, 57, 43, 0.10); }
+  .reparto-linea { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 4px; } .reparto-linea label { display: inline-flex; gap: 4px; align-items: center; }
+  .fila-stock td { opacity: 0.6; } .fila-stock td:nth-child(2), .fila-stock td.price-cell { text-decoration: line-through; }
   .aviso-envase { margin-top: 4px; padding: 5px 8px; border-radius: 6px; font-size: 12px; background: rgba(var(--accent-rgb), 0.10); border: 1px solid rgba(var(--accent-rgb), 0.35); }
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-x: auto; }
   .modal .panel { background: var(--surface2); margin-bottom: 0; }

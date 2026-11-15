@@ -12,6 +12,8 @@ router.post("/licitacion/:codigo", c.licitacion);
 // Documentos de proveedores cambian precios: encargado de precios (admin)
 router.post("/documento-proveedor", catalogoPrecios, subir.single("archivo"), c.documentoProveedor);
 router.post("/documento-proveedor/aprobar", catalogoPrecios, c.aprobarDocumento);
+router.get("/documentos-cargados", catalogoPrecios, c.documentosCargados);
+router.get("/documentos-cargados/detalle", catalogoPrecios, c.detalleDocumento);
 router.get("/auditoria", soloAdmin, c.auditoria);
 
 module.exports = router;

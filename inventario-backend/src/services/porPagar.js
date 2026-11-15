@@ -21,7 +21,7 @@ async function calcularPorPagar({ empresa } = {}) {
   const params = await getParametros();
   const hoy = hoyISO();
   const [filas] = await sequelize.query(`SELECT o.id, o.numero, o.empresa, o.proveedor_id, o.proveedor_nombre, o.documento, o.fecha, o.fecha_factura,
-      o.fecha_recepcion, o.fecha_vencimiento, o.estado, o.total::float AS total, o.monto_pagado::float AS pagado, o.venta_id,
+      o.fecha_recepcion, o.fecha_vencimiento, o.estado, o.total::float AS total, o.monto_pagado::float AS pagado, o.venta_id, o.factura_grupo,
       v.numero AS venta_numero, v.cliente_nombre, p.plazo_pago_dias, p.descuento_pronto_pago::float AS dcto, p.dias_pronto_pago, p.contacto, p.telefono
     FROM ordenes_compra o LEFT JOIN proveedores p ON p.id = o.proveedor_id LEFT JOIN ventas v ON v.id = o.venta_id
     WHERE o.estado <> 'anulada' AND o.total - o.monto_pagado > 0.5 AND (o.estado = 'recibida' OR o.documento IS NOT NULL)
@@ -46,7 +46,20 @@ async function calcularPorPagar({ empresa } = {}) {
       vence_estimado: !o.fecha_vencimiento, sin_factura: !o.documento,
       dias_vencida: dv, tramo: tramoPago(dv), pronto_pago: pronto,
     };
-  }).sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento));
+  }).reduce((acc, d, _k, todos) => {
+    // Una factura repartida entre varias ventas aparece una sola vez, con su total (se paga junta)
+    const o = filas.find((f) => f.id === d.id);
+    if (!o.factura_grupo) { acc.push(d); return acc; }
+    const previo = acc.find((x) => x.grupo === o.factura_grupo);
+    if (!previo) { acc.push({ ...d, grupo: o.factura_grupo, partes: [{ id: d.id, numero: d.numero, venta_numero: d.venta_numero, total: d.total }] }); return acc; }
+    previo.total += d.total; previo.saldo += d.saldo;
+    previo.partes.push({ id: d.id, numero: d.numero, venta_numero: d.venta_numero, total: d.total });
+    previo.numero = previo.partes.map((x) => x.numero).join(" + ");
+    previo.venta_numero = previo.partes.map((x) => x.venta_numero).filter(Boolean).join(", ") || null;
+    if (previo.pronto_pago) previo.pronto_pago = { ...previo.pronto_pago, ahorro: Math.round(previo.saldo * previo.pronto_pago.pct / 100) };
+    void todos;
+    return acc;
+  }, []).sort((a, b) => a.fecha_vencimiento.localeCompare(b.fecha_vencimiento));
 
   const resumenDe = (lista) => {
     const r = { por_pagar: 0, vencido: 0, proximos_7: 0, documentos: lista.length, ahorro_pronto_pago: 0 };

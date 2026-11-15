@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
 
 // "Subir facturas y boletas" de una venta: se suben todos los documentos juntos; el sistema lee cada uno
@@ -34,7 +34,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             orden_id: propia ? String(propia.id) : "", razon_social: e.razon_social, rut: e.rut,
           },
           gasto: { tipo: "flete", descripcion: "" },
-          lineas: r.lineas.map((l) => ({ ...l, omitir: false, accion: l.producto ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })),
+          lineas: r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })),
         };
       } catch (err) { lista[k] = { ...lista[k], estado: "error", error: err.message }; }
       setDocs([...lista]);
@@ -70,11 +70,12 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             lineas: activas.map((l) => ({
               producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
               descripcion: l.descripcion, cantidad: Number(l.cantidad), precio: Number(l.precio_neto), unidad: l.unidad, marca: l.marca, calce: l.calce,
+              reparto: repartoParaEnviar(l),
             })),
           },
         });
         invalidarProductos();
-        resultado = { texto: `Compra ${r.orden.numero} · ${r.orden.proveedor_nombre} · ${fmt(r.orden.subtotal)}${r.alzas.length ? ` · ⚠ ${r.alzas.length} alza(s) de precio` : ""}${r.no_vinieron?.length ? ` · ⚠ No vino: ${r.no_vinieron.map((x) => `${x.nombre} (${x.cantidad})`).join(", ")}. Vuelve a "por comprar" en el cuadro` : ""}`, alzas: r.alzas };
+        resultado = { texto: `Compra ${r.orden.numero} · ${r.orden.proveedor_nombre} · ${fmt(r.orden.subtotal)}${r.alzas.length ? ` · ⚠ ${r.alzas.length} alza(s) de precio` : ""}${r.no_vinieron?.length ? ` · ⚠ No vino: ${r.no_vinieron.map((x) => `${x.nombre} (${x.cantidad})`).join(", ")}. Vuelve a "por comprar" en el cuadro` : ""}${r.reparto?.length > 1 ? ` · repartida: ${r.reparto.map((p) => p.numero).join(" + ")}` : ""}`, alzas: r.alzas };
       }
       const nuevos = docs.map((x, k) => (k === actual ? { ...x, estado: "guardado", resultado } : x));
       setDocs(nuevos); siguientePendiente(nuevos);
@@ -191,6 +192,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             );
           })()}
           <div className="pago-form">
+            {d.res.ya_registrada?.length > 0 && <span className="estado estado-danger">⚠ Ya registrado: {d.res.ya_registrada.map((o) => o.numero).join(", ")}</span>}
             {d.res.control.precios_incluyen_iva && <span className="estado estado-info">Precios con IVA: ya se dividieron por 1,19</span>}
             {d.res.control.cuadra === true && <span className="estado estado-ok">✓ Las líneas cuadran con el total</span>}
             {d.res.control.cuadra === false && <span className="estado estado-warn">⚠ Las líneas ({fmt(d.res.control.suma_lineas)}) no cuadran con el documento ({fmt(d.res.control.total_documento)})</span>}
@@ -222,6 +224,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
                     <td className="mini">
                       {l.venta_linea ? <>✓ {l.venta_linea.nombre}<div>necesita {l.venta_linea.cantidad}{Number(l.cantidad) > l.venta_linea.cantidad ? ` · se compraron ${l.cantidad}: cuenta el total pagado` : Number(l.cantidad) < l.venta_linea.cantidad ? ` · faltan ${l.venta_linea.cantidad - Number(l.cantidad)}` : ""}</div></>
                         : <span style={{ color: "var(--warn)" }}>no está en la venta: compra extra, su costo suma a la venta</span>}
+                      <RepartoLinea l={l} onChange={(r) => setLinea(l.i, { reparto: r })} />
                     </td>
                   </tr>
                 ); })}

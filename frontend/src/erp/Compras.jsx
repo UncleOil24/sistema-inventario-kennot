@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar } from "./ui";
+import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando } from "./ui";
 import { api, fmt, fecha, useProductos, descargar } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
@@ -320,8 +320,41 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
   );
 }
 
+// Repartir una compra ya registrada entre varias ventas (si se subió en el lugar equivocado o cubre varias ventas)
+function RepartirCompra({ orden, notify, onClose, onListo }) {
+  const [items, setItems] = useState(null);
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => {
+    api(`/ordenes-compra/${orden.id}/repartir`).then((d) => setItems(d.items.map((i) => ({ ...i, producto: { id: i.producto_id }, reparto_de: i.producto_id }))))
+      .catch((e) => { notify(e.message, "danger"); onClose(); });
+  }, [orden.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      const r = await api(`/ordenes-compra/${orden.id}/repartir`, { method: "POST", body: { items: items.map((i) => ({ indice: i.indice, reparto: repartoParaEnviar(i) })) } });
+      notify(r.partes.length > 1 ? `✓ Repartida: ${r.partes.map((p) => p.numero).join(" + ")}` : "Sin cambios: todo quedó en la misma venta");
+      onListo();
+    } catch (e) { notify(e.message, "danger"); setGuardando(false); }
+  };
+  return (
+    <Modal titulo={`// Repartir ${orden.numero} entre ventas`} onClose={onClose} ancho={820}
+      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button><button className="btn btn-primary" disabled={!items || guardando} onClick={guardar}>{guardando ? "Guardando..." : "Repartir"}</button></>}>
+      {!items ? <Cargando /> : <>
+        <div className="mini" style={{ marginBottom: 8 }}>Indica cuánto de cada producto va a cada venta. Se crea una compra por venta con el mismo documento ({orden.documento || "sin N°"}); el IVA se reparte en proporción y en Por pagar sigue siendo una sola factura.</div>
+        <table className="table table-compacta"><tbody>
+          {items.map((i) => (
+            <tr key={i.indice}><td>{i.nombre}<div className="mini">{i.cantidad} {i.unidad} · {fmt(i.precio)} c/u</div>
+              <RepartoLinea l={i} onChange={(r) => setItems((xs) => xs.map((x) => (x.indice === i.indice ? { ...x, reparto: r } : x)))} /></td></tr>
+          ))}
+        </tbody></table>
+      </>}
+    </Modal>
+  );
+}
+
 export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada }) {
   const [subir, setSubir] = useState(false);
+  const [repartirAbierto, setRepartirAbierto] = useState(false);
   const [registrarPrecios, setRegistrarPrecios] = useState(true);
   const [factura, setFactura] = useState(orden.documento || "");
   const [fact, setFact] = useState({ fecha_factura: orden.fecha_factura || "", fecha_vencimiento: orden.fecha_vencimiento || "", empresa: orden.empresa || "" });
@@ -350,6 +383,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
     <Modal titulo={`// Compra ${orden.numero}`} onClose={onClose} ancho={720}
       footer={<>
         {orden.estado !== "anulada" && puedeOperar && !(orden.documentos || []).length && <button className="btn btn-primary" onClick={() => setSubir(true)}>⇪ Subir factura</button>}
+        {orden.estado === "recibida" && puedeOperar && !(Number(orden.monto_pagado) > 0) && <button className="btn btn-ghost" title="Si esta compra cubre productos de varias ventas, o se cargó a la venta equivocada" onClick={() => setRepartirAbierto(true)}>Repartir entre ventas</button>}
         {orden.estado === "borrador" && puedeOperar && <>
           {esAdmin && <button className="btn btn-danger" onClick={eliminar}>Eliminar</button>}
           <button className="btn btn-ghost" onClick={onEditar}>Editar</button>
@@ -363,6 +397,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
         <span>{orden.proveedor_nombre}</span>
         {orden.notas && orden.venta_id && <span>{orden.notas}</span>}
         {orden.documento && <span>Factura {orden.documento}{orden.fecha_factura ? ` del ${fecha(orden.fecha_factura)}` : ""}</span>}
+        {orden.grupo?.length > 1 && <span className="estado estado-info" title="Misma factura repartida entre ventas: se paga junta">Factura repartida: {orden.grupo.map((g) => `${g.numero}${g.venta_numero ? ` (${g.venta_numero})` : " (sin venta)"}`).join(" + ")}</span>}
         {orden.empresa && <span>{orden.empresa === "kenott" ? "Kenott" : "Tactics"}</span>}
         {orden.fecha_recepcion && <span>Recibida {fecha(orden.fecha_recepcion)}</span>}
         {orden.fecha_vencimiento && <span>Vence {fecha(orden.fecha_vencimiento)}</span>}
@@ -397,6 +432,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
         </div>
       )}
       {subir && <FacturaCompra orden={orden} notify={notify} onClose={() => setSubir(false)} onListo={() => onCambio(true)} />}
+      {repartirAbierto && <RepartirCompra orden={orden} notify={notify} onClose={() => setRepartirAbierto(false)} onListo={() => { setRepartirAbierto(false); onCambio(false); }} />}
       {orden.estado !== "anulada" && puedeOperar && (
         <div className="panel" style={{ marginTop: 10 }}>
           <div className="panel-titulo">Factura del proveedor</div>
@@ -426,7 +462,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
       {esAdmin && (orden.estado === "recibida" || (orden.documento && orden.estado !== "anulada")) && (
         <PagosPanel
           key={orden.monto_pagado}
-          doc={orden}
+          doc={orden.grupo?.length > 1 ? { ...orden, total: orden.grupo.reduce((x, g) => x + g.total, 0), monto_pagado: orden.grupo.reduce((x, g) => x + (g.pagado || 0), 0) } : orden}
           tipo="pago"
           onRegistrar={(body) => accion(() => api(`/ordenes-compra/${orden.id}/pagos`, { method: "POST", body }), "✓ Pago registrado")}
           onEliminar={esAdmin ? async (p) => (await confirmar("¿Eliminar este pago?", { titulo: "Eliminar pago", boton: "Eliminar", peligro: true })) && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Pago eliminado") : null}
