@@ -114,26 +114,93 @@ const sinTildes = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036
 
 // POST /api/ia/documento-proveedor   (multipart: archivo)  -> propuesta para revisar
 const documentoProveedor = handler(async (req, res) => {
+  const DocumentoCargado = require("../models/DocumentoCargado");
+  const hash = require("crypto").createHash("sha256").update(req.file.buffer).digest("hex");
+  const mismoArchivo = await DocumentoCargado.findOne({ where: { hash }, order: [["id", "DESC"]] });
   const { indice, productos } = await indiceCatalogo();
   const r = await ia.leerDocumentoProveedor(req.file, indice, firma(req));
   const ver = vista(req, await getParametros());
   const prov = r.encabezado.proveedor
     ? await Proveedor.findOne({ where: sequelize.where(sequelize.fn("upper", sequelize.col("nombre")), r.encabezado.proveedor) })
     : null;
+  const nombreProv = prov?.nombre || normProv(r.encabezado.proveedor || "");
+  const numero = String(r.encabezado.numero_documento || "").trim();
+
+  // ¿Ya se cargó? Mismo archivo, mismo proveedor y N°, o casi todos los precios iguales a los últimos de ese proveedor
+  const ids = r.lineas.map((l) => l.producto_id).filter(Boolean);
+  const ultimos = new Map();
+  if (nombreProv && ids.length) {
+    const filas = await PrecioProveedor.findAll({ where: { producto_id: ids, proveedor: nombreProv, descartado: false }, order: [["fecha", "DESC"], ["id", "DESC"]], raw: true });
+    for (const f of filas) if (!ultimos.has(f.producto_id)) ultimos.set(f.producto_id, f);
+  }
+  const lineas = r.lineas.map((l) => {
+    const u = l.producto_id ? ultimos.get(l.producto_id) : null;
+    const precio = Math.round(Number(l.precio_neto) || 0);
+    return {
+      descripcion: l.descripcion, codigo_proveedor: l.codigo_proveedor, marca: l.marca, unidad: l.unidad, cantidad: l.cantidad,
+      precio_neto: l.precio_neto, total_linea: l.total_linea, calce: l.calce, nota: l.nota,
+      producto: l.producto_id ? ver(productos.get(l.producto_id)) : null,
+      candidatos: l.candidatos.slice(0, 6).map((p) => ver(p)),
+      anterior: u ? { precio: Math.round(Number(u.precio)), fecha: u.fecha, documento: u.documento } : null,
+      ya_cargado: !!u && Math.abs(Math.round(Number(u.precio)) - precio) <= 1,
+    };
+  });
+  let repetido = null;
+  if (mismoArchivo) repetido = { motivo: "archivo", fecha: mismoArchivo.createdAt, usuario: mismoArchivo.usuario, proveedor: mismoArchivo.proveedor, documento: mismoArchivo.documento };
+  if (!repetido && nombreProv && numero) {
+    const d = await DocumentoCargado.findOne({ where: { proveedor: nombreProv, documento: numero }, order: [["id", "DESC"]] });
+    const p = d ? null : await PrecioProveedor.findOne({ where: { proveedor: nombreProv, documento: numero }, order: [["id", "DESC"]], raw: true });
+    if (d || p) repetido = { motivo: "numero", fecha: d?.createdAt || p?.createdAt, usuario: d?.usuario || p?.creado_por || null, proveedor: nombreProv, documento: numero };
+  }
+  const calzadas = lineas.filter((l) => l.producto && l.anterior);
+  const iguales = lineas.filter((l) => l.ya_cargado).length;
+  if (!repetido && calzadas.length >= 3 && iguales / Math.max(1, lineas.filter((l) => l.producto).length) >= 0.8) {
+    repetido = { motivo: "precios", iguales, total: lineas.length, proveedor: nombreProv };
+  }
   res.json({
     ok: true,
     data: {
       ...r,
-      archivo: req.file.originalname,
+      archivo: req.file.originalname, hash, repetido,
       proveedor_existente: prov ? { id: prov.id, nombre: prov.nombre, tipo: prov.tipo } : null,
-      lineas: r.lineas.map((l) => ({
-        descripcion: l.descripcion, codigo_proveedor: l.codigo_proveedor, marca: l.marca, unidad: l.unidad, cantidad: l.cantidad,
-        precio_neto: l.precio_neto, total_linea: l.total_linea, calce: l.calce, nota: l.nota,
-        producto: l.producto_id ? ver(productos.get(l.producto_id)) : null,
-        candidatos: l.candidatos.slice(0, 6).map((p) => ver(p)),
-      })),
+      lineas,
     },
   });
+});
+
+// GET /api/ia/documentos-cargados?proveedor=&q=   -> últimos documentos de proveedores cargados al catálogo
+// Los registrados desde ahora + los anteriores, armados desde el historial de precios (proveedor, N° y fecha)
+const documentosCargados = handler(async (req, res) => {
+  const DocumentoCargado = require("../models/DocumentoCargado");
+  const prov = req.query.proveedor ? normProv(req.query.proveedor) : null;
+  const q = String(req.query.q || "").trim();
+  const [registrados] = await sequelize.query(`SELECT id, proveedor, documento, fecha, origen, productos, cambios, usuario, archivo, "createdAt" AS subido
+    FROM documentos_cargados WHERE (:prov::text IS NULL OR proveedor = :prov) AND (:q = '' OR proveedor ILIKE :ql OR documento ILIKE :ql OR archivo ILIKE :ql)
+    ORDER BY id DESC LIMIT 300`, { replacements: { prov, q, ql: `%${q}%` } });
+  const [historial] = await sequelize.query(`SELECT pp.proveedor, pp.documento, pp.fecha, MIN(pp.origen) AS origen, COUNT(*)::int AS productos, MIN(pp.creado_por) AS usuario, MIN(pp."createdAt") AS subido
+    FROM precios_proveedor pp
+    WHERE pp.documento IS NOT NULL AND pp.documento <> '' AND (:prov::text IS NULL OR pp.proveedor = :prov) AND (:q = '' OR pp.proveedor ILIKE :ql OR pp.documento ILIKE :ql)
+      AND NOT EXISTS (SELECT 1 FROM documentos_cargados d WHERE d.proveedor = pp.proveedor AND d.documento = pp.documento)
+    GROUP BY pp.proveedor, pp.documento, pp.fecha ORDER BY MIN(pp."createdAt") DESC LIMIT 300`, { replacements: { prov, q, ql: `%${q}%` } });
+  const lista = [...registrados.map((d) => ({ ...d, tipo: "registrado" })), ...historial.map((d) => ({ ...d, tipo: "historial", cambios: null }))]
+    .sort((a, b) => new Date(b.subido) - new Date(a.subido)).slice(0, 300);
+  void DocumentoCargado;
+  res.json({ ok: true, data: lista });
+});
+
+// GET /api/ia/documentos-cargados/detalle?id=  |  ?proveedor=&documento=&fecha=   -> productos y precios de ese documento
+const detalleDocumento = handler(async (req, res) => {
+  const DocumentoCargado = require("../models/DocumentoCargado");
+  if (req.query.id) {
+    const d = await DocumentoCargado.findByPk(req.query.id);
+    if (!d) throw new ErrorNegocio("Documento no encontrado", 404);
+    return res.json({ ok: true, data: { ...d.toJSON(), lineas: d.lineas } });
+  }
+  const [lineas] = await sequelize.query(`SELECT pp.producto_id, p.codigo, p.nombre, pp.precio::float AS precio, pp.descripcion_proveedor, pp.fecha
+    FROM precios_proveedor pp LEFT JOIN productos p ON p.id = pp.producto_id
+    WHERE pp.proveedor = :prov AND pp.documento = :doc ${req.query.fecha ? "AND pp.fecha = :fecha" : ""} ORDER BY p.nombre`,
+  { replacements: { prov: req.query.proveedor || "", doc: req.query.documento || "", fecha: req.query.fecha || null } });
+  res.json({ ok: true, data: { proveedor: req.query.proveedor, documento: req.query.documento, fecha: req.query.fecha, lineas } });
 });
 
 // POST /api/ia/documento-proveedor/aprobar
@@ -179,7 +246,15 @@ const aprobarDocumento = handler(async (req, res) => {
       await recalcular(p, { t, usuario: firma(req), motivo: `Documento ${ficha.nombre} ${b.documento || ""}`.trim() });
       out.precios++;
       if (Number(p.precio_compra) !== antes) out.cambios_precio.push({ codigo: p.codigo, nombre: p.nombre, antes, despues: Number(p.precio_compra), proveedor: p.proveedor });
+      out.lineas_doc = out.lineas_doc || [];
+      out.lineas_doc.push({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, precio, antes: l.antes != null ? Math.round(Number(l.antes)) : null });
     }
+    // Registro del documento (para la lista de documentos cargados y el aviso de repetido)
+    await require("../models/DocumentoCargado").create({
+      hash: b.hash || null, archivo: b.archivo || null, proveedor: ficha.nombre, documento: b.documento || null, fecha: b.fecha || null, origen,
+      productos: out.precios, cambios: (out.lineas_doc || []).filter((x) => x.antes == null || x.antes !== x.precio).length, lineas: out.lineas_doc || [], usuario: firma(req),
+    }, { transaction: t });
+    delete out.lineas_doc;
     return out;
   });
   res.json({ ok: true, data: resumen });
@@ -191,4 +266,4 @@ const auditoria = handler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, auditoria, indiceCatalogo };
+module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, documentosCargados, detalleDocumento, auditoria, indiceCatalogo };

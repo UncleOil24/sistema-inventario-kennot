@@ -395,7 +395,8 @@ async function datosCuadro(venta) {
     // El proveedor y costo con que se cotizó también es una opción (aunque no tenga historial)
     if (prov !== CC.SIN && Number(i.costo) > 0 && !ops.some((o) => o.proveedor === prov)) ops.push({ proveedor: prov, precio: Math.round(Number(i.costo)), fecha: null, cotizado: true });
     ops.sort((a, b) => a.precio - b.precio);
-    const totalCompra = Number(i.costo) * Number(i.cantidad);
+    const enStock = CC.stockDe(i);
+    const totalCompra = Number(i.costo) * (Number(i.cantidad) - enStock);
     const totalVenta = Number(i.precio) * Number(i.cantidad);
     const p = prodMap.get(i.producto_id);
     return {
@@ -405,6 +406,7 @@ async function datosCuadro(venta) {
       margen: redondear(totalVenta - totalCompra), margen_pct: totalVenta ? Math.round(((totalVenta - totalCompra) / totalVenta) * 100) : 0,
       catalogo: p ? { proveedor: p.proveedor, precio: Number(p.precio_compra) || 0 } : null,
       opciones: ops.slice(0, 6),
+      stock_info: i.stock || null,
       ...estados[indice],
     };
   });
@@ -416,7 +418,7 @@ async function datosCuadro(venta) {
       if (nv) { l.no_vino = { orden: o.numero, proveedor: o.proveedor_nombre, cantidad: Number(nv.cantidad) }; break; }
     }
   }
-  const sugerencias = CC.sugerir(lineas.filter((l) => l.estado === "por_comprar"));
+  const sugerencias = CC.sugerir(lineas.filter((l) => l.estado === "por_comprar").map((l) => ({ ...l, cantidad: l.cantidad - (l.stock || 0) })));
 
   // Resumen por proveedor elegido (solo lo que falta comprar)
   const provMap = new Map(proveedores.map((p) => [normProv(p.nombre), p]));
@@ -435,8 +437,8 @@ async function datosCuadro(venta) {
       lineas, sugerencias, resumen_proveedores,
       totales: (() => {
         // Utilidad con lo ya comprado (facturas y boletas) + lo planificado de lo que falta comprar
-        const falta = lineas.filter((l) => l.estado !== "comprado").reduce((s2, l) => s2 + l.total_compra, 0);
-        const todoComprado = lineas.every((l) => l.estado === "comprado");
+        const falta = lineas.filter((l) => !["comprado", "stock"].includes(l.estado)).reduce((s2, l) => s2 + l.total_compra, 0);
+        const todoComprado = lineas.every((l) => ["comprado", "stock"].includes(l.estado));
         const actual = Number(venta.subtotal) - Number(extra.resumen.compras_real || 0) - falta - Number(extra.resumen.gastos || 0);
         return { compra: redondear(Number(venta.costo_total)), venta: redondear(Number(venta.subtotal)), ...extra.resumen,
           falta_comprar: redondear(falta), utilidad_actual: redondear(actual), todo_comprado: todoComprado };
@@ -476,7 +478,7 @@ const asignarProveedores = handler(async (req, res) => {
       if (costo == null) costo = Number(i.costo) || 0; // sin precio con ese proveedor: se mantiene el costo
       items[Number(a.indice)] = { ...i, proveedor: prov, costo: Math.round(costo) };
     }
-    await v.update({ items, costo_total: items.reduce((s, x) => s + Number(x.costo) * Number(x.cantidad), 0) }, { transaction: t });
+    await v.update({ items, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
   });
   res.json({ ok: true, data: { asignadas: lista.length } });
 });
@@ -505,7 +507,9 @@ async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
       let precio = await precioCon(i, prov);
       if (precio == null) precio = Number(i.costo) || 0;
       items[k] = { ...i, proveedor: prov, costo: Math.round(precio) };
-      lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: Number(i.cantidad), precio: Math.round(precio) });
+      const cant = Number(i.cantidad) - require("../services/cuadroCompra").stockDe(i);
+      if (cant <= 0) continue; // cubierto con stock
+      lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: cant, precio: Math.round(precio) });
     }
     if (!lineas.length) throw new ErrorNegocio("Las líneas marcadas no existen");
     let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
@@ -516,7 +520,7 @@ async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
       notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`, creado_por: firma(req),
     }, { transaction: t });
     await orden.update({ numero: `C-${String(orden.id).padStart(4, "0")}` }, { transaction: t });
-    const cambios = { items, costo_total: items.reduce((s, x) => s + Number(x.costo) * Number(x.cantidad), 0) };
+    const cambios = { items, costo_total: require("../services/cuadroCompra").costoItems(items) };
     if (v.etapa === "registrada") Object.assign(cambios, { etapa: "aceptada", aceptada_fecha: new Date(), aceptada_por: firma(req) });
     await v.update(cambios, { transaction: t });
     return orden;
@@ -538,7 +542,8 @@ const pedidoExcel = handler(async (req, res) => {
   if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
   const prov = normProv(req.query.proveedor || "");
   const indices = String(req.query.indices || "").split(",").filter((x) => x !== "").map(Number);
-  const items = v.items.map((i, k) => ({ ...i, k })).filter((i) => (indices.length ? indices.includes(i.k) : normProv(i.proveedor || "") === prov));
+  const CC = require("../services/cuadroCompra");
+  const items = v.items.map((i, k) => ({ ...i, k, cantidad: Number(i.cantidad) - CC.stockDe(i) })).filter((i) => i.cantidad > 0 && (indices.length ? indices.includes(i.k) : normProv(i.proveedor || "") === prov));
   if (!items.length) throw new ErrorNegocio("No hay productos para el pedido");
   const ExcelJS = require("exceljs");
   const wb = new ExcelJS.Workbook();
@@ -618,9 +623,9 @@ const agruparDatos = handler(async (req, res) => {
     const d = await datosCuadro(v);
     const pendientes = new Map(); // producto -> órdenes pedidas sin recibir
     for (const o of d.ordenes) if (o.estado !== "recibida") for (const it of o.items) { if (!pendientes.has(it.producto_id)) pendientes.set(it.producto_id, []); pendientes.get(it.producto_id).push(`${o.numero} (${o.proveedor_nombre})`); }
-    const lineas = d.lineas.filter((l) => l.estado !== "comprado").map((l) => ({
+    const lineas = d.lineas.filter((l) => !["comprado", "stock"].includes(l.estado)).map((l) => ({
       indice: l.indice, producto_id: l.producto_id, codigo: l.codigo, nombre: l.nombre, unidad: l.unidad,
-      cantidad: l.cantidad, falta: Math.max(0, l.cantidad - (l.recibido || 0) - (l.pedido || 0)), pedido: l.pedido || 0,
+      cantidad: l.cantidad, falta: Math.max(0, l.cantidad - (l.stock || 0) - (l.recibido || 0) - (l.pedido || 0)), pedido: l.pedido || 0,
       estado: l.estado, proveedor: l.proveedor, compra_unit: l.compra_unit, opciones: l.opciones, no_vino: l.no_vino || null,
       ordenes: pendientes.get(l.producto_id) || [],
     }));
@@ -704,6 +709,28 @@ const agruparOrdenes = handler(async (req, res) => {
   res.status(201).json({ ok: true, data: { creadas } });
 });
 
+// POST /api/ventas/:id/stock   { indice, cantidad }  (cantidad 0 = deshacer)
+// Parte o toda la línea se cubre con stock de bodega (comprado antes, va en gastos generales): no se compra y su costo es $0
+const marcarStock = handler(async (req, res) => {
+  const k = Number(req.body?.indice);
+  const cantidad = Math.max(0, Number(req.body?.cantidad) || 0);
+  await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
+    const items = [...v.items];
+    const i = items[k];
+    if (!i) throw new ErrorNegocio("Línea no encontrada", 404);
+    if (cantidad > Number(i.cantidad)) throw new ErrorNegocio(`La línea pide ${i.cantidad}: no puede salir más de stock`);
+    const antes = Number(i.stock?.cantidad) || 0;
+    if (cantidad > 0) items[k] = { ...i, stock: { cantidad, fecha: new Date().toISOString(), por: firma(req) } };
+    else { const { stock, ...resto } = i; items[k] = resto; } // eslint-disable-line no-unused-vars
+    await v.update({ items, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
+    await HistorialVenta.anotar(v, "paso", `${i.nombre}: ${cantidad ? `${cantidad} de ${i.cantidad} desde stock (costo $0, va en gastos generales)` : `ya no sale de stock (eran ${antes})`}`, req, t);
+  });
+  res.json({ ok: true });
+});
+
 // POST /api/ventas/:id/cambiar-proveedor   { indice, proveedor, costo }
 // Para comprar una línea a otro proveedor (p.ej. la opción 2). Cambia el costo y el margen de la venta.
 const cambiarProveedorLinea = handler(async (req, res) => {
@@ -718,7 +745,7 @@ const cambiarProveedorLinea = handler(async (req, res) => {
     if (!proveedor) throw new ErrorNegocio("Indica el proveedor");
     if (!(Number(costo) >= 0)) throw new ErrorNegocio("Costo inválido");
     items[Number(indice)] = { ...i, proveedor: normProv(proveedor), costo: Number(costo) };
-    await v.update({ items, costo_total: items.reduce((s, x) => s + Number(x.costo) * Number(x.cantidad), 0) }, { transaction: t });
+    await v.update({ items, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
     return v;
   });
   res.json({ ok: true, data: verVenta(req, venta) });
@@ -937,5 +964,5 @@ module.exports = {
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
-  getCuadroCompra, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
+  getCuadroCompra, marcarStock, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
 };
