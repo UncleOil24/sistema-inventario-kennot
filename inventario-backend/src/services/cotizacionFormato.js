@@ -522,16 +522,24 @@ function pdfSolicitud(grupos, destino) {
 
 // Lista de materiales sencilla, en blanco y negro (como la hoja impresa del cuadro de compra):
 // { titulo, sub, proyectos, secciones: [{ titulo, lineas: [{ nombre, unidad, cantidad, obs }] }] }
-function pdfMaterialesSimple({ titulo, sub, proyectos, secciones }, destino) {
+function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = [], conOrden = [] }, destino) {
   const doc = new PDFDocument({ size: "LETTER", margins: { top: 34, bottom: 34, left: 40, right: 40 }, info: { Title: titulo } });
   doc.pipe(destino);
   const X = 40;
   const W = doc.page.width - 80;
   let y = 40;
-  doc.fillColor("black").font("Helvetica-Bold").fontSize(14).text(titulo, X, y, { width: W });
+  // Datos de facturación arriba a la derecha
+  const anchoF = 230;
+  let yf = 40;
+  facturacion.forEach((f) => {
+    f.forEach((t, k) => { doc.fillColor(k ? "#333" : "black").font(k ? "Helvetica" : "Helvetica-Bold").fontSize(k ? 8 : 9).text(t, X + W - anchoF, yf, { width: anchoF, align: "right" }); yf = doc.y + 1; });
+    yf += 5;
+  });
+  const anchoT = facturacion.length ? W - anchoF - 12 : W;
+  doc.fillColor("black").font("Helvetica-Bold").fontSize(14).text(titulo, X, y, { width: anchoT });
   y = doc.y + 2;
-  doc.font("Helvetica").fontSize(9).fillColor("#444").text(sub, X, y, { width: W }); y = doc.y + 2;
-  doc.text(`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`, X, y, { width: W }); y = doc.y + 8;
+  doc.font("Helvetica").fontSize(9).fillColor("#444").text(sub, X, y, { width: anchoT }); y = doc.y + 2;
+  doc.text(`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`, X, y, { width: anchoT }); y = Math.max(doc.y, yf) + 10;
   const fin = () => doc.page.height - 50;
   for (const sec of secciones) {
     const conObs = true; // versión interna: siempre con la columna de observación (detalle por proyecto o para anotar)
@@ -570,6 +578,14 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones }, destino) {
       y += 2;
     });
     y += 12;
+  }
+  if (!secciones.length) { doc.fillColor("black").font("Helvetica").fontSize(9.5).text("Todos los productos marcados ya tienen orden de compra.", X, y, { width: W }); y = doc.y + 10; }
+  // Lo que ya tiene orden: solo la referencia de la orden (sin detallar materiales)
+  if (conOrden.length) {
+    if (y + 30 + conOrden.length * 13 > doc.page.height - 50) { doc.addPage(); y = 40; }
+    doc.fillColor("black").font("Helvetica-Bold").fontSize(9).text("Ya tienen orden de compra (no se cotizan):", X, y, { width: W }); y = doc.y + 3;
+    doc.font("Helvetica").fontSize(8.5).fillColor("#333");
+    conOrden.forEach((o) => { doc.text(`• ${o.titulo} · ${o.productos} producto(s)`, X + 8, y, { width: W - 8 }); y = doc.y + 2; });
   }
   doc.end();
 }
