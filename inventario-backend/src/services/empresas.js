@@ -11,7 +11,7 @@ const validarEmpresa = (e) => (EMPRESAS.includes(e) ? e : "kenott");
 function datosEmpresa(clave, p) {
   if (clave === "tactics") {
     return {
-      clave, nombre: p.tactics_nombre, corto: "Tactics", rut: p.tactics_rut, giro: p.tactics_giro, direccion: p.tactics_direccion,
+      clave, nombre: p.tactics_nombre, corto: "Tactics", rut: p.tactics_rut, giro: p.tactics_giro, actividad: p.tactics_actividad, direccion: p.tactics_direccion,
       contacto: p.tactics_contacto, email: p.tactics_email, fono: p.tactics_fono, representante: p.tactics_representante,
       responsable: p.tactics_contacto, cargo: "Representante Legal",
       banco: p.tactics_banco, tipo_cuenta: p.tactics_tipo_cuenta, numero_cuenta: p.tactics_numero_cuenta,
@@ -21,7 +21,7 @@ function datosEmpresa(clave, p) {
     };
   }
   return {
-    clave: "kenott", nombre: p.empresa_nombre, corto: "Kenott", rut: p.empresa_rut, giro: p.empresa_giro, direccion: "",
+    clave: "kenott", nombre: p.empresa_nombre, corto: "Kenott", rut: p.empresa_rut, giro: p.empresa_giro, actividad: p.empresa_actividad, direccion: "",
     contacto: p.empresa_contacto, email: p.empresa_email, fono: p.empresa_fono, representante: p.representante_nombre,
     responsable: p.responsable_nombre, cargo: p.responsable_cargo,
     banco: p.banco, tipo_cuenta: p.tipo_cuenta, numero_cuenta: p.numero_cuenta,

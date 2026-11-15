@@ -45,7 +45,7 @@ const ficha = handler(async (req, res) => {
   const falta = Math.round(Number(v.total) - Number(v.monto_facturado || 0));
   res.json({ ok: true, data: {
     venta: { id: v.id, numero: v.numero, etapa: v.etapa, estado_factura: v.estado_factura, guia: v.guia_despacho },
-    emisor: { empresa: emp.corto || v.empresa, razon_social: emp.nombre, rut: emp.rut, giro: emp.giro },
+    emisor: { empresa: emp.corto || v.empresa, razon_social: emp.nombre, rut: emp.rut, giro: emp.giro, actividad: emp.actividad || null },
     receptor: {
       rut: cli?.rut || null, razon_social: v.cliente_nombre || cli?.nombre || null, giro: cli?.giro || null,
       direccion: cli?.direccion || null, comuna: cli?.comuna || null, contacto: cli?.contacto || null, email: cli?.email || null,

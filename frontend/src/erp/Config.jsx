@@ -104,7 +104,7 @@ export default function Config({ notify }) {
         <div className="panel-titulo">Datos de Inversiones Kenott (PDF y Excel de la cotización)</div>
         {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
           <div className="fields-row">{texto("empresa_nombre", "Razón social")}{texto("empresa_rut", "RUT")}</div>
-          {texto("empresa_giro", "Giro")}
+          <div className="fields-row">{texto("empresa_actividad", "Código actividad económica (SII)")}{texto("empresa_giro", "Giro")}</div>
           <div className="fields-row">{texto("empresa_contacto", "Contacto")}{texto("empresa_fono", "Teléfono")}</div>
           {texto("empresa_email", "Email")}
           <div className="fields-row">{texto("responsable_nombre", "Responsable comercial")}{texto("responsable_cargo", "Cargo")}</div>
@@ -124,7 +124,7 @@ export default function Config({ notify }) {
         {!params ? <span className="mini"><span className="spinner"></span>Cargando...</span> : <>
           <div className="mini">Al cotizar eliges "Tactics Inversiones": sale con su logo, firma, formato y numeración. Comparte catálogo, precios y márgenes con Kenott.</div>
           <div className="fields-row">{texto("tactics_nombre", "Razón social")}{texto("tactics_rut", "RUT")}</div>
-          {texto("tactics_giro", "Giro")}
+          <div className="fields-row">{texto("tactics_actividad", "Código actividad económica (SII)")}{texto("tactics_giro", "Giro")}</div>
           {texto("tactics_direccion", "Dirección")}
           <div className="fields-row">{texto("tactics_contacto", "Contacto")}{texto("tactics_fono", "Teléfono")}</div>
           <div className="fields-row">{texto("tactics_email", "Email")}{texto("tactics_representante", "Representante legal (firma)")}</div>
