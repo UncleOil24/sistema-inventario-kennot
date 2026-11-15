@@ -27,7 +27,7 @@ export function FichaSII({ venta, notify, onClose }) {
     <Modal titulo={`// Copiar al SII · ${venta.numero}`} onClose={onClose} ancho={820}
       footer={<><a className="btn btn-ghost" href="https://www.sii.cl" target="_blank" rel="noreferrer">Abrir portal del SII ↗</a><button className="btn btn-ghost" onClick={onClose}>Cerrar</button></>}>
       {!d ? <div className="cot-empty"><span className="spinner"></span>Cargando...</div> : <>
-        <div className="mini" style={{ marginBottom: 8 }}>Emite con <strong>{d.emisor.razon_social || d.emisor.empresa}</strong>{d.emisor.rut ? ` (RUT ${d.emisor.rut})` : ""}. Copia cada dato al formulario del portal, en este orden.</div>
+        <div className="mini" style={{ marginBottom: 8 }}>Emite con <strong>{d.emisor.razon_social || d.emisor.empresa}</strong>{d.emisor.rut ? ` (RUT ${d.emisor.rut})` : ""}{d.emisor.actividad ? ` · actividad ${d.emisor.actividad}` : ""}{d.emisor.giro ? ` · giro: ${d.emisor.giro}` : ""}. Copia cada dato al formulario del portal, en este orden.</div>
         {r.faltan?.length > 0 && <div className="aviso">Al cliente le falta {r.faltan.join(", ")}: complétalo en Clientes → Editar para que quede para la próxima vez.</div>}
         <div className="panel-titulo">Receptor</div>
         <Dato label="RUT" valor={r.rut} notify={notify} falta={!r.rut} />

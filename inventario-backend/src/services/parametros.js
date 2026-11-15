@@ -46,7 +46,8 @@ const DEFAULTS = {
   // Datos de la empresa para el PDF de la cotización
   empresa_nombre: "Inversiones Kenott SpA",
   empresa_rut: "78.060.315-1",
-  empresa_giro: "Comercialización y distribución de productos",
+  empresa_giro: "Venta al por mayor de materiales de construcción, artículos de ferretería, gasfitería y calefacción",
+  empresa_actividad: "466302", // código de actividad económica (SII)
   empresa_contacto: "Marcela Espinosa",
   empresa_fono: "+56 9 4709 6606",
   empresa_email: "kenottinversiones@gmail.com",
@@ -59,7 +60,8 @@ const DEFAULTS = {
   // --- Tactics Inversiones SpA (segunda empresa: se elige en cada cotización) ---
   tactics_nombre: "Tactics Inversiones SpA",
   tactics_rut: "76.999.682-6",
-  tactics_giro: "Actividades especializadas de construcción, contratista, comercialización y traslado de personal.",
+  tactics_giro: "Otras actividades de venta al por menor en comercios no especializados n.c.p.",
+  tactics_actividad: "471990", // código de actividad económica (SII)
   tactics_direccion: "30 Sur #1008, La Campiña, Maule",
   tactics_contacto: "Jorge Orellana",
   tactics_email: "tacticsinversionesspa@gmail.com",

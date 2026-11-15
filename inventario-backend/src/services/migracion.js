@@ -51,6 +51,7 @@ async function migrar() {
   await borradoresV0004(q);
   await postuladasV1(q);
   await ocPendienteV1(q);
+  await giroEmpresasV1(q);
   await protegerTablas(q);
 }
 
@@ -93,6 +94,22 @@ async function ocPendienteV1(q) {
     WHERE orden_compra_cliente ~* '^\\s*(pendiente|por llegar|sin\\s*oc|s/?\\s*oc|-+|\\?)\\s*$' RETURNING numero`);
   if (filas.length) console.log(`✓ OC pendiente: ${filas.map((f) => f.numero).join(", ")}`);
   await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_oc_pendiente_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// Giro y código de actividad económica de cada empresa (gerencia, 15-nov-2026)
+async function giroEmpresasV1(q) {
+  const [[hecho]] = await q(`SELECT valor FROM parametros WHERE clave = 'migracion_giro_v1'`);
+  if (hecho) return;
+  const valores = {
+    empresa_giro: "Venta al por mayor de materiales de construcción, artículos de ferretería, gasfitería y calefacción", empresa_actividad: "466302",
+    tactics_giro: "Otras actividades de venta al por menor en comercios no especializados n.c.p.", tactics_actividad: "471990",
+  };
+  for (const [clave, valor] of Object.entries(valores)) {
+    await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('${clave}', '${valor.replace(/'/g, "''")}', NOW(), NOW())
+      ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, "updatedAt" = NOW()`);
+  }
+  console.log("✓ Giro y código de actividad de Kenott (466302) y Tactics (471990) actualizados");
+  await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_giro_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)
