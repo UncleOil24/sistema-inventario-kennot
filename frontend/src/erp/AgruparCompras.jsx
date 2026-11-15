@@ -95,8 +95,8 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
           ls = [...m.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
         }
         return `<div class="grupo"><h2><span>${h(g.k === SIN ? "Sin proveedor elegido" : g.k)}</span><span>${ls.length} prod. · ${fmt(g.total)}</span></h2>
-        <table><colgroup><col style="width:18px"><col><col style="width:40px"><col style="width:40px"><col style="width:62px"><col style="width:22%"><col style="width:70px"><col style="width:78px"><col style="width:80px"></colgroup><thead><tr><th class="chk"></th><th>Producto</th><th>N°</th><th class="num">Cant.</th><th>Unidad</th><th>${porVenta ? "Proveedor" : "De qué ventas"}</th><th class="num">Precio unit.</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>
-        ${ls.map((f) => `<tr><td class="chk">☐</td><td>${h(f.nombre)}${f.no_vino ? `<div class="aviso">no vino en ${h(f.no_vino.orden)}</div>` : ""}</td><td>${h(f.codigo || "")}</td><td class="num">${f.cantidad}</td><td>${h(f.unidad || "")}</td>
+        <table><colgroup><col style="width:40px"><col style="width:18px"><col><col style="width:40px"><col style="width:62px"><col style="width:22%"><col style="width:70px"><col style="width:78px"><col style="width:80px"></colgroup><thead><tr><th>N°</th><th class="chk"></th><th>Producto</th><th class="num">Cant.</th><th>Unidad</th><th>${porVenta ? "Proveedor" : "De qué ventas"}</th><th class="num">Precio unit.</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>
+        ${ls.map((f) => `<tr><td>${h(f.codigo || "")}</td><td class="chk">☐</td><td>${h(f.nombre)}${f.no_vino ? `<div class="aviso">no vino en ${h(f.no_vino.orden)}</div>` : ""}</td><td class="num">${f.cantidad}</td><td>${h(f.unidad || "")}</td>
           <td>${h(porVenta ? f.proveedor : f.detalle.join(" · "))}</td><td class="num">${f.precio > 0 ? fmt(f.precio) : "sin precio"}</td><td class="num">${fmt(Number(f.precio || 0) * f.cantidad)}</td>
           <td>${TXT[f.estado] || f.estado}${f.ordenes?.length ? `<div class="mini">${h(f.ordenes.join(", "))}</div>` : ""}</td></tr>`).join("")}
         </tbody></table></div>`;
