@@ -275,7 +275,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
       </div>
       {venta.notas && <div className="mini">{venta.notas}</div>}
       <AccionesVenta venta={venta} puedeOperar={puedeOperar && modo !== "comercial"} puedeVender={puedeVender && modo !== "operativo"} esAdmin={esAdmin} notify={notify} onCambio={onCambio}
-        abrirCuadro={verCompras ? () => setCuadro(true) : null} />
+        abrirCuadro={null} />
       {venta.estado !== "anulada" && editaDatos && (
         <div className="fields-row">
           <div className="field">
