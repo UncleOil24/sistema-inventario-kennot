@@ -117,7 +117,6 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   };
   const quitarStock = (l) => ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: 0 } }), "Ya no sale de stock");
   const comprarConOtro = (l) => { setSel(new Set([l.indice])); setTimeout(() => document.getElementById("orden-a")?.focus(), 50); };
-  const pedido = () => !sel.size ? notify(AVISO_SEL, "danger") : descargar(`/ventas/${ventaId}/pedido?proveedor=${encodeURIComponent(provOrden || "")}&indices=${[...sel].join(",")}`).catch((e) => notify(e.message, "danger"));
   const descartar = async () => {
     if (!(await confirmar(`¿Descartar ${borradores.length} orden(es) en borrador (${borradores.map((o) => o.numero).join(", ")})?\nSus productos vuelven a "por comprar".`, { titulo: "Descartar borradores", boton: "Descartar", peligro: true }))) return;
     ejecutar(() => api(`/ventas/${ventaId}/descartar-borradores`, { method: "POST" }), (r) => `✓ Descartadas: ${r.descartadas.join(", ")}`);
@@ -176,7 +175,6 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
             <input id="orden-a" list="cuadro-provs" className="input-mini" value={provOrden} onChange={(e) => setProvOrden(e.target.value.toUpperCase())} style={{ width: 200, padding: "5px 8px" }} />
             <datalist id="cuadro-provs">{data.proveedores.map((p) => <option key={p} value={p} />)}</datalist>
             <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={crearOrden}>Crear orden</button>
-            <button className="btn btn-ghost btn-sm" onClick={pedido}>↓ Pedido (Excel)</button>
             <BotonesSolicitud notify={notify} lineas={() => marcadas.map((l) => ({ venta_id: ventaId, indice: l.indice }))} />
             {sel.size > 0 && <button className="link mini" onClick={() => setSel(new Set())}>Quitar marcas</button>}
           </div>

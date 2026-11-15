@@ -522,4 +522,58 @@ function pdfSolicitud(grupos, destino) {
   doc.end();
 }
 
-module.exports = { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion, pdfSolicitud, PLAZO_DEFECTO };
+// Lista de materiales sencilla, en blanco y negro (como la hoja impresa del cuadro de compra):
+// { titulo, sub, proyectos, secciones: [{ titulo, lineas: [{ nombre, unidad, cantidad, obs }] }] }
+function pdfMaterialesSimple({ titulo, sub, proyectos, secciones }, destino) {
+  const doc = new PDFDocument({ size: "LETTER", margins: { top: 34, bottom: 34, left: 40, right: 40 }, info: { Title: titulo } });
+  doc.pipe(destino);
+  const X = 40;
+  const W = doc.page.width - 80;
+  let y = 40;
+  doc.fillColor("black").font("Helvetica-Bold").fontSize(14).text(titulo, X, y, { width: W });
+  y = doc.y + 2;
+  doc.font("Helvetica").fontSize(9).fillColor("#444").text(sub, X, y, { width: W }); y = doc.y + 2;
+  doc.text(`${proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${proyectos.join(" · ")}`, X, y, { width: W }); y = doc.y + 8;
+  const fin = () => doc.page.height - 50;
+  for (const sec of secciones) {
+    const conObs = sec.lineas.some((l) => l.obs);
+    const col = conObs
+      ? [{ t: "", w: 16 }, { t: "N°", w: 24, a: "right" }, { t: "MATERIAL", w: W * 0.46 }, { t: "UNIDAD", w: 60 }, { t: "CANT.", w: 44, a: "right" }]
+      : [{ t: "", w: 16 }, { t: "N°", w: 24, a: "right" }, { t: "MATERIAL", w: W - 16 - 24 - 70 - 54 }, { t: "UNIDAD", w: 70 }, { t: "CANT.", w: 54, a: "right" }];
+    if (conObs) col.push({ t: "OBSERVACIÓN INTERNA", w: W - col.reduce((s2, c) => s2 + c.w, 0) });
+    const cabecera = () => {
+      if (y + 50 > fin()) { doc.addPage(); y = 40; }
+      doc.rect(X, y, 3, 16).fill("#333");
+      doc.rect(X + 3, y, W - 3, 16).fill("#ececec");
+      doc.fillColor("black").font("Helvetica-Bold").fontSize(9.5).text(sec.titulo, X + 8, y + 4, { width: W - 120 });
+      doc.font("Helvetica").fontSize(8.5).text(`${sec.lineas.length} producto(s)`, X + W - 110, y + 4, { width: 104, align: "right" });
+      y += 20;
+      let x = X;
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#222");
+      col.forEach((c) => { doc.text(c.t, x + 2, y, { width: c.w - 4, align: c.a || "left" }); x += c.w; });
+      y += 11;
+      doc.moveTo(X, y).lineTo(X + W, y).lineWidth(1).strokeColor("#333").stroke();
+      y += 3;
+    };
+    cabecera();
+    sec.lineas.forEach((l, k) => {
+      const vals = ["☐", String(k + 1), l.nombre || "", l.unidad || "", String(l.cantidad), ...(conObs ? [l.obs || ""] : [])];
+      doc.font("Helvetica").fontSize(9);
+      const alto = Math.max(14, ...vals.map((v, i) => doc.heightOfString(v, { width: col[i].w - 4 }) + 5));
+      if (y + alto > fin()) { doc.addPage(); y = 40; cabecera(); }
+      let x = X;
+      vals.forEach((v, i) => {
+        if (i === 0) doc.rect(x + 3, y + 2, 7, 7).lineWidth(0.7).strokeColor("#333").stroke();
+        else doc.fillColor(i === 5 ? "#555" : "black").font("Helvetica").fontSize(i === 5 ? 7.5 : 9).text(v, x + 2, y + 2, { width: col[i].w - 4, align: col[i].a || "left" });
+        x += col[i].w;
+      });
+      y += alto;
+      doc.moveTo(X, y).lineTo(X + W, y).lineWidth(0.4).strokeColor("#bbb").stroke();
+      y += 2;
+    });
+    y += 12;
+  }
+  doc.end();
+}
+
+module.exports = { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion, pdfSolicitud, pdfMaterialesSimple, PLAZO_DEFECTO };
