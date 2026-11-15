@@ -6,6 +6,9 @@ const c = require("../controllers/ventasController");
 
 router.get("/", c.getVentas);
 router.get("/facturas/lista", c.listarFacturas);
+router.get("/agrupar/datos", operativo, c.agruparDatos);
+router.post("/agrupar/excel", operativo, c.agruparExcel);
+router.post("/agrupar/ordenes", operativo, c.agruparOrdenes);
 router.get("/:id", c.getVenta);
 router.post("/", comercial, c.crearVenta);
 router.post("/desde-cotizacion/:id", comercial, c.ventaDesdeCotizacion);
@@ -21,6 +24,7 @@ router.post("/:id/asignar", operativo, c.asignarProveedores);
 router.post("/:id/crear-orden", operativo, c.crearOrdenVenta);
 router.post("/:id/descartar-borradores", operativo, c.descartarBorradores);
 router.get("/:id/pedido", operativo, c.pedidoExcel);
+router.get("/:id/cuadro-excel", operativo, c.cuadroExcel);
 // Recorrido: Operativo acepta y confirma (productos listos), Comercial factura, Operativo despacha y entrega
 router.post("/:id/aceptar", operativo, c.aceptarVenta);
 router.post("/:id/confirmar", operativo, c.confirmarVenta);

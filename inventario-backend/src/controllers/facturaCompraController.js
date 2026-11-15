@@ -179,7 +179,19 @@ const registrarFactura = handler(async (req, res) => {
       orden = await OrdenCompra.findByPk(b.orden_id, { transaction: t, lock: t.LOCK.UPDATE });
       if (!orden) throw new ErrorNegocio("Compra no encontrada", 404);
       if (orden.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
+      // Lo pedido que no vino en la factura (sin stock o vino menos): vuelve a "por comprar" en el cuadro de la venta
+      const llego = new Map();
+      for (const it of itemsOrden) llego.set(it.producto_id, (llego.get(it.producto_id) || 0) + Number(it.cantidad));
+      const noVinieron = [];
+      for (const it of orden.items || []) {
+        if (!it.producto_id) continue;
+        const hay = llego.get(it.producto_id) || 0;
+        const usa = Math.min(hay, Number(it.cantidad)); llego.set(it.producto_id, hay - usa);
+        if (usa < Number(it.cantidad)) noVinieron.push({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) - usa, pedido: Number(it.cantidad) });
+      }
+      resumen.no_vinieron = noVinieron;
       await orden.update({
+        no_vinieron: noVinieron.length ? noVinieron : null,
         proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: itemsOrden, subtotal: neto, iva, total,
         documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa: empresa || orden.empresa,
         estado: "recibida", fecha_recepcion: orden.fecha_recepcion || new Date(),

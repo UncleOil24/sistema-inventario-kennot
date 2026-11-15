@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Modal, Cargando, Estado, confirmar, pedirTexto } from "./ui";
-import { api, fmt, descargar } from "./lib";
+import { api, fmt, descargar, imprimirHTML, escaparHTML as h } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
 
 // Cuadro de compra de una venta (Operativo y gerencia): todos los materiales en una tabla, con quién comprar cada uno.
@@ -10,7 +10,7 @@ const ESTADO_LINEA = {
   por_comprar: ["Por comprar", "warn"], pedido: ["Pedido", "info"], parcial: ["Parcial", "warn"], comprado: ["Comprado", "ok"],
 };
 
-export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
+export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAdmin }) {
   const [data, setData] = useState(null);
   const [sel, setSel] = useState(new Set());
   const [ocupado, setOcupado] = useState(false);
@@ -28,7 +28,11 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
   // Proveedor propuesto para la orden: el que más se repite entre las líneas marcadas
   const provSugerido = useMemo(() => {
     const c = new Map();
-    for (const l of marcadas) if (l.proveedor !== "SIN PROVEEDOR") c.set(l.proveedor, (c.get(l.proveedor) || 0) + 1);
+    for (const l of marcadas) {
+      // Lo que no vino con un proveedor se propone con el siguiente más barato
+      const p = l.no_vino && l.proveedor.toUpperCase() === String(l.no_vino.proveedor).toUpperCase() ? (l.opciones.find((o) => o.proveedor.toUpperCase() !== l.proveedor.toUpperCase())?.proveedor || "") : l.proveedor;
+      if (p && p !== "SIN PROVEEDOR") c.set(p, (c.get(p) || 0) + 1);
+    }
     return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
   }, [marcadas]);
   useEffect(() => { setProvOrden(provSugerido); }, [provSugerido]);
@@ -72,6 +76,25 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
     if (!provOrden) return notify("Indica el proveedor de la orden", "danger");
     ejecutar(() => api(`/ventas/${ventaId}/crear-orden`, { method: "POST", body: { indices: [...sel], proveedor: provOrden } }), (r) => `✓ Orden ${r.numero} creada a ${r.proveedor_nombre}`);
   };
+  // Hoja para imprimir (Carta horizontal): productos agrupados por proveedor, con casilla para marcar a mano
+  const imprimir = () => {
+    const grupos = new Map();
+    for (const l of lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
+    const prov = [...grupos.entries()].sort((a, b) => (a[0] === "SIN PROVEEDOR") - (b[0] === "SIN PROVEEDOR") || a[0].localeCompare(b[0]));
+    const contacto = Object.fromEntries((data.resumen_proveedores || []).map((p) => [p.proveedor, p.contacto]));
+    const txt = { por_comprar: "Por comprar", pedido: "Pedido", parcial: "Parcial", comprado: "Comprado" };
+    const cuerpo = `<h1>Cuadro de compra · ${h(venta.numero)} · ${h(venta.cliente_nombre || "Sin cliente")}</h1>
+      <div class="sub">${[venta.orden_compra_cliente ? `OC ${h(venta.orden_compra_cliente)}` : "", venta.id_solicitud ? `ID ${h(venta.id_solicitud)}` : "", `impreso el ${new Date().toLocaleDateString("es-CL")}`].filter(Boolean).join(" · ")}</div>
+      ${prov.map(([p, ls]) => `<div class="grupo"><h2><span>${h(p === "SIN PROVEEDOR" ? "Sin proveedor elegido" : p)}${contacto[p] ? ` <span class="mini">· ${h(contacto[p])}</span>` : ""}</span><span>${ls.length} prod. · ${fmt(ls.reduce((s2, l) => s2 + l.total_compra, 0))}</span></h2>
+        <table><colgroup><col style="width:20px"><col><col style="width:50px"><col style="width:45px"><col style="width:72px"><col style="width:80px"><col style="width:85px"><col style="width:110px"></colgroup><thead><tr><th class="chk"></th><th>Producto</th><th>N°</th><th class="num">Cant.</th><th>Unidad</th><th class="num">Precio unit.</th><th class="num">Total</th><th>Estado</th></tr></thead><tbody>
+        ${ls.map((l) => `<tr><td class="chk">☐</td><td>${h(l.nombre)}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}</td><td>${h(l.codigo || "")}</td><td class="num">${l.cantidad}</td><td>${h(l.unidad || "")}</td>
+          <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td>${txt[l.estado] || l.estado}${l.compras.length ? `<div class="mini">${l.compras.map((c) => h(c.numero)).join(", ")}</div>` : ""}</td></tr>`).join("")}
+        </tbody></table></div>`).join("")}
+      <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;
+    imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo, { horizontal: true });
+  };
+  const excelCuadro = () => descargar(`/ventas/${ventaId}/cuadro-excel`).catch((e) => notify(e.message, "danger"));
+  const comprarConOtro = (l) => { setSel(new Set([l.indice])); setTimeout(() => document.getElementById("orden-a")?.focus(), 50); };
   const pedido = () => descargar(`/ventas/${ventaId}/pedido?proveedor=${encodeURIComponent(provOrden || "")}&indices=${[...sel].join(",")}`).catch((e) => notify(e.message, "danger"));
   const descartar = async () => {
     if (!(await confirmar(`¿Descartar ${borradores.length} orden(es) en borrador (${borradores.map((o) => o.numero).join(", ")})?\nSus productos vuelven a "por comprar".`, { titulo: "Descartar borradores", boton: "Descartar", peligro: true }))) return;
@@ -83,7 +106,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
   return (
     <Modal titulo={`// Cuadro de compra · ${venta.numero} · ${venta.cliente_nombre || "Sin cliente"}`} onClose={onClose} ancho={1250}
       footer={<>
-        <button className="btn btn-ghost" onClick={() => window.print()}>Imprimir</button>
+        <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
+        <button className="btn btn-ghost" onClick={excelCuadro}>↓ Excel del cuadro</button>
         {!anulada && borradores.length > 0 && <button className="btn btn-ghost" disabled={ocupado} onClick={descartar}>Descartar borradores ({borradores.length})</button>}
         {!anulada && <button className="btn btn-primary" onClick={() => setSubir(true)}>⇪ Subir facturas y boletas</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
@@ -127,7 +151,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
             <strong>{sel.size} marcado(s)</strong>
             <button className="btn btn-ghost btn-sm" disabled={ocupado} onClick={asignarMarcadas}>Asignar proveedor…</button>
             <span className="mini">Orden a</span>
-            <input list="cuadro-provs" className="input-mini" value={provOrden} onChange={(e) => setProvOrden(e.target.value.toUpperCase())} style={{ width: 200, padding: "5px 8px" }} />
+            <input id="orden-a" list="cuadro-provs" className="input-mini" value={provOrden} onChange={(e) => setProvOrden(e.target.value.toUpperCase())} style={{ width: 200, padding: "5px 8px" }} />
             <datalist id="cuadro-provs">{data.proveedores.map((p) => <option key={p} value={p} />)}</datalist>
             <button className="btn btn-primary btn-sm" disabled={ocupado || !provOrden} onClick={crearOrden}>Crear orden</button>
             <button className="btn btn-ghost btn-sm" onClick={pedido}>↓ Pedido (Excel)</button>
@@ -168,6 +192,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
                     <td className="mini" style={{ color: l.margen < 0 ? "var(--danger)" : undefined }}>{fmt(l.margen)} · {l.margen_pct}%</td>
                     <td>
                       <span className={`estado estado-${tono}`}>{txt}</span>
+                      {l.no_vino && <div className="mini" style={{ color: "var(--danger)" }}>no vino en {l.no_vino.orden} ({l.no_vino.proveedor})
+                        {!anulada && <div><button className="link mini" onClick={() => comprarConOtro(l)}>Comprar con otro proveedor</button></div>}</div>}
                       {l.compras.map((c) => <div key={c.id + c.numero}><button className="link mini" onClick={() => irACompra?.(c.id)}>{c.numero} {c.proveedor}</button></div>)}
                     </td>
                   </tr>
@@ -211,7 +237,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra }) {
           </div>
         </div>
       </div>
-      {subir && <SubirDocumentosVenta venta={venta} lineas={lineas} proveedores={data.proveedores} notify={notify} onClose={() => { setSubir(false); cargar(); }} />}
+      {subir && <SubirDocumentosVenta venta={venta} lineas={lineas} ordenes={ordenes} proveedores={data.proveedores} notify={notify} onClose={() => { setSubir(false); cargar(); }} />}
     </Modal>
   );
 }

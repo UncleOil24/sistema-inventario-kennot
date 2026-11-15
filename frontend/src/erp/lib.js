@@ -82,6 +82,58 @@ export async function descargar(path, nombre) {
   URL.revokeObjectURL(url);
 }
 
+// Descarga un archivo pidiéndolo con POST (cuando lo que va en el archivo se arma en pantalla)
+export async function descargarPost(path, body, nombre) {
+  const res = await authFetch(`${API_URL}/api${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) { let msg = `Error ${res.status}`; try { msg = (await res.json()).error || msg; } catch { /* binario */ } throw new Error(msg); }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = nombre || (res.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/)?.[1] || "archivo.xlsx";
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// Imprime directo un PDF del sistema (sin descargarlo): se abre la ventana de impresión con el tamaño de hoja del PDF
+export async function imprimirPDF(path) {
+  const res = await authFetch(`${API_URL}/api${path}`);
+  if (!res.ok) { let msg = `Error ${res.status}`; try { msg = (await res.json()).error || msg; } catch { /* binario */ } throw new Error(msg); }
+  const url = URL.createObjectURL(new Blob([await res.blob()], { type: "application/pdf" }));
+  const viejo = document.getElementById("marco-impresion"); if (viejo) viejo.remove();
+  const f = document.createElement("iframe");
+  f.id = "marco-impresion"; f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  f.src = url;
+  f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch { window.open(url, "_blank"); } };
+  document.body.appendChild(f);
+  setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
+}
+
+// Imprime una hoja armada para papel (Carta, vertical u horizontal), sin los botones de la pantalla
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+export { esc as escaparHTML };
+export function imprimirHTML(titulo, cuerpo, { horizontal = true } = {}) {
+  const viejo = document.getElementById("marco-impresion"); if (viejo) viejo.remove();
+  const f = document.createElement("iframe");
+  f.id = "marco-impresion"; f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(f);
+  const d = f.contentWindow.document;
+  d.open();
+  d.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${esc(titulo)}</title><style>
+    @page { size: letter ${horizontal ? "landscape" : "portrait"}; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5px; color: #111; margin: 0; }
+    h1 { font-size: 15px; margin: 0 0 2px; } .sub { color: #444; margin-bottom: 8px; }
+    h2 { font-size: 12px; margin: 12px 0 4px; padding: 4px 6px; background: #e6eeee; border-left: 4px solid #2b6f6f; display: flex; justify-content: space-between; }
+    table { width: 100%; border-collapse: collapse; page-break-inside: auto; table-layout: fixed; } td, th { overflow-wrap: break-word; }
+    tr { page-break-inside: avoid; } thead { display: table-header-group; }
+    th { text-align: left; font-size: 9.5px; text-transform: uppercase; border-bottom: 1.5px solid #333; padding: 3px 4px; }
+    td { border-bottom: 1px solid #ccc; padding: 3px 4px; vertical-align: top; }
+    .num { text-align: right; white-space: nowrap; } .chk { width: 18px; font-size: 13px; } .mini { color: #555; font-size: 9px; }
+    .tot td { font-weight: bold; border-top: 1.5px solid #333; } .aviso { color: #a33; }
+    .pie { margin-top: 10px; font-size: 11px; } .grupo { page-break-inside: avoid; }
+  </style></head><body>${cuerpo}</body></html>`);
+  d.close();
+  setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); }, 300);
+}
+
 // Parámetros (márgenes) para calcular precios de venta en pantalla
 export const precioSegun = (p, tipo) => Number(tipo === "particular" ? p.precio_particular : p.precio_convenio) || 0;
 
