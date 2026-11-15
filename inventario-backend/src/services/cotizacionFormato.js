@@ -544,8 +544,8 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
   for (const sec of secciones) {
     const conObs = true; // versión interna: siempre con la columna de observación (detalle por proyecto o para anotar)
     const col = conObs
-      ? [{ t: "", w: 16 }, { t: "N°", w: 24, a: "right" }, { t: "MATERIAL", w: W * 0.46 }, { t: "UNIDAD", w: 60 }, { t: "CANT.", w: 44, a: "right" }]
-      : [{ t: "", w: 16 }, { t: "N°", w: 24, a: "right" }, { t: "MATERIAL", w: W - 16 - 24 - 70 - 54 }, { t: "UNIDAD", w: 70 }, { t: "CANT.", w: 54, a: "right" }];
+      ? [{ t: "N°", w: 22, a: "right" }, { t: "", w: 16 }, { t: "MATERIAL", w: W * 0.46 }, { t: "UNIDAD", w: 60 }, { t: "CANT.", w: 44, a: "right" }]
+      : [{ t: "N°", w: 22, a: "right" }, { t: "", w: 16 }, { t: "MATERIAL", w: W - 16 - 22 - 70 - 54 }, { t: "UNIDAD", w: 70 }, { t: "CANT.", w: 54, a: "right" }];
     if (conObs) col.push({ t: "OBSERVACIÓN INTERNA", w: W - col.reduce((s2, c) => s2 + c.w, 0) });
     const cabecera = () => {
       if (y + 50 > fin()) { doc.addPage(); y = 40; }
@@ -563,13 +563,13 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
     };
     cabecera();
     sec.lineas.forEach((l, k) => {
-      const vals = ["☐", String(k + 1), l.nombre || "", l.unidad || "", String(l.cantidad), ...(conObs ? [l.obs || ""] : [])];
+      const vals = [String(k + 1), "☐", l.nombre || "", l.unidad || "", String(l.cantidad), ...(conObs ? [l.obs || ""] : [])];
       doc.font("Helvetica").fontSize(9);
       const alto = Math.max(14, ...vals.map((v, i) => doc.heightOfString(v, { width: col[i].w - 4 }) + 5));
       if (y + alto > fin()) { doc.addPage(); y = 40; cabecera(); }
       let x = X;
       vals.forEach((v, i) => {
-        if (i === 0) doc.rect(x + 3, y + 2, 7, 7).lineWidth(0.7).strokeColor("#333").stroke();
+        if (i === 1) doc.rect(x + 5, y + 2, 7, 7).lineWidth(0.7).strokeColor("#333").stroke();
         else doc.fillColor(i === 5 ? "#555" : "black").font("Helvetica").fontSize(i === 5 ? 7.5 : 9).text(v, x + 2, y + 2, { width: col[i].w - 4, align: col[i].a || "left" });
         x += col[i].w;
       });
