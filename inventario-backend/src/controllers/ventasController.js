@@ -678,7 +678,7 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     const pk = it.producto_id || it.nombre;
     const x = sec.lineas.get(pk) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map(), ordenes: new Set() };
     x.cantidad += cant; x.detalle.set(v.numero, (x.detalle.get(v.numero) || 0) + cant); // de qué venta es cada cantidad
-    if (o) x.ordenes.add(`${o.numero} ${o.proveedor_nombre}${o.estado === "recibida" ? " (recibida)" : ""}`);
+    if (o) x.ordenes.add(o.numero); // solo el N° de la orden, sin proveedor
     sec.lineas.set(pk, x);
   }
   // Primero la solicitud de cotización, después las órdenes por número
@@ -695,6 +695,8 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
   const facturacion = (empresas.size > 1 ? ["tactics"] : [...empresas]).map((e) => { const d = datosEmpresa(e, params); return [d.nombre, d.rut ? `RUT ${d.rut}` : "", d.giro ? `Giro: ${d.giro}` : "", d.direccion || "", [d.contacto, d.fono].filter(Boolean).join(" · "), d.email || ""].filter(Boolean); });
   const fecha = new Date().toLocaleDateString("es-CL", { timeZone: "America/Santiago" });
   const nombre = `Solicitud_cotizacion_${new Date().toISOString().slice(0, 10)}`;
+  // Para imprimir directo: los datos, y la pantalla arma la hoja (se ajusta al papel de la impresora)
+  if (req.body?.formato === "datos") return res.json({ ok: true, data: { titulo, fecha, proyectos, secciones: porCotizar, facturacion, conOrden } });
   if (req.body?.formato === "excel") {
     const wb = libro();
     const ws = wb.addWorksheet("Solicitud");
