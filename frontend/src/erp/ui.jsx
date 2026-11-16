@@ -1,6 +1,6 @@
 // Piezas compartidas por las vistas del ERP
 import { useState, useMemo, useEffect } from "react";
-import { fmt, fecha, hoyISO, sinTildes, imprimirPDF, descargarPost } from "./lib";
+import { fmt, fecha, hoyISO, sinTildes, descargarPost, api, imprimirHTML, escaparHTML } from "./lib";
 
 export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
   return (
@@ -395,6 +395,30 @@ export const repartoParaEnviar = (l) => {
   return r;
 };
 
+// Imprime directo la solicitud de cotización sencilla como hoja HTML: se ajusta al ancho del papel de la impresora
+export async function imprimirSolicitud(lineas) {
+  const d = await api("/ventas/solicitud-cotizacion", { method: "POST", body: { lineas, estilo: "simple", formato: "datos" } });
+  const h = escaparHTML;
+  const fact = d.facturacion.map((f) => `<div class="fact">${f.map((t, k) => {
+    if (!k) return `<div class="fact-nom">${h(t)}</div>`;
+    const m = /^(RUT|Giro):?\s*(.*)$/i.exec(t);
+    return m ? `<div><b>${m[1].toUpperCase()}:</b> ${h(m[2])}</div>` : `<div>${h(t)}</div>`;
+  }).join("")}</div>`).join("");
+  const tabla = (sec) => {
+    const llena = sec.lineas.some((l) => l.obs);
+    return `<div class="grupo"><h2><span>${h(sec.titulo)}</span><span>${sec.lineas.length} producto(s)</span></h2>
+    <table><colgroup><col style="width:30px"><col style="width:18px"><col><col style="width:70px"><col style="width:48px"><col style="width:${llena ? "26%" : "110px"}"></colgroup>
+    <thead><tr><th class="num">N°</th><th class="chk"></th><th>Material</th><th class="cen">Unidad</th><th class="num">Cant.</th><th class="obs">${llena ? "Observación interna" : "Observación"}</th></tr></thead><tbody>
+    ${sec.lineas.map((l, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(l.nombre)}</td><td class="cen">${h(l.unidad || "")}</td><td class="num">${l.cantidad}</td><td class="obs mini">${h(l.obs || "")}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  };
+  const cuerpo = `<style>.cab{display:flex;justify-content:space-between;gap:16px;margin-bottom:10px}.fact{border:1px solid #999;padding:6px 8px;font-size:9.5px}.fact+.fact{margin-top:6px}.fact-nom{font-weight:bold;font-size:11px}</style>
+    <div class="cab"><div style="flex:1"><h1>${h(d.titulo)}</h1><div class="sub">Fecha: ${h(d.fecha)}<br>${d.proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${h(d.proyectos.join(" · "))}</div></div><div style="width:48%">${fact}</div></div>
+    ${d.secciones.map(tabla).join("")}
+    ${!d.secciones.length ? "<div class=\"pie\">Todos los productos marcados ya tienen orden de compra.</div>" : ""}`;
+  imprimirHTML(d.titulo, cuerpo);
+}
+
 // Solicitud de cotización a proveedores (lineas: [{ venta_id, indice, cantidad? }]).
 // Sencilla (blanco y negro, solo material, unidad y cantidad; lo que ya tiene orden sale bajo "Orden de compra C-00xx"):
 // imprimir directo, PDF o Excel. Formal: con logo y colores de la empresa (PDF).
@@ -404,7 +428,7 @@ export function BotonesSolicitud({ lineas, notify, sm = true, vacio = "Seleccion
     const ls = typeof lineas === "function" ? lineas() : lineas;
     if (!ls.length) return notify(vacio, "danger");
     const body = { lineas: ls, estilo, formato: accion === "excel" ? "excel" : "pdf" };
-    const p = accion === "imprimir" ? imprimirPDF("/ventas/solicitud-cotizacion", body) : descargarPost("/ventas/solicitud-cotizacion", body);
+    const p = accion === "imprimir" ? imprimirSolicitud(ls) : descargarPost("/ventas/solicitud-cotizacion", body);
     p.catch((e) => notify(e.message, "danger"));
   };
   const c = `btn btn-ghost${sm ? " btn-sm" : ""}`;

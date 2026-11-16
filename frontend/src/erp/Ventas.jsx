@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar, pedirTexto } from "./ui";
-import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO, imprimirPDF } from "./lib";
+import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar, pedirTexto, imprimirSolicitud } from "./ui";
+import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
 import CuadroCompra from "./CuadroCompra";
 import { AccionesVenta, PanelFacturas, HistorialVenta, conConfirmacion } from "./Recorrido";
 
@@ -129,7 +129,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
                     <td><div style={{ display: "flex", gap: 4, flexWrap: "nowrap" }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => verDetalle(v.id)}>Ver</button>
                       {modo === "operativo" && v.estado !== "anulada" && (v.items || []).length > 0 && <button className="btn btn-ghost btn-sm" title="Imprime directo el detalle de materiales (solicitud de cotización sencilla)"
-                        onClick={() => imprimirPDF("/ventas/solicitud-cotizacion", { estilo: "simple", lineas: v.items.map((_, k) => ({ venta_id: v.id, indice: k })) }).catch((e) => notify(e.message, "danger"))}>🖨 Detalle</button>}
+                        onClick={() => imprimirSolicitud(v.items.map((_, k) => ({ venta_id: v.id, indice: k }))).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
                     </div></td>
                   </tr>
                 );
