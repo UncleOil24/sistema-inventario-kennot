@@ -488,3 +488,19 @@ const exportarPlanilla = async (req, res) => {
   } catch (e) { console.error(e); if (!res.headersSent) res.status(500).json({ ok: false, error: "No se pudo generar la planilla" }); }
 };
 module.exports.exportarPlanilla = exportarPlanilla;
+module.exports.buscarSimilares = buscarSimilares;
+// Búsqueda amplia para encontrar precios cargados en otro producto: cuánto de lo buscado aparece en el nombre
+module.exports.buscarParecidos = async (q, excluirId, { minimo = 0.4, max = 15 } = {}) => {
+  const A = [...tokens(q)];
+  const largas = A.filter((w) => w.length >= 3 || /\d/.test(w));
+  if (!largas.length) return [];
+  const candidatos = await Producto.findAll({
+    where: { activo: true, ...(excluirId ? { id: { [Op.ne]: excluirId } } : {}), [Op.or]: largas.slice(0, 10).map((w) => ({ nombre: { [Op.iLike]: `%${w}%` } })) },
+    attributes: ["id", "codigo", "nombre", "unidad"], limit: 800,
+  });
+  // Las medidas (palabras con números) pesan doble: 50 MM no es 60 MM
+  const peso = (w) => (/\d/.test(w) ? 2 : 1);
+  const total = A.reduce((s, w) => s + peso(w), 0);
+  return candidatos.map((p) => { const B = tokens(p.nombre); let c = 0; for (const w of A) if (B.has(w)) c += peso(w); return { ...p.toJSON(), parecido: Math.round((c / total) * 100) }; })
+    .filter((p) => p.parecido >= minimo * 100).sort((a, b) => b.parecido - a.parecido).slice(0, max * 3);
+};
