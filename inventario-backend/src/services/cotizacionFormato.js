@@ -448,6 +448,63 @@ async function excelInterno(cot, params, precioVenta) {
   return wb;
 }
 
+// Hoja interna simple: lo cotizado, el caso, venta, compra, los 3 mejores proveedores y la utilidad.
+// opciones: Map(producto_id -> [{ proveedor, precio }]) ordenado del más barato al más caro
+const GENERICOS = ["SISTEMA", "SIN PROVEEDOR", "SIN IDENTIFICAR"];
+async function excelInternoSimple(cot, opciones) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Interna simple", { views: [{ state: "frozen", ySplit: 3, xSplit: 2 }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  const cols = [
+    ["N°", 5], ["Producto cotizado", 46], ["Caso", 11], ["Precio venta", 13], ["Precio compra", 13],
+    ["Proveedor 1 (mejor)", 17], ["Precio 1", 11], ["Proveedor 2", 17], ["Precio 2", 11], ["Proveedor 3", 17], ["Precio 3", 11],
+    ["Unidad", 9], ["Cant.", 8], ["Total venta", 13], ["Total compra", 13], ["Utilidad", 13], ["Margen %", 9],
+  ];
+  ws.columns = cols.map(([header, width]) => ({ header, width }));
+  ws.spliceRows(1, 0, [`HOJA INTERNA SIMPLE — ${String(cot.empresa).toUpperCase()} N${cot.numero} · ${cot.cliente || ""} · ID ${cot.id_solicitud || "—"} · NO ENVIAR AL CLIENTE`], []);
+  ws.getCell("A1").font = { bold: true, size: 12, color: { argb: "FFC00000" } };
+  const enc = ws.getRow(3);
+  enc.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  enc.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  enc.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF444444" } }; });
+  const COLOR = { similar: "FFFFF2CC", nuevo: "FFF8D7DA" };
+  const CASO = { mismo: "Exacto", similar: "Similar", nuevo: "Sin catálogo" };
+  const PESOS = '"$" #,##0';
+  let tv = 0; let tc = 0; let sinCosto = 0;
+  (cot.items || []).forEach((it, k) => {
+    const costo = Math.round(Number(it.costo) || 0);
+    const precio = Math.round(Number(it.precio) || 0);
+    const cant = Number(it.cantidad) || 0;
+    // Proveedores reales del catálogo hoy (incluye las cotizaciones subidas después de cotizar); sin los genéricos de la planilla
+    const ops = (opciones.get(it.producto_id) || []).filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase())).slice(0, 3);
+    const prov = []; for (let n = 0; n < 3; n++) prov.push(ops[n]?.proveedor || "", ops[n]?.precio ?? null);
+    const venta = Math.round(precio * cant); const compra = Math.round(costo * cant);
+    tv += venta; if (costo) tc += compra; else sinCosto += 1;
+    const row = ws.addRow([
+      k + 1, it.descripcion_cliente || it.nombre, CASO[it.caso || (it.producto_id ? "mismo" : "nuevo")] || "",
+      precio, costo || null, ...prov, it.unidad || "", cant, venta, costo ? compra : null,
+      costo ? venta - compra : null, precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null,
+    ]);
+    [4, 5, 7, 9, 11, 14, 15, 16].forEach((c) => { row.getCell(c).numFmt = PESOS; });
+    row.alignment = { vertical: "top", wrapText: true };
+    [1, 3, 12, 13, 17].forEach((c) => { row.getCell(c).alignment = { vertical: "top", horizontal: "center" }; });
+    if (COLOR[it.caso]) [1, 2, 3].forEach((c) => { row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[it.caso] } }; });
+    // El proveedor con que se cotizó, en negrita
+    const usado = String(it.proveedor || "").toUpperCase();
+    for (let n = 0; n < 3; n++) if (usado && String(ops[n]?.proveedor || "").toUpperCase() === usado) { row.getCell(6 + n * 2).font = { bold: true }; row.getCell(7 + n * 2).font = { bold: true }; }
+    if (row.getCell(17).value != null && row.getCell(17).value < 0) row.getCell(17).font = { bold: true, color: { argb: "FFC00000" } };
+  });
+  ws.addRow([]);
+  const fila = (t, v, fmt) => { const r = ws.addRow(["", t, "", v]); r.font = { bold: true }; if (fmt) r.getCell(4).numFmt = fmt; return r; };
+  fila("TOTAL VENTA NETO", tv, PESOS);
+  fila("TOTAL COMPRA NETO", tc, PESOS);
+  fila("UTILIDAD", tv - tc, PESOS);
+  fila("MARGEN %", tv ? Math.round(((tv - tc) / tv) * 1000) / 10 : null);
+  if (sinCosto) { const r = ws.addRow(["", `Ojo: ${sinCosto} línea(s) sin precio de compra; no suman a la compra ni a la utilidad.`]); r.font = { italic: true, color: { argb: "FFC00000" } }; }
+  const r = ws.addRow(["", "Caso: Exacto = mismo producto · Similar = equivalente nuestro · Sin catálogo = precio a mano. En negrita, el proveedor con que se cotizó."]);
+  r.font = { italic: true, size: 9 };
+  return wb;
+}
+
 // Nombre visible y de archivo: Cotizacion_KENOTT_N100  (las de antes del cambio: "Kenott N276 (anterior)")
 const idCotizacion = (cot) => `Cotizacion_${String(cot.empresa || "kenott").toUpperCase()}_N${cot.numero}`;
 
@@ -606,4 +663,4 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
   doc.end();
 }
 
-module.exports = { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion, pdfSolicitud, pdfMaterialesSimple, PLAZO_DEFECTO };
+module.exports = { excelCotizacion, pdfCotizacion, excelInterno, excelInternoSimple, idCotizacion, pdfSolicitud, pdfMaterialesSimple, PLAZO_DEFECTO };

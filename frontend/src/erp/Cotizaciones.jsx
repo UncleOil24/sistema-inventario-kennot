@@ -158,7 +158,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
         )}
 
       {abierta && <DetalleCotizacion cot={abierta} esAdmin={esAdmin} notify={notify} onClose={() => setAbierta(null)}
-        acciones={{ pdf: () => pdf(abierta), excel: () => excel(abierta), interna: () => descargar(`/cotizaciones/${abierta.id}/interna`, `INTERNA_${idCot(abierta)}.xlsx`).catch((e) => notify(e.message, "danger")),
+        acciones={{ pdf: () => pdf(abierta), excel: () => excel(abierta), interna: (modo) => descargar(`/cotizaciones/${abierta.id}/interna?modo=${modo}`, `INTERNA_${modo.toUpperCase()}_${idCot(abierta)}.xlsx`).catch((e) => notify(e.message, "danger")),
           seguimiento: () => { const c = abierta; setAbierta(null); setSeguimiento(c); } }} />}
       {seguimiento && <Seguimiento cot={seguimiento} notify={notify} onClose={() => setSeguimiento(null)} onHecho={() => { setSeguimiento(null); cargar(); }} />}
       {proveedorDe && <SubirProveedor cot={proveedorDe} notify={notify} onClose={() => setProveedorDe(null)}
@@ -178,7 +178,8 @@ function DetalleCotizacion({ cot, esAdmin, notify, onClose, acciones }) {
         {enviada && <button className="btn btn-ghost" onClick={() => imprimirPDF(`/cotizaciones/${cot.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
         {enviada && <button className="btn btn-ghost" onClick={acciones.pdf}>↓ PDF</button>}
         {enviada && <button className="btn btn-ghost" onClick={acciones.excel}>↓ Excel</button>}
-        {esAdmin && <button className="btn btn-ghost" title="Hoja interna con costos: no se envía al cliente" onClick={acciones.interna}>↓ Interna</button>}
+        {esAdmin && <button className="btn btn-ghost" title="Cotizado, caso, venta, compra, 3 mejores proveedores y utilidad. No se envía al cliente" onClick={() => acciones.interna("simple")}>↓ Interna simple</button>}
+        {esAdmin && <button className="btn btn-ghost" title="Todo el detalle interno con costos. No se envía al cliente" onClick={() => acciones.interna("full")}>↓ Interna full</button>}
         {cot.estado === "cotizacion" && <button className="btn btn-ghost" onClick={acciones.seguimiento}>☎ Seguimiento</button>}
         {mp && <a className="btn btn-ghost" href={mp} target="_blank" rel="noreferrer">↗ Mercado Público</a>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
