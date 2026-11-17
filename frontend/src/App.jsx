@@ -137,7 +137,7 @@ const styles = `
   .modal-close { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
   .modal-close:hover { color: var(--text); background: var(--surface2); }
   .modal-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-  .modal-footer { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+  .modal-footer { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field label { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; }
   .field input, .field select { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; font-family: var(--mono); font-size: 12px; color: var(--text); outline: none; transition: border-color 0.15s; width: 100%; }

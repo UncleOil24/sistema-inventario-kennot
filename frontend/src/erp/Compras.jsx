@@ -4,6 +4,7 @@ import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago, i
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
 import AgruparCompras from "./AgruparCompras";
+import CuadroCompra from "./CuadroCompra";
 
 // Compras: las gestiona Operativo; Comercial solo consulta el avance. Los pagos a proveedores son de Finanzas (gerencia).
 export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onPreciosCambio, abrirOrdenId, onAbierta }) {
@@ -13,6 +14,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   const [busqueda, setBusqueda] = useState("");
   const [editando, setEditando] = useState(null); // null | "nueva" | orden
   const [detalle, setDetalle] = useState(null);
+  const [cuadroDe, setCuadroDe] = useState(null); // venta cuyo cuadro de compra está abierto
   const [documento, setDocumento] = useState(false);
   const [facturaNueva, setFacturaNueva] = useState(false);
   const [agrupar, setAgrupar] = useState(false);
@@ -102,7 +104,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
                   <PeriodoCompras key={p.clave} p={p} total={total} abierto={abierto} conTitulo={periodo !== "todo"}
                     onToggle={() => alternar(abiertos, setAbiertos, p.clave)}>
                     {abierto && p.grupos.map((g) => (
-                      <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} esAdmin={esAdmin} abierto={buscando || ventasAbiertas.has(`${p.clave}|${g.clave}`)}
+                      <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} esAdmin={esAdmin} abrirCuadro={puedeOperar ? setCuadroDe : null} abierto={buscando || ventasAbiertas.has(`${p.clave}|${g.clave}`)}
                         onToggle={() => alternar(ventasAbiertas, setVentasAbiertas, `${p.clave}|${g.clave}`)} />
                     ))}
                   </PeriodoCompras>
@@ -112,6 +114,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
         </table>
       </div>
 
+      {cuadroDe && <CuadroCompra ventaId={cuadroDe} esAdmin={esAdmin} notify={notify} irACompra={(id) => { setCuadroDe(null); verDetalle(id); }} onClose={() => { setCuadroDe(null); cargar(); }} />}
       {agrupar && <AgruparCompras notify={notify} onClose={() => setAgrupar(false)} onCreadas={() => cargar()} />}
       {facturaNueva && <FacturaCompra notify={notify} proveedores={proveedores} onClose={() => setFacturaNueva(false)} onListo={(o) => { onPreciosCambio?.(); refrescar(o?.id); }} />}
       {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} onClose={() => { setDocumento(false); onPreciosCambio?.(); }} />}
@@ -122,6 +125,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
       )}
       {detalle && (
         <DetalleOrden orden={detalle} esAdmin={esAdmin} puedeOperar={puedeOperar} notify={notify} onClose={() => setDetalle(null)}
+          abrirCuadro={detalle.venta_id && puedeOperar ? () => { const v = detalle.venta_id; setDetalle(null); setCuadroDe(v); } : null}
           onEditar={() => { setEditando(detalle); setDetalle(null); }}
           onCambio={(precios) => { refrescar(detalle.id); if (precios) onPreciosCambio?.(); }}
           onEliminada={() => { setDetalle(null); cargar(); }} />
@@ -212,7 +216,7 @@ function MargenCompra({ venta, vivas }) {
   );
 }
 
-function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle }) {
+function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle, abrirCuadro }) {
   const vivas = g.ordenes.filter((o) => o.estado !== "anulada");
   const total = vivas.reduce((s, o) => s + Number(o.total), 0);
   const recibidas = vivas.filter((o) => o.estado === "recibida").length;
@@ -228,7 +232,8 @@ function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle }) {
         <td colSpan={3}>{abierto ? "▾" : "▸"} {titulo}{dadaDeBaja && <span className="estado estado-neutral" style={{ marginLeft: 8 }}>{g.venta?.estado === "anulada" ? "Venta anulada" : "Órdenes anuladas"}</span>}</td>
         <td className="mini">{vivas.length} orden(es) · {recibidas} recibida(s){g.ordenes.length > vivas.length ? ` · ${g.ordenes.length - vivas.length} anulada(s)` : ""}</td>
         <td className="price-cell">{fmt(total)}</td>
-        <td colSpan={2} className="mini">{recibidas === vivas.length && vivas.length ? "Todo recibido" : `${vivas.length - recibidas} por recibir`}{esAdmin && saldo > 0 ? ` · por pagar ${fmt(saldo)}` : ""}</td>
+        <td colSpan={2} className="mini">{recibidas === vivas.length && vivas.length ? "Todo recibido" : `${vivas.length - recibidas} por recibir`}{esAdmin && saldo > 0 ? ` · por pagar ${fmt(saldo)}` : ""}
+          {abrirCuadro && g.venta && g.venta.estado !== "anulada" && <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} title="Cuadro de compra de esta venta" onClick={(e) => { e.stopPropagation(); abrirCuadro(g.venta.id); }}>Cuadro</button>}</td>
       </tr>
       {esAdmin && g.venta && vivas.length > 0 && <MargenCompra venta={g.venta} vivas={vivas} />}
       {abierto && g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
@@ -376,7 +381,7 @@ function RepartirCompra({ orden, notify, onClose, onListo }) {
   );
 }
 
-export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada }) {
+export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onEditar, onCambio, onEliminada, abrirCuadro }) {
   const [subir, setSubir] = useState(false);
   const [repartirAbierto, setRepartirAbierto] = useState(false);
   const [registrarPrecios, setRegistrarPrecios] = useState(true);
@@ -408,9 +413,10 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
   const quitar = () => (orden.estado === "borrador" && esAdmin ? eliminar() : anular());
 
   return (
-    <Modal titulo={`// Compra ${orden.numero}`} onClose={onClose} ancho={720}
+    <Modal titulo={`// Compra ${orden.numero}`} onClose={onClose} ancho={960}
       footer={<>
         <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
+        {abrirCuadro && <button className="btn btn-ghost" title="Cuadro de compra de la venta: elegir proveedores y crear órdenes" onClick={abrirCuadro}>Cuadro de compra</button>}
         {orden.estado === "borrador" && puedeOperar && <button className="btn btn-ghost" onClick={onEditar}>Editar</button>}
         {orden.estado === "recibida" && puedeOperar && !(Number(orden.monto_pagado) > 0) && <button className="btn btn-ghost" title="Si esta compra cubre productos de varias ventas, o se cargó a la venta equivocada" onClick={() => setRepartirAbierto(true)}>Repartir entre ventas</button>}
         {puedeOperar && orden.estado !== "anulada" && <button className="btn btn-ghost" style={{ color: "var(--danger)" }} onClick={quitar}>{orden.estado === "borrador" ? "Descartar" : "Anular"}</button>}
