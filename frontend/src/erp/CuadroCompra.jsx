@@ -17,6 +17,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const [ocupado, setOcupado] = useState(false);
   const [subir, setSubir] = useState(false);
   const [buscar, setBuscar] = useState(null); // índice de la línea donde se busca precio
+  const [elegir, setElegir] = useState(null); // { l } una línea · { ls } las marcadas
 
   const cargar = useCallback(async () => {
     try { setData(await api(`/ventas/${ventaId}/cuadro-compra`)); }
@@ -57,12 +58,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   };
   const cambiarLinea = async (l, valor) => {
     if (valor === "__buscar") return setBuscar(l.indice);
-    if (valor === "__otro") {
-      const prov = await pedirTexto(`¿Con qué proveedor compras "${l.nombre}"?`, { titulo: "Otro proveedor", sugerencias: data.proveedores.slice(0, 12) });
-      if (!prov) return;
-      const precio = await pedirTexto(`Precio unitario neto con ${prov.toUpperCase()} (vacío = mantener ${fmt(l.compra_unit)})`, { titulo: "Precio" });
-      return asignar([{ indice: l.indice, proveedor: prov, costo: precio ? Number(String(precio).replace(/[^\d]/g, "")) : null }], `✓ ${l.nombre}: ${prov.toUpperCase()}`);
-    }
+    if (valor === "__otro") return setElegir({ l });
     const o = l.opciones.find((x) => x.proveedor === valor);
     asignar([{ indice: l.indice, proveedor: valor, costo: o ? o.precio : null }]);
   };
@@ -74,8 +70,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     if (!sel.size) return notify(AVISO_SEL, "danger");
     const ls = sinOrden(marcadas);
     if (!ls.length) return notify("Los productos marcados ya tienen orden de compra o están comprados", "danger");
-    const prov = await pedirTexto(`¿A qué proveedor asignas los ${ls.length} producto(s) por comprar?`, { titulo: "Asignar proveedor", sugerencias: [...new Set(ls.flatMap((l) => l.opciones.map((o) => o.proveedor)))].slice(0, 10) });
-    if (prov) asignar(ls.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${ls.length} producto(s) asignados a ${prov.toUpperCase()}${avisoOmitidos(marcadas.length - ls.length)}`);
+    setElegir({ ls, omitidos: marcadas.length - ls.length });
   };
   // Una orden por cada proveedor elegido en las líneas marcadas ("Comprar con"): no se cambia el proveedor de ninguna línea
   const crearOrden = async () => {
@@ -191,7 +186,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                           <option key={o.proveedor} value={o.proveedor}>{o.proveedor} · {fmt(o.precio)}{k === 0 ? " ★" : ""}</option>
                         ))}
                         <option value="__buscar">🔍 Buscar precio en el catálogo…</option>
-                        <option value="__otro">Otro proveedor…</option>
+                        <option value="__otro">Elegir otro proveedor…</option>
                       </select>}
                       {!real && !bloqueada && <button className="link mini" style={{ display: "block" }} title="Todos los precios de este producto y de productos parecidos del catálogo" onClick={() => setBuscar(l.indice)}>🔍 buscar precio</button>}
                       {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); return o ? <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}</div> : null; })()}
@@ -249,6 +244,12 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
           </div>
         </div>
       </div>
+      {elegir && <ElegirProveedor proveedores={data.proveedores} linea={elegir.l} lineas={elegir.ls} onClose={() => setElegir(null)}
+        onElegir={(prov, precio) => {
+          const e = elegir; setElegir(null);
+          if (e.l) asignar([{ indice: e.l.indice, proveedor: prov, costo: precio }], `✓ ${e.l.nombre}: ${prov}`);
+          else asignar(e.ls.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${e.ls.length} producto(s) asignados a ${prov}${avisoOmitidos(e.omitidos)}`);
+        }} />}
       {buscar != null && <BuscarPrecio ventaId={ventaId} indice={buscar} notify={notify} onClose={() => setBuscar(null)} onHecho={() => { setBuscar(null); cargar(); }} />}
       {subir && <SubirDocumentosVenta venta={venta} lineas={lineas} ordenes={ordenes} proveedores={data.proveedores} notify={notify} onClose={() => { setSubir(false); cargar(); }} />}
     </Modal>
@@ -328,6 +329,62 @@ function BuscarPrecio({ ventaId, indice, notify, onClose, onHecho }) {
               <table className="table table-compacta"><tbody>{filas(p.opciones, p.id)}</tbody></table>
             </div>
           ))}
+      </>}
+    </Modal>
+  );
+}
+
+// Nombres de relleno: sirven como nota en la línea, pero no son proveedores (no se crean órdenes a ellos)
+const RELLENO = ["OTRO", "OTROS", "COTIZAR", "POR COTIZAR", "A COTIZAR", "VARIOS", "PENDIENTE", "POR DEFINIR", "SIN PROVEEDOR", "SIN IDENTIFICAR", "SISTEMA", "?", "-", "X"];
+const esRelleno = (s) => RELLENO.includes(String(s || "").trim().toUpperCase().replace(/\.$/, ""));
+
+// Elegir proveedor de una lista (todos los proveedores, buscando por nombre), con los precios que tenga el producto.
+// linea: una línea (se puede poner precio) · lineas: varias marcadas (cada una toma su precio con ese proveedor)
+function ElegirProveedor({ proveedores, linea, lineas, onElegir, onClose }) {
+  const [q, setQ] = useState("");
+  const [elegido, setElegido] = useState(null);
+  const [precio, setPrecio] = useState("");
+  const precios = new Map();
+  if (linea) for (const o of linea.opciones) precios.set(o.proveedor, o.precio);
+  const cuenta = new Map();
+  if (lineas) for (const l of lineas) for (const o of l.opciones) cuenta.set(o.proveedor, (cuenta.get(o.proveedor) || 0) + 1);
+  const Q = q.trim().toUpperCase();
+  const todos = [...new Set([...precios.keys(), ...cuenta.keys(), ...proveedores])].filter((p) => !esRelleno(p));
+  const filtrados = todos.filter((p) => !Q || p.includes(Q))
+    .sort((a, b) => (precios.has(b) - precios.has(a)) || ((precios.get(a) || 0) - (precios.get(b) || 0)) || ((cuenta.get(b) || 0) - (cuenta.get(a) || 0)) || a.localeCompare(b));
+  const nuevo = Q && !todos.includes(Q) ? Q : null;
+  const tomar = (p) => {
+    if (lineas) return onElegir(p, null);
+    setElegido(p); setPrecio(precios.has(p) ? String(precios.get(p)) : "");
+  };
+  const confirmarLinea = () => {
+    const n = Number(String(precio).replace(/[^\d]/g, ""));
+    onElegir(elegido, n > 0 ? n : null);
+  };
+  return (
+    <Modal titulo={linea ? "// Elegir proveedor" : `// Asignar proveedor a ${lineas.length} producto(s)`} onClose={onClose} ancho={560}
+      footer={<>{elegido && <button className="btn btn-primary" onClick={confirmarLinea}>Usar {elegido}</button>}<button className="btn btn-ghost" onClick={onClose}>Cancelar</button></>}>
+      {linea && <div style={{ marginBottom: 8 }}><strong>{linea.nombre}</strong> <span className="mini">· {linea.cantidad} {linea.unidad} · ahora {linea.proveedor} {linea.compra_unit > 0 ? fmt(linea.compra_unit) : "sin precio"}</span></div>}
+      {!elegido ? <>
+        <input autoFocus className="input-mini" style={{ width: "100%", padding: "6px 8px", marginBottom: 8 }} placeholder="Buscar proveedor (ej. bac)" value={q} onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (filtrados[0] || nuevo)) tomar(filtrados[0] || nuevo); }} />
+        <div style={{ maxHeight: 340, overflowY: "auto" }}>
+          {filtrados.slice(0, 80).map((p) => (
+            <button key={p} className="fila-elegir" onClick={() => tomar(p)}>
+              <span>{p}</span>
+              <span className="mini">{precios.has(p) ? fmt(precios.get(p)) : cuenta.has(p) ? `precio en ${cuenta.get(p)} de ${lineas.length}` : ""}</span>
+            </button>
+          ))}
+          {!filtrados.length && !nuevo && <div className="mini">No hay proveedores con ese nombre.</div>}
+        </div>
+        {nuevo && <div style={{ marginTop: 8 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => tomar(nuevo)}>Usar «{nuevo}» {esRelleno(nuevo) ? "solo como nota" : "(proveedor nuevo)"}</button>
+          <div className="mini">{esRelleno(nuevo) ? `"${nuevo}" no es un proveedor: queda solo en esta línea y no se puede crear orden con ese nombre.` : "No se guarda en ninguna parte hasta crear la orden de compra."}</div>
+        </div>}
+      </> : <>
+        <div style={{ marginBottom: 8 }}>Proveedor: <strong>{elegido}</strong> <button className="link mini" onClick={() => setElegido(null)}>cambiar</button></div>
+        <div className="field"><label>Precio unitario neto{precios.has(elegido) ? " (del catálogo)" : ""}</label>
+          <input autoFocus value={precio} onChange={(e) => setPrecio(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmarLinea()} placeholder={linea.compra_unit > 0 ? `vacío = mantener ${fmt(linea.compra_unit)}` : "ej. 1500"} /></div>
       </>}
     </Modal>
   );

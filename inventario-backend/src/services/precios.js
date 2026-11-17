@@ -14,6 +14,10 @@ const { ErrorNegocio } = require("./erp");
 
 const IVA = 1.19;
 const normProv = (s) => String(s || "").trim().toUpperCase();
+// Nombres de relleno que se escriben mientras no se sabe el proveedor: sirven en la línea, pero no son proveedores
+// (no se guardan como proveedor, ni precios con ellos, ni se crean órdenes a ellos)
+const GENERICOS_PROV = ["OTRO", "OTROS", "COTIZAR", "POR COTIZAR", "A COTIZAR", "VARIOS", "PENDIENTE", "POR DEFINIR", "SIN PROVEEDOR", "SIN IDENTIFICAR", "SISTEMA", "?", "-", "X"];
+const esGenerico = (s) => GENERICOS_PROV.includes(normProv(s).replace(/\.$/, ""));
 const pesos = (n) => `$${Math.round(Number(n)).toLocaleString("es-CL")}`;
 
 // Convierte lo que se ingresó al precio neto unitario (reglas 1 y 2)
@@ -138,4 +142,4 @@ const origenDe = async (nombreProveedor, t) => {
 // Qué cuenta como aviso real en REVISAR (el resto del texto es solo el origen del precio, ej. "WEB SODIMAC")
 const SQL_AVISO = `(NOT confirmado AND precio_compra > 0 AND revisar ~* '(revis|verific|m[aá]s barat|m[aá]s car|antes \\$|pendiente)')`;
 
-module.exports = { REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
+module.exports = { GENERICOS_PROV, esGenerico, REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };

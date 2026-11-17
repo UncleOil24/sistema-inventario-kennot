@@ -191,6 +191,27 @@ function grupos(ordenes) {
   return lista;
 }
 
+// Gerencia: lo comprado (neto) contra el costo cotizado y la venta, para ver si se mantiene el margen
+function MargenCompra({ venta, vivas }) {
+  const compra = vivas.reduce((s, o) => s + Number(o.subtotal || 0), 0);
+  const cotizado = Number(venta.costo_cotizado) || 0;
+  const neto = Number(venta.subtotal) || 0;
+  if (!neto) return null;
+  const dif = compra - cotizado;
+  const mReal = Math.round(((neto - compra) / neto) * 1000) / 10;
+  const mCot = cotizado ? Math.round(((neto - cotizado) / neto) * 1000) / 10 : null;
+  const malo = cotizado && dif > 0;
+  return (
+    <tr className="fila-grupo-margen">
+      <td colSpan={7} className="mini" style={{ paddingTop: 0 }}>
+        Compra neta <strong>{fmt(compra)}</strong>
+        {cotizado ? <> vs cotizado <strong>{fmt(cotizado)}</strong> <span style={{ color: malo ? "var(--danger)" : "var(--success, #2e7d32)", fontWeight: 600 }}>({dif > 0 ? "+" : dif < 0 ? "−" : ""}{fmt(Math.abs(dif))}{cotizado ? ` · ${dif > 0 ? "+" : ""}${Math.round((dif / cotizado) * 1000) / 10}%` : ""})</span></> : " · sin costo cotizado"}
+        {" · "}venta neta {fmt(neto)} · margen <strong style={{ color: mReal < (mCot ?? 0) ? "var(--danger)" : undefined }}>{mReal}%</strong>{mCot != null ? ` (cotizado ${mCot}%)` : ""}
+      </td>
+    </tr>
+  );
+}
+
 function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle }) {
   const vivas = g.ordenes.filter((o) => o.estado !== "anulada");
   const total = vivas.reduce((s, o) => s + Number(o.total), 0);
@@ -209,6 +230,7 @@ function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle }) {
         <td className="price-cell">{fmt(total)}</td>
         <td colSpan={2} className="mini">{recibidas === vivas.length && vivas.length ? "Todo recibido" : `${vivas.length - recibidas} por recibir`}{esAdmin && saldo > 0 ? ` · por pagar ${fmt(saldo)}` : ""}</td>
       </tr>
+      {esAdmin && g.venta && vivas.length > 0 && <MargenCompra venta={g.venta} vivas={vivas} />}
       {abierto && g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
     </>
   );
