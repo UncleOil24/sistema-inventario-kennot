@@ -451,6 +451,29 @@ async function excelInterno(cot, params, precioVenta) {
 // Hoja interna simple: lo cotizado, el caso, venta, compra, los 3 mejores proveedores y la utilidad.
 // opciones: Map(producto_id -> [{ proveedor, precio }]) ordenado del más barato al más caro
 const GENERICOS = ["SISTEMA", "SIN PROVEEDOR", "SIN IDENTIFICAR"];
+const CASO_SIMPLE = { mismo: "Exacto", similar: "Similar", nuevo: "Sin catálogo" };
+// Filas de la hoja interna simple (se usan en el Excel de la cotización y en la impresión desde la venta)
+function filasInternaSimple(items, opciones) {
+  let tv = 0; let tc = 0; let sinCosto = 0;
+  const filas = (items || []).map((it, k) => {
+    const costo = Math.round(Number(it.costo) || 0);
+    const precio = Math.round(Number(it.precio) || 0);
+    const cant = Number(it.cantidad) || 0;
+    const caso = it.caso || (it.producto_id ? "mismo" : "nuevo");
+    // Proveedores reales del catálogo hoy (incluye las cotizaciones subidas después de cotizar); sin los genéricos de la planilla
+    const usado = String(it.proveedor || "").toUpperCase();
+    const proveedores = (opciones.get(it.producto_id) || []).filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase())).slice(0, 3)
+      .map((o) => ({ proveedor: o.proveedor, precio: o.precio, usado: !!usado && String(o.proveedor).toUpperCase() === usado }));
+    const venta = Math.round(precio * cant); const compra = Math.round(costo * cant);
+    tv += venta; if (costo) tc += compra; else sinCosto += 1;
+    return {
+      n: k + 1, producto: it.descripcion_cliente || it.nombre, caso, caso_txt: CASO_SIMPLE[caso] || "", precio, costo: costo || null,
+      proveedores, unidad: it.unidad || "", cantidad: cant, total_venta: venta, total_compra: costo ? compra : null,
+      utilidad: costo ? venta - compra : null, margen: precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null,
+    };
+  });
+  return { filas, totales: { venta: tv, compra: tc, utilidad: tv - tc, margen: tv ? Math.round(((tv - tc) / tv) * 1000) / 10 : null, sin_costo: sinCosto } };
+}
 async function excelInternoSimple(cot, opciones) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Interna simple", { views: [{ state: "frozen", ySplit: 3, xSplit: 2 }], pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
@@ -467,31 +490,19 @@ async function excelInternoSimple(cot, opciones) {
   enc.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   enc.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF444444" } }; });
   const COLOR = { similar: "FFFFF2CC", nuevo: "FFF8D7DA" };
-  const CASO = { mismo: "Exacto", similar: "Similar", nuevo: "Sin catálogo" };
   const PESOS = '"$" #,##0';
-  let tv = 0; let tc = 0; let sinCosto = 0;
-  (cot.items || []).forEach((it, k) => {
-    const costo = Math.round(Number(it.costo) || 0);
-    const precio = Math.round(Number(it.precio) || 0);
-    const cant = Number(it.cantidad) || 0;
-    // Proveedores reales del catálogo hoy (incluye las cotizaciones subidas después de cotizar); sin los genéricos de la planilla
-    const ops = (opciones.get(it.producto_id) || []).filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase())).slice(0, 3);
-    const prov = []; for (let n = 0; n < 3; n++) prov.push(ops[n]?.proveedor || "", ops[n]?.precio ?? null);
-    const venta = Math.round(precio * cant); const compra = Math.round(costo * cant);
-    tv += venta; if (costo) tc += compra; else sinCosto += 1;
-    const row = ws.addRow([
-      k + 1, it.descripcion_cliente || it.nombre, CASO[it.caso || (it.producto_id ? "mismo" : "nuevo")] || "",
-      precio, costo || null, ...prov, it.unidad || "", cant, venta, costo ? compra : null,
-      costo ? venta - compra : null, precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null,
-    ]);
+  const { filas, totales } = filasInternaSimple(cot.items, opciones);
+  const tv = totales.venta; const tc = totales.compra; const sinCosto = totales.sin_costo;
+  filas.forEach((f) => {
+    const prov = []; for (let n = 0; n < 3; n++) prov.push(f.proveedores[n]?.proveedor || "", f.proveedores[n]?.precio ?? null);
+    const row = ws.addRow([f.n, f.producto, f.caso_txt, f.precio, f.costo, ...prov, f.unidad, f.cantidad, f.total_venta, f.total_compra, f.utilidad, f.margen]);
     [4, 5, 7, 9, 11, 14, 15, 16].forEach((c) => { row.getCell(c).numFmt = PESOS; });
     row.alignment = { vertical: "top", wrapText: true };
     [1, 3, 12, 13, 17].forEach((c) => { row.getCell(c).alignment = { vertical: "top", horizontal: "center" }; });
-    if (COLOR[it.caso]) [1, 2, 3].forEach((c) => { row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[it.caso] } }; });
+    if (COLOR[f.caso]) [1, 2, 3].forEach((c) => { row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[f.caso] } }; });
     // El proveedor con que se cotizó, en negrita
-    const usado = String(it.proveedor || "").toUpperCase();
-    for (let n = 0; n < 3; n++) if (usado && String(ops[n]?.proveedor || "").toUpperCase() === usado) { row.getCell(6 + n * 2).font = { bold: true }; row.getCell(7 + n * 2).font = { bold: true }; }
-    if (row.getCell(17).value != null && row.getCell(17).value < 0) row.getCell(17).font = { bold: true, color: { argb: "FFC00000" } };
+    f.proveedores.forEach((o, n) => { if (o.usado) { row.getCell(6 + n * 2).font = { bold: true }; row.getCell(7 + n * 2).font = { bold: true }; } });
+    if (f.margen != null && f.margen < 0) row.getCell(17).font = { bold: true, color: { argb: "FFC00000" } };
   });
   ws.addRow([]);
   const fila = (t, v, fmt) => { const r = ws.addRow(["", t, "", v]); r.font = { bold: true }; if (fmt) r.getCell(4).numFmt = fmt; return r; };
@@ -663,4 +674,4 @@ function pdfMaterialesSimple({ titulo, sub, proyectos, secciones, facturacion = 
   doc.end();
 }
 
-module.exports = { excelCotizacion, pdfCotizacion, excelInterno, excelInternoSimple, idCotizacion, pdfSolicitud, pdfMaterialesSimple, PLAZO_DEFECTO };
+module.exports = { excelCotizacion, pdfCotizacion, excelInterno, excelInternoSimple, filasInternaSimple, idCotizacion, pdfSolicitud, pdfMaterialesSimple, PLAZO_DEFECTO };

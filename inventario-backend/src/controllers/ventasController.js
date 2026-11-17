@@ -18,7 +18,7 @@ const {
 } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { normProv } = require("../services/precios");
-const { esAdmin, tieneRol } = require("../middlewares/auth");
+const { esAdmin, tieneRol, veCostos } = require("../middlewares/auth");
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
 
 const SIN_PROVEEDOR = "SIN PROVEEDOR";
@@ -1121,7 +1121,28 @@ const listarFacturas = handler(async (req, res) => {
   res.json({ ok: true, data: facturas.map((f) => ({ ...f.toJSON(), venta: mapa.get(f.venta_id) || null })) });
 });
 
+// GET /api/ventas/:id/interna-simple  (solo quien ve costos) — para imprimir desde la venta:
+// producto cotizado, caso, venta, compra, 3 mejores proveedores del catálogo de hoy y utilidad
+const internaSimple = handler(async (req, res) => {
+  if (!veCostos(req)) return res.status(403).json({ ok: false, error: "Sin acceso a costos" });
+  const venta = await Venta.findByPk(req.params.id);
+  if (!venta) return res.status(404).json({ ok: false, error: "Venta no encontrada" });
+  // Lo que pidió el cliente y el caso vienen de la cotización (la venta guarda el producto nuestro)
+  const cot = venta.cotizacion_id ? await Cotizacion.findByPk(venta.cotizacion_id) : null;
+  const deCot = new Map();
+  for (const i of cot?.items || []) { const k = i.clave || i.producto_id; if (!deCot.has(k)) deCot.set(k, []); deCot.get(k).push(i); }
+  const items = (venta.items || []).map((i) => {
+    const c = (deCot.get(i.clave || i.producto_id) || deCot.get(i.producto_id) || []).shift();
+    return { ...i, descripcion_cliente: i.descripcion_cliente || c?.descripcion_cliente, caso: i.caso || c?.caso };
+  });
+  const { opcionesPorProducto } = require("../services/cuadroCompra");
+  const { filasInternaSimple } = require("../services/cotizacionFormato");
+  const r = filasInternaSimple(items, await opcionesPorProducto(items.map((i) => i.producto_id)));
+  res.json({ ok: true, data: { venta: { numero: venta.numero, cliente: venta.cliente_nombre, empresa: venta.empresa, id_solicitud: venta.id_solicitud, orden_compra_cliente: venta.orden_compra_cliente }, ...r } });
+});
+
 module.exports = {
+  internaSimple,
   resumenAnulacion,
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,

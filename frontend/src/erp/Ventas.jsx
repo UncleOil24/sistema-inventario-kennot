@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar, pedirTexto, imprimirSolicitud } from "./ui";
-import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO } from "./lib";
-import CuadroCompra from "./CuadroCompra";
+import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO, imprimirPDF, imprimirHTML, escaparHTML as h } from "./lib";
+import CuadroCompra, { imprimirCuadro } from "./CuadroCompra";
+import { cuerpoOrden } from "./Compras";
 import { AccionesVenta, PanelFacturas, HistorialVenta, conConfirmacion } from "./Recorrido";
 
 // Períodos para filtrar (fechas en hora local de Chile)
@@ -229,6 +230,44 @@ function NuevaVenta({ clientes, notify, onClose, onCreada }) {
   );
 }
 
+// Imprimir desde la venta: cotización, interna simple (costos), cuadro de compra y órdenes de compra
+function ImprimirVenta({ venta, esAdmin, verCompras, notify }) {
+  const [abierto, setAbierto] = useState(false);
+  const hacer = (fn) => Promise.resolve().then(fn).catch((e) => notify(e.message, "danger"));
+  const ordenes = async () => {
+    const os = (await api(`/ordenes-compra?venta_id=${venta.id}`)).filter((o) => o.estado !== "anulada");
+    if (!os.length) return notify("Esta venta aún no tiene órdenes de compra", "danger");
+    imprimirHTML(`Órdenes de compra ${venta.numero}`, os.map((o, k) => `<div${k ? ' style="page-break-before:always"' : ""}>${cuerpoOrden(o)}</div>`).join(""));
+  };
+  if (!abierto) return <button className="btn btn-ghost" title="Cotización, interna simple, cuadro de compra u órdenes de compra" onClick={() => setAbierto(true)}>🖨 Imprimir ▸</button>;
+  return (
+    <span className="grupo-botones">
+      {venta.cotizacion_id && <button className="btn btn-ghost btn-sm" onClick={() => hacer(() => imprimirPDF(`/cotizaciones/${venta.cotizacion_id}/pdf`))}>Cotización</button>}
+      {esAdmin && <button className="btn btn-ghost btn-sm" title="Cotizado, caso, venta, compra, 3 mejores proveedores y utilidad" onClick={() => hacer(() => imprimirInternaSimple(venta.id))}>Interna simple</button>}
+      {verCompras && <button className="btn btn-ghost btn-sm" onClick={() => hacer(() => imprimirCuadro(venta.id, esAdmin))}>Cuadro de compra</button>}
+      {verCompras && <button className="btn btn-ghost btn-sm" onClick={() => hacer(ordenes)}>Órdenes de compra</button>}
+      <button className="link mini" title="Cerrar" onClick={() => setAbierto(false)}>✕</button>
+    </span>
+  );
+}
+
+// Hoja interna simple de la venta (no se entrega al cliente)
+async function imprimirInternaSimple(ventaId) {
+  const d = await api(`/ventas/${ventaId}/interna-simple`);
+  const v = d.venta; const t = d.totales;
+  const $ = (n) => (n == null ? "" : fmt(n));
+  const prov = (o) => (o ? `<td${o.usado ? ' style="font-weight:bold"' : ""}>${h(o.proveedor)}</td><td class="num"${o.usado ? ' style="font-weight:bold"' : ""}>${$(o.precio)}</td>` : "<td></td><td></td>");
+  const cuerpo = `<h1>Interna simple · ${h(v.numero)} · ${h(v.cliente || "Sin cliente")}</h1>
+    <div class="sub">${[v.empresa === "tactics" ? "Tactics" : "Kenott", v.orden_compra_cliente ? `OC ${h(v.orden_compra_cliente)}` : "", v.id_solicitud ? `ID ${h(v.id_solicitud)}` : "", "NO ENTREGAR AL CLIENTE"].filter(Boolean).join(" · ")}</div>
+    <table style="font-size:9px"><colgroup><col style="width:24px"><col><col style="width:52px"><col style="width:56px"><col style="width:56px"><col style="width:66px"><col style="width:52px"><col style="width:66px"><col style="width:52px"><col style="width:66px"><col style="width:52px"><col style="width:34px"><col style="width:62px"><col style="width:62px"><col style="width:58px"><col style="width:40px"></colgroup>
+    <thead><tr><th class="num">N°</th><th>Producto cotizado</th><th class="cen">Caso</th><th class="num">P. venta</th><th class="num">P. compra</th><th>Proveedor 1</th><th class="num">$</th><th>Proveedor 2</th><th class="num">$</th><th>Proveedor 3</th><th class="num">$</th><th class="num">Cant.</th><th class="num">T. venta</th><th class="num">T. compra</th><th class="num">Utilidad</th><th class="num">%</th></tr></thead><tbody>
+    ${d.filas.map((f) => `<tr${f.caso === "similar" ? ' style="background:#fff2cc"' : f.caso === "nuevo" ? ' style="background:#f8d7da"' : ""}><td class="num">${f.n}</td><td>${h(f.producto)}</td><td class="cen">${h(f.caso_txt)}</td><td class="num">${$(f.precio)}</td><td class="num">${f.costo ? $(f.costo) : "sin precio"}</td>${[0, 1, 2].map((n) => prov(f.proveedores[n])).join("")}<td class="num">${f.cantidad}</td><td class="num">${$(f.total_venta)}</td><td class="num">${$(f.total_compra)}</td><td class="num"${f.utilidad < 0 ? ' style="color:#c00;font-weight:bold"' : ""}>${$(f.utilidad)}</td><td class="num">${f.margen ?? ""}</td></tr>`).join("")}
+    </tbody></table>
+    <div class="pie">Venta neta <strong>${fmt(t.venta)}</strong> · compra neta <strong>${fmt(t.compra)}</strong> · utilidad <strong>${fmt(t.utilidad)}</strong>${t.margen != null ? ` (${t.margen}%)` : ""}${t.sin_costo ? ` · ${t.sin_costo} línea(s) sin precio de compra no suman` : ""}</div>
+    <div class="mini">En negrita, el proveedor de la línea. Caso: Exacto = mismo producto · Similar = equivalente · Sin catálogo = precio a mano.</div>`;
+  imprimirHTML(`Interna simple ${v.numero}`, cuerpo, { horizontal: true });
+}
+
 function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar, puedeVender, notify, onClose, onCambio, irACompra }) {
   const [cuadro, setCuadro] = useState(false);
   const editaDatos = puedeVender && modo === "comercial";
@@ -258,6 +297,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
       footer={<>
         {esAdmin && venta.estado !== "anulada" && <button className="btn btn-danger" onClick={anular}>Anular venta</button>}
         {anulando && <AnularVenta venta={venta} notify={notify} onClose={() => setAnulando(false)} onHecho={() => { setAnulando(false); onCambio(); }} />}
+        <ImprimirVenta venta={venta} esAdmin={esAdmin} verCompras={verCompras} notify={notify} />
         {verCompras && venta.estado !== "anulada" && <button className="btn btn-primary" onClick={() => setCuadro(true)}>Cuadro de compra</button>}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>

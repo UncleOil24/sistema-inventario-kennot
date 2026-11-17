@@ -381,18 +381,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
     catch (e) { notify(e.message, "danger"); }
   };
 
-  // Hoja de la orden de compra (blanco y negro), para imprimir directo
-  const imprimir = () => {
-    const its = orden.items || [];
-    const cuerpo = `<h1>Orden de compra ${h(orden.numero)} · ${h(orden.proveedor_nombre || "")}</h1>
-      <div class="sub">${[orden.empresa === "tactics" ? "Tactics Inversiones SpA" : orden.empresa === "kenott" ? "Inversiones Kenott SpA" : "", `fecha ${fecha(orden.fecha)}`, orden.notas || "", orden.documento ? `factura ${h(orden.documento)}` : ""].filter(Boolean).map(h).join(" · ")}</div>
-      <table><colgroup><col style="width:30px"><col style="width:20px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
-      <thead><tr><th class="num">N°</th><th class="chk"></th><th>Material</th><th class="cen">Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
-      ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.nombre)}</td><td class="cen">${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
-      </tbody></table>
-      <div class="pie">Neto ${fmt(orden.subtotal)} · IVA ${fmt(orden.iva)} · <strong>Total ${fmt(orden.total)}</strong></div>`;
-    imprimirHTML(`Orden de compra ${orden.numero}`, cuerpo);
-  };
+  const imprimir = () => imprimirHTML(`Orden de compra ${orden.numero}`, cuerpoOrden(orden));
   // Un solo botón: un borrador se descarta (gerencia lo elimina; si no, queda anulado); una compra enviada o recibida se anula
   const quitar = () => (orden.estado === "borrador" && esAdmin ? eliminar() : anular());
 
@@ -491,4 +480,16 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
       )}
     </Modal>
   );
+}
+
+// Hoja de la orden de compra (blanco y negro), para imprimir directo (también desde la venta)
+export function cuerpoOrden(orden) {
+  const its = orden.items || [];
+  return `<h1>Orden de compra ${h(orden.numero)} · ${h(orden.proveedor_nombre || "")}</h1>
+    <div class="sub">${[orden.empresa === "tactics" ? "Tactics Inversiones SpA" : orden.empresa === "kenott" ? "Inversiones Kenott SpA" : "", `fecha ${fecha(orden.fecha)}`, orden.notas || "", orden.documento ? `factura ${h(orden.documento)}` : ""].filter(Boolean).map(h).join(" · ")}</div>
+    <table><colgroup><col style="width:30px"><col style="width:20px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
+    <thead><tr><th class="num">N°</th><th class="chk"></th><th>Material</th><th class="cen">Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
+    ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.nombre)}</td><td class="cen">${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
+    </tbody></table>
+    <div class="pie">Neto ${fmt(orden.subtotal)} · IVA ${fmt(orden.iva)} · <strong>Total ${fmt(orden.total)}</strong></div>`;
 }

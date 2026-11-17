@@ -91,23 +91,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     ejecutar(() => api("/ventas/agrupar/ordenes", { method: "POST", body: { lineas: ls.map((l) => ({ venta_id: ventaId, indice: l.indice, proveedor: l.proveedor })) } }),
       (r) => `✓ ${r.creadas.map((c) => `${c.numero} a ${c.proveedor}`).join(" · ")}`);
   };
-  // Hoja para imprimir (Carta horizontal): productos agrupados por proveedor, con casilla para marcar a mano
-  const imprimir = () => {
-    const grupos = new Map();
-    for (const l of lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
-    const prov = [...grupos.entries()].sort((a, b) => (a[0] === "SIN PROVEEDOR") - (b[0] === "SIN PROVEEDOR") || a[0].localeCompare(b[0]));
-    const contacto = Object.fromEntries((data.resumen_proveedores || []).map((p) => [p.proveedor, p.contacto]));
-    const txt = { por_comprar: "Por comprar", pedido: "Pedido", parcial: "Parcial", comprado: "Comprado", stock: "Stock" };
-    const cuerpo = `<h1>Cuadro de compra · ${h(venta.numero)} · ${h(venta.cliente_nombre || "Sin cliente")}</h1>
-      <div class="sub">${[venta.orden_compra_cliente ? `OC ${h(venta.orden_compra_cliente)}` : "", venta.id_solicitud ? `ID ${h(venta.id_solicitud)}` : "", `impreso el ${new Date().toLocaleDateString("es-CL")}`].filter(Boolean).join(" · ")}</div>
-      ${prov.map(([p, ls]) => `<div class="grupo"><h2><span>${h(p === "SIN PROVEEDOR" ? "Sin proveedor elegido" : p)}${contacto[p] ? ` <span class="mini">· ${h(contacto[p])}</span>` : ""}</span><span>${ls.length} prod. · ${fmt(ls.reduce((s2, l) => s2 + l.total_compra, 0))}</span></h2>
-        <table><colgroup><col style="width:46px"><col style="width:18px"><col><col style="width:38px"><col style="width:66px"><col style="width:70px"><col style="width:80px"><col style="width:92px"></colgroup><thead><tr><th>N°</th><th class="chk"></th><th>Producto</th><th class="num">Cant.</th><th class="cen">Unidad</th><th class="num">Precio unit.</th><th class="num">Total</th><th class="obs">Estado</th></tr></thead><tbody>
-        ${ls.map((l) => `<tr${l.estado === "stock" ? ' style="text-decoration:line-through;color:#777"' : ""}><td>${h(l.codigo || "")}</td><td class="chk">${l.estado === "stock" ? "✓" : "☐"}</td><td>${h(l.nombre)}${l.stock > 0 && l.estado !== "stock" ? `<div class="mini">${l.stock} de stock · comprar ${l.cantidad - l.stock}</div>` : ""}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}</td><td class="num">${l.cantidad}</td><td class="cen">${h(l.unidad || "")}</td>
-          <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td class="obs">${txt[l.estado] || l.estado}${l.compras.length ? `<div class="mini">${l.compras.map((c) => h(c.numero)).join(", ")}</div>` : ""}</td></tr>`).join("")}
-        </tbody></table></div>`).join("")}
-      <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;
-    imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo);
-  };
+  const imprimir = () => imprimirCuadroDatos(data, esAdmin);
   const excelCuadro = () => descargar(`/ventas/${ventaId}/cuadro-excel`).catch((e) => notify(e.message, "danger"));
   // OK stock: la línea (o parte) sale de bodega; costo $0 para la venta (ya está en gastos generales)
   const okStock = async (l) => {
@@ -264,4 +248,27 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
       {subir && <SubirDocumentosVenta venta={venta} lineas={lineas} ordenes={ordenes} proveedores={data.proveedores} notify={notify} onClose={() => { setSubir(false); cargar(); }} />}
     </Modal>
   );
+}
+
+// Hoja para imprimir (Carta horizontal): productos agrupados por proveedor, con casilla para marcar a mano
+export function imprimirCuadroDatos(data, esAdmin) {
+  const { venta, totales } = data; const lineas = data.lineas || [];
+  const grupos = new Map();
+  for (const l of lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
+  const prov = [...grupos.entries()].sort((a, b) => (a[0] === "SIN PROVEEDOR") - (b[0] === "SIN PROVEEDOR") || a[0].localeCompare(b[0]));
+  const contacto = Object.fromEntries((data.resumen_proveedores || []).map((p) => [p.proveedor, p.contacto]));
+  const txt = { por_comprar: "Por comprar", pedido: "Pedido", parcial: "Parcial", comprado: "Comprado", stock: "Stock" };
+  const cuerpo = `<h1>Cuadro de compra · ${h(venta.numero)} · ${h(venta.cliente_nombre || "Sin cliente")}</h1>
+    <div class="sub">${[venta.orden_compra_cliente ? `OC ${h(venta.orden_compra_cliente)}` : "", venta.id_solicitud ? `ID ${h(venta.id_solicitud)}` : "", `impreso el ${new Date().toLocaleDateString("es-CL")}`].filter(Boolean).join(" · ")}</div>
+    ${prov.map(([p, ls]) => `<div class="grupo"><h2><span>${h(p === "SIN PROVEEDOR" ? "Sin proveedor elegido" : p)}${contacto[p] ? ` <span class="mini">· ${h(contacto[p])}</span>` : ""}</span><span>${ls.length} prod. · ${fmt(ls.reduce((s2, l) => s2 + l.total_compra, 0))}</span></h2>
+      <table><colgroup><col style="width:46px"><col style="width:18px"><col><col style="width:38px"><col style="width:66px"><col style="width:70px"><col style="width:80px"><col style="width:92px"></colgroup><thead><tr><th>N°</th><th class="chk"></th><th>Producto</th><th class="num">Cant.</th><th class="cen">Unidad</th><th class="num">Precio unit.</th><th class="num">Total</th><th class="obs">Estado</th></tr></thead><tbody>
+      ${ls.map((l) => `<tr${l.estado === "stock" ? ' style="text-decoration:line-through;color:#777"' : ""}><td>${h(l.codigo || "")}</td><td class="chk">${l.estado === "stock" ? "✓" : "☐"}</td><td>${h(l.nombre)}${l.stock > 0 && l.estado !== "stock" ? `<div class="mini">${l.stock} de stock · comprar ${l.cantidad - l.stock}</div>` : ""}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}</td><td class="num">${l.cantidad}</td><td class="cen">${h(l.unidad || "")}</td>
+        <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td class="obs">${txt[l.estado] || l.estado}${l.compras.length ? `<div class="mini">${l.compras.map((c) => h(c.numero)).join(", ")}</div>` : ""}</td></tr>`).join("")}
+      </tbody></table></div>`).join("")}
+    <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;
+  imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo);
+}
+// Desde la venta: trae el cuadro y lo imprime
+export async function imprimirCuadro(ventaId, esAdmin) {
+  imprimirCuadroDatos(await api(`/ventas/${ventaId}/cuadro-compra`), esAdmin);
 }

@@ -19,6 +19,7 @@ router.post("/:id/anular", soloAdmin, c.anularVenta);
 router.post("/:id/cobros", soloAdmin, c.registrarCobro); // cobros: Finanzas
 // Qué comprar y a quién: lo gestiona Operativo
 router.get("/:id/cuadro-compra", operativo, c.getCuadroCompra);
+router.get("/:id/interna-simple", c.internaSimple);
 router.post("/:id/cambiar-proveedor", operativo, c.cambiarProveedorLinea);
 router.post("/:id/generar-ordenes", operativo, c.generarOrdenes);
 router.post("/:id/asignar", operativo, c.asignarProveedores);
