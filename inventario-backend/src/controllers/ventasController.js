@@ -464,10 +464,10 @@ async function datosCuadro(venta) {
 async function precioCon(item, proveedor) {
   const CC = require("../services/cuadroCompra");
   const ops = (await CC.opcionesPorProducto([item.producto_id])).get(item.producto_id) || [];
+  // Si la línea ya va con ese proveedor se respeta su costo (puede ser un precio puesto a mano)
+  if (normProv(item.proveedor) === proveedor && Number(item.costo) > 0) return Number(item.costo);
   const o = ops.find((x) => x.proveedor === proveedor);
-  if (o) return o.precio;
-  if (normProv(item.proveedor) === proveedor) return Number(item.costo) || 0;
-  return null;
+  return o ? o.precio : null;
 }
 
 // POST /api/ventas/:id/asignar   { asignaciones: [{ indice, proveedor, costo? }] }

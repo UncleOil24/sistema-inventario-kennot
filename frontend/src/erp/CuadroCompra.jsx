@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Modal, Cargando, Estado, confirmar, pedirTexto, BotonesSolicitud } from "./ui";
 import { api, fmt, descargar, imprimirHTML, escaparHTML as h } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
@@ -15,7 +15,6 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const [data, setData] = useState(null);
   const [sel, setSel] = useState(new Set());
   const [ocupado, setOcupado] = useState(false);
-  const [provOrden, setProvOrden] = useState("");
   const [subir, setSubir] = useState(false);
 
   const cargar = useCallback(async () => {
@@ -26,17 +25,6 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
 
   const lineas = data?.lineas || [];
   const marcadas = lineas.filter((l) => sel.has(l.indice));
-  // Proveedor propuesto para la orden: el que más se repite entre las líneas marcadas
-  const provSugerido = useMemo(() => {
-    const c = new Map();
-    for (const l of marcadas) {
-      // Lo que no vino con un proveedor se propone con el siguiente más barato
-      const p = l.no_vino && l.proveedor.toUpperCase() === String(l.no_vino.proveedor).toUpperCase() ? (l.opciones.find((o) => o.proveedor.toUpperCase() !== l.proveedor.toUpperCase())?.proveedor || "") : l.proveedor;
-      if (p && p !== "SIN PROVEEDOR") c.set(p, (c.get(p) || 0) + 1);
-    }
-    return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
-  }, [marcadas]);
-  useEffect(() => { setProvOrden(provSugerido); }, [provSugerido]);
 
   if (!data) return <Modal titulo="// Cuadro de compra" onClose={onClose} ancho={1250}><Cargando /></Modal>;
   const { venta, sugerencias, resumen_proveedores, totales, ordenes, gastos } = data;
@@ -52,12 +40,19 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   };
   const asignar = (asignaciones, msg) => ejecutar(() => api(`/ventas/${ventaId}/asignar`, { method: "POST", body: { asignaciones } }), msg);
 
+  // La sugerencia se aplica a lo marcado (o a todo lo por comprar si no hay nada marcado) y solo cambia
+  // las líneas donde el proveedor es distinto; antes se muestra qué cambia
   const aplicarSugerencia = async (modo) => {
     const lista = sugerencias[modo];
     if (!lista.length) return notify("No hay precios para sugerir: carga cotizaciones de proveedores", "danger");
-    const r = sugerencias.resumen[modo];
-    if (!(await confirmar(`Asignar ${lista.length} producto(s) por comprar a ${r.proveedores} proveedor(es), total ${fmt(r.total)} neto.\nCambia el costo y el margen de la venta; las líneas pedidas o compradas no se tocan.`, { titulo: modo === "barato" ? "Más barato por producto" : "Menos proveedores", boton: "Aplicar" }))) return;
-    asignar(lista.map((a) => ({ indice: a.indice, proveedor: a.proveedor, costo: a.precio })), `✓ Sugerencia aplicada: ${r.proveedores} proveedor(es)`);
+    const destino = sel.size ? new Set(sinOrden(marcadas).map((l) => l.indice)) : null;
+    if (destino && !destino.size) return notify("Los productos marcados ya tienen orden de compra o están comprados", "danger");
+    const porIndice = new Map(lineas.map((l) => [l.indice, l]));
+    const cambios = lista.filter((a) => (!destino || destino.has(a.indice)) && porIndice.get(a.indice)?.proveedor !== a.proveedor);
+    if (!cambios.length) return notify("Los productos ya están con esos proveedores: no hay nada que cambiar");
+    const detalle = cambios.slice(0, 15).map((a) => { const l = porIndice.get(a.indice); return `• ${l.nombre}: ${l.proveedor === "SIN PROVEEDOR" ? "—" : l.proveedor} → ${a.proveedor} (${fmt(a.precio)})`; }).join("\n");
+    if (!(await confirmar(`${destino ? `Sobre los ${destino.size} producto(s) marcados` : "Sobre todos los productos por comprar"}, cambian ${cambios.length}:\n${detalle}${cambios.length > 15 ? `\n… y ${cambios.length - 15} más` : ""}\n\nLos que no tienen precio de proveedor, los pedidos y los comprados no se tocan. Cambia el costo y el margen de la venta.`, { titulo: modo === "barato" ? "Más barato por producto" : "Menos proveedores", boton: "Aplicar" }))) return;
+    asignar(cambios.map((a) => ({ indice: a.indice, proveedor: a.proveedor, costo: a.precio })), `✓ ${cambios.length} producto(s) cambiados de proveedor`);
   };
   const cambiarLinea = async (l, valor) => {
     if (valor === "__otro") {
@@ -80,13 +75,21 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     const prov = await pedirTexto(`¿A qué proveedor asignas los ${ls.length} producto(s) por comprar?`, { titulo: "Asignar proveedor", sugerencias: [...new Set(ls.flatMap((l) => l.opciones.map((o) => o.proveedor)))].slice(0, 10) });
     if (prov) asignar(ls.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${ls.length} producto(s) asignados a ${prov.toUpperCase()}${avisoOmitidos(marcadas.length - ls.length)}`);
   };
-  const crearOrden = () => {
+  // Una orden por cada proveedor elegido en las líneas marcadas ("Comprar con"): no se cambia el proveedor de ninguna línea
+  const crearOrden = async () => {
     if (!sel.size) return notify(AVISO_SEL, "danger");
     const ls = sinOrden(marcadas);
     if (!ls.length) return notify("Los productos marcados ya tienen orden de compra o están comprados: no se duplican", "danger");
-    if (!provOrden) return notify("Indica el proveedor de la orden", "danger");
+    const sinProv = ls.filter((l) => !l.proveedor || l.proveedor === "SIN PROVEEDOR");
+    if (sinProv.length) return notify(`Elige el proveedor de: ${sinProv.slice(0, 3).map((l) => l.nombre).join(", ")}${sinProv.length > 3 ? ` y ${sinProv.length - 3} más` : ""}`, "danger");
+    const grupos = new Map();
+    for (const l of ls) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
+    const repetir = ls.filter((l) => l.no_vino && l.proveedor.toUpperCase() === String(l.no_vino.proveedor).toUpperCase());
     const omitidos = marcadas.length - ls.length;
-    ejecutar(() => api(`/ventas/${ventaId}/crear-orden`, { method: "POST", body: { indices: ls.map((l) => l.indice), proveedor: provOrden } }), (r) => `✓ Orden ${r.numero} creada a ${r.proveedor_nombre}${avisoOmitidos(omitidos)}`);
+    const texto = [...grupos].map(([p, g]) => `• ${p}: ${g.length} prod. · ${fmt(g.reduce((s2, l) => s2 + l.total_compra, 0))}`).join("\n");
+    if (!(await confirmar(`Se ${grupos.size === 1 ? "creará 1 orden" : `crearán ${grupos.size} órdenes`} (borrador), cada producto con el proveedor que tiene elegido:\n${texto}${repetir.length ? `\n\nOjo: ${repetir.map((l) => l.nombre).join(", ")} no vino antes con ese mismo proveedor.` : ""}${omitidos ? `\n\n${omitidos} marcado(s) ya tenían orden o estaban comprados: se omiten.` : ""}`, { titulo: "Crear órdenes", boton: grupos.size === 1 ? "Crear orden" : "Crear órdenes" }))) return;
+    ejecutar(() => api("/ventas/agrupar/ordenes", { method: "POST", body: { lineas: ls.map((l) => ({ venta_id: ventaId, indice: l.indice, proveedor: l.proveedor })) } }),
+      (r) => `✓ ${r.creadas.map((c) => `${c.numero} a ${c.proveedor}`).join(" · ")}`);
   };
   // Hoja para imprimir (Carta horizontal): productos agrupados por proveedor, con casilla para marcar a mano
   const imprimir = () => {
@@ -139,6 +142,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
         {!anulada && porComprar.length > 0 && (
           <div className="panel">
             <div className="panel-titulo">Sugerencia para lo que falta comprar ({porComprar.length} productos)</div>
+            <div className="mini" style={{ marginBottom: 6 }}>Solo es una ayuda: "Aplicar" cambia lo marcado (o todo si no marcas nada) y antes te muestra qué cambia. Lo que eliges a mano en cada línea es lo que va a la orden.</div>
             <div className="fields-row" style={{ alignItems: "stretch" }}>
               <div className="sugerencia-caja">
                 <strong>Más barato por producto</strong>
@@ -171,10 +175,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
           <div className="panel barra-seleccion">
             {sel.size ? <strong>{sel.size} marcado(s)</strong> : <strong style={{ color: "var(--warn)" }}>{AVISO_SEL} ↓</strong>}
             <button className="btn btn-ghost btn-sm" disabled={ocupado} onClick={asignarMarcadas}>Asignar proveedor…</button>
-            <span className="mini">Orden a</span>
-            <input id="orden-a" list="cuadro-provs" className="input-mini" value={provOrden} onChange={(e) => setProvOrden(e.target.value.toUpperCase())} style={{ width: 200, padding: "5px 8px" }} />
-            <datalist id="cuadro-provs">{data.proveedores.map((p) => <option key={p} value={p} />)}</datalist>
-            <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={crearOrden}>Crear orden</button>
+            <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={crearOrden} title="Una orden por cada proveedor elegido en las líneas marcadas">Crear orden(es)</button>
             <BotonesSolicitud notify={notify} lineas={() => marcadas.map((l) => ({ venta_id: ventaId, indice: l.indice }))} />
             {sel.size > 0 && <button className="link mini" onClick={() => setSel(new Set())}>Quitar marcas</button>}
           </div>
