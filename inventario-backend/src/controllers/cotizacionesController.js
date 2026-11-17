@@ -563,7 +563,7 @@ const descargarInterna = async (req, res) => {
     const simple = req.query.modo === "simple";
     const c = cot.toJSON();
     const wb = simple
-      ? await excelInternoSimple(c, await require("../services/cuadroCompra").opcionesPorProducto((c.items || []).map((i) => i.producto_id)))
+      ? await excelInternoSimple(c, await require("../services/cuadroCompra").opcionesInterna(c.items || []))
       : await excelInterno(c, await getParametros(), precioVenta);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="INTERNA_${simple ? "SIMPLE" : "FULL"}_${nombreArchivo(cot, "xlsx")}"`);

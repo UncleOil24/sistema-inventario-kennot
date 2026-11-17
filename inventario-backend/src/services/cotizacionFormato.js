@@ -453,6 +453,7 @@ async function excelInterno(cot, params, precioVenta) {
 const GENERICOS = ["SISTEMA", "SIN PROVEEDOR", "SIN IDENTIFICAR"];
 const CASO_SIMPLE = { mismo: "Exacto", similar: "Similar", nuevo: "Sin catálogo" };
 // Filas de la hoja interna simple (se usan en el Excel de la cotización y en la impresión desde la venta)
+// opciones: arreglo por línea [{ opciones, parecido }] (opcionesInterna)
 function filasInternaSimple(items, opciones) {
   let tv = 0; let tc = 0; let sinCosto = 0;
   const filas = (items || []).map((it, k) => {
@@ -462,12 +463,13 @@ function filasInternaSimple(items, opciones) {
     const caso = it.caso || (it.producto_id ? "mismo" : "nuevo");
     // Proveedores reales del catálogo hoy (incluye las cotizaciones subidas después de cotizar); sin los genéricos de la planilla
     const usado = String(it.proveedor || "").toUpperCase();
-    const proveedores = (opciones.get(it.producto_id) || []).filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase())).slice(0, 3)
+    const op = opciones[k] || { opciones: [] };
+    const proveedores = op.opciones.filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase())).slice(0, 3)
       .map((o) => ({ proveedor: o.proveedor, precio: o.precio, usado: !!usado && String(o.proveedor).toUpperCase() === usado }));
     const venta = Math.round(precio * cant); const compra = Math.round(costo * cant);
     tv += venta; if (costo) tc += compra; else sinCosto += 1;
     return {
-      n: k + 1, producto: it.descripcion_cliente || it.nombre, caso, caso_txt: CASO_SIMPLE[caso] || "", precio, costo: costo || null,
+      n: k + 1, producto: it.descripcion_cliente || it.nombre, parecido: op.parecido, caso, caso_txt: CASO_SIMPLE[caso] || "", precio, costo: costo || null,
       proveedores, unidad: it.unidad || "", cantidad: cant, total_venta: venta, total_compra: costo ? compra : null,
       utilidad: costo ? venta - compra : null, margen: precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null,
     };
@@ -495,7 +497,7 @@ async function excelInternoSimple(cot, opciones) {
   const tv = totales.venta; const tc = totales.compra; const sinCosto = totales.sin_costo;
   filas.forEach((f) => {
     const prov = []; for (let n = 0; n < 3; n++) prov.push(f.proveedores[n]?.proveedor || "", f.proveedores[n]?.precio ?? null);
-    const row = ws.addRow([f.n, f.producto, f.caso_txt, f.precio, f.costo, ...prov, f.unidad, f.cantidad, f.total_venta, f.total_compra, f.utilidad, f.margen]);
+    const row = ws.addRow([f.n, f.parecido ? `${f.producto}\n≈ precios de ${f.parecido}` : f.producto, f.caso_txt, f.precio, f.costo, ...prov, f.unidad, f.cantidad, f.total_venta, f.total_compra, f.utilidad, f.margen]);
     [4, 5, 7, 9, 11, 14, 15, 16].forEach((c) => { row.getCell(c).numFmt = PESOS; });
     row.alignment = { vertical: "top", wrapText: true };
     [1, 3, 12, 13, 17].forEach((c) => { row.getCell(c).alignment = { vertical: "top", horizontal: "center" }; });
@@ -511,7 +513,7 @@ async function excelInternoSimple(cot, opciones) {
   fila("UTILIDAD", tv - tc, PESOS);
   fila("MARGEN %", tv ? Math.round(((tv - tc) / tv) * 1000) / 10 : null);
   if (sinCosto) { const r = ws.addRow(["", `Ojo: ${sinCosto} línea(s) sin precio de compra; no suman a la compra ni a la utilidad.`]); r.font = { italic: true, color: { argb: "FFC00000" } }; }
-  const r = ws.addRow(["", "Caso: Exacto = mismo producto · Similar = equivalente nuestro · Sin catálogo = precio a mano. En negrita, el proveedor con que se cotizó."]);
+  const r = ws.addRow(["", "Caso: Exacto = mismo producto · Similar = equivalente nuestro · Sin catálogo = precio a mano. En negrita, el proveedor con que se cotizó. ≈ = el producto no tiene precios; se muestran los de un producto parecido del catálogo."]);
   r.font = { italic: true, size: 9 };
   return wb;
 }

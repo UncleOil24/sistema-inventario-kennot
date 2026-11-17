@@ -35,6 +35,35 @@ async function opcionesPorProducto(ids) {
   return out;
 }
 
+// Opciones para la hoja interna: los proveedores del catálogo de hoy (sin los genéricos de la planilla) más el
+// proveedor y costo de la propia línea si no está en el catálogo. Si el producto no tiene ningún precio, se usan los
+// del producto más parecido del catálogo (precio subido con otra descripción), marcados con "parecido".
+const GENERICOS = ["SISTEMA", "SIN PROVEEDOR", "SIN IDENTIFICAR"];
+async function opcionesInterna(items) {
+  const ops = await opcionesPorProducto((items || []).map((i) => i.producto_id));
+  const { buscarParecidos } = require("../controllers/productosController");
+  const out = [];
+  for (const it of items || []) {
+    let lista = (ops.get(it.producto_id) || []).filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase()));
+    let parecido = null;
+    if (!lista.length && it.producto_id) {
+      const cands = await buscarParecidos(it.nombre || it.descripcion_cliente || "", it.producto_id, { minimo: 0.6 });
+      const conPrecio = await opcionesPorProducto(cands.slice(0, 15).map((c) => c.id));
+      const mejor = cands.find((c) => (conPrecio.get(c.id) || []).some((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase())));
+      if (mejor) {
+        lista = conPrecio.get(mejor.id).filter((o) => !GENERICOS.includes(String(o.proveedor).toUpperCase()));
+        parecido = `N° ${mejor.codigo ?? mejor.id} ${mejor.nombre}`;
+      }
+    }
+    const prov = String(it.proveedor || "").toUpperCase();
+    if (prov && !GENERICOS.includes(prov) && Number(it.costo) > 0 && !lista.some((o) => String(o.proveedor).toUpperCase() === prov)) {
+      lista = [...lista, { proveedor: prov, precio: Math.round(Number(it.costo)), fecha: null }].sort((a, b) => a.precio - b.precio);
+    }
+    out.push({ opciones: lista, parecido });
+  }
+  return out;
+}
+
 // Sugerencias para todas las líneas. lineas: [{ indice, cantidad, opciones: [{proveedor, precio}] }]
 // "barato": cada línea con su proveedor más barato.
 // "menos": se eligen pocos proveedores: cada línea puede ir a un proveedor que cueste hasta 10% más que su mejor
@@ -109,4 +138,5 @@ function estadoLineas(items, ordenes) {
   });
 }
 
-module.exports = { opcionesPorProducto, sugerir, estadoLineas, stockDe, costoItems, TOLERANCIA, SIN };
+module.exports = {
+  opcionesInterna, opcionesPorProducto, sugerir, estadoLineas, stockDe, costoItems, TOLERANCIA, SIN };
