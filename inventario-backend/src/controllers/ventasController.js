@@ -485,7 +485,9 @@ const asignarProveedores = handler(async (req, res) => {
       const prov = normProv(a.proveedor || "");
       if (!i || !prov) continue;
       let costo = a.costo != null && a.costo !== "" ? Number(a.costo) : await precioCon(i, prov);
-      if (costo == null) costo = Number(i.costo) || 0; // sin precio con ese proveedor: se mantiene el costo
+      // Sin precio con ese proveedor: si es el mismo proveedor se mantiene el costo; si es otro, queda sin precio
+      // (antes quedaba el costo del proveedor anterior y parecía que el nuevo cobraba lo mismo)
+      if (costo == null) costo = normProv(i.proveedor) === prov ? Number(i.costo) || 0 : 0;
       items[Number(a.indice)] = { ...i, proveedor: prov, costo: Math.round(costo) };
     }
     await v.update({ items, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
