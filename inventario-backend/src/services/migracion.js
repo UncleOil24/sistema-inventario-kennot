@@ -54,6 +54,7 @@ async function migrar() {
   await giroEmpresasV1(q);
   await proveedoresGenericosV1(q);
   await proveedoresGenericosV2(q);
+  await bacEnPernosBac();
   await protegerTablas(q);
 }
 
@@ -144,6 +145,25 @@ async function proveedoresGenericosV2(q) {
   await q(`UPDATE ordenes_compra o SET proveedor_id = NULL FROM proveedores p WHERE o.proveedor_id = p.id AND upper(trim(p.nombre)) IN (${enSql})`);
   await q(`DELETE FROM proveedores WHERE upper(trim(nombre)) IN (${enSql})`);
   await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_prov_genericos_v2', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// "BAC" se creó por error desde el cuadro de compra (no se encontraba PERNOS BAC): todo lo de BAC (órdenes, líneas de
+// ventas y cotizaciones, precios si hubiera) pasa a PERNOS BAC y se borra la ficha BAC. Una sola vez.
+async function bacEnPernosBac() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_bac_v1'`);
+  if (hecho) return;
+  const [[bac]] = await sequelize.query(`SELECT id FROM proveedores WHERE upper(trim(nombre)) = 'BAC'`);
+  const [[pernos]] = await sequelize.query(`SELECT id, nombre FROM proveedores WHERE upper(trim(nombre)) = 'PERNOS BAC'`);
+  if (bac && pernos) {
+    const { propagarNombre, recalcularDeProveedor } = require("../controllers/proveedoresController");
+    await sequelize.transaction(async (t) => {
+      await propagarNombre("BAC", pernos.nombre, { proveedorId: pernos.id, t });
+      await sequelize.query(`DELETE FROM proveedores WHERE id = ${Number(bac.id)}`, { transaction: t });
+    });
+    await recalcularDeProveedor(pernos.nombre, "Sistema", "BAC (creado por error) se juntó con PERNOS BAC").catch((e) => console.error("BAC", e.message));
+    console.log("BAC se juntó con PERNOS BAC");
+  }
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_bac_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 async function catalogoPaso7() {

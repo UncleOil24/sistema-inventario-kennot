@@ -272,8 +272,62 @@ async function imprimirInternaSimple(ventaId) {
   imprimirHTML(`Interna simple ${v.numero}`, cuerpo, { horizontal: true });
 }
 
+// Cambiar el producto de una línea de la venta (el cliente cambió de opinión). La cotización queda como se envió.
+function CambiarProducto({ venta, indice, verCompras, notify, onClose, onHecho }) {
+  const linea = venta.items[indice];
+  const productos = useProductos();
+  const [q, setQ] = useState("");
+  const [elegido, setElegido] = useState(null);
+  const [precio, setPrecio] = useState(String(Math.round(linea.precio)));
+  const [cantidad, setCantidad] = useState(String(linea.cantidad));
+  const [motivo, setMotivo] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  // Medidas escritas distinto valen igual: 1 1/2 = 1.1/2 = 1-1/2 ; 1/2X1 = 1/2 X 1
+  const norm = (x) => String(x).toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/(\d)X(\d)/g, "$1 X $2").replace(/(^|[^0-9A-Z./])(\d+)(?:\s+|-|\.)(\d+\/\d+)/g, "$1$2.$3").replace(/"/g, "");
+  const palabras = norm(q.trim()).split(/\s+/).filter(Boolean);
+  const lista = palabras.length ? productos.filter((p) => { const t = norm(`${p.codigo} ${p.nombre}`); return p.activo !== false && palabras.every((w) => t.includes(w)); }).slice(0, 25) : [];
+  const guardar = async () => {
+    if (!motivo.trim()) return notify("Escribe el motivo del cambio", "danger");
+    setEnviando(true);
+    try {
+      const r = await api(`/ventas/${venta.id}/cambiar-producto`, { method: "POST", body: { indice, producto_id: elegido.id, precio, cantidad, motivo } });
+      notify(`✓ ${linea.nombre} → ${elegido.nombre}${r.total_cambio ? ` · el total neto cambia ${r.total_cambio > 0 ? "+" : ""}${fmt(r.total_cambio)}` : ""}`);
+      onHecho();
+    } catch (e) { notify(e.message, "danger"); setEnviando(false); }
+  };
+  return (
+    <Modal titulo="// Cambiar producto de la venta" onClose={onClose} ancho={680}
+      footer={<>{elegido && <button className="btn btn-primary" disabled={enviando} onClick={guardar}>Cambiar producto</button>}<button className="btn btn-ghost" onClick={onClose}>Cancelar</button></>}>
+      <div style={{ marginBottom: 10 }}>Ahora: <strong>{linea.nombre}</strong> <span className="mini">· {linea.cantidad} {linea.unidad} · {fmt(linea.precio)} c/u</span></div>
+      <div className="mini" style={{ marginBottom: 10 }}>Úsalo cuando el cliente cambia de opinión. Cambia la venta y lo que hay que comprar; la cotización queda como se envió. Si la línea ya tiene orden de compra, primero anula o descarta esa orden.</div>
+      {!elegido ? <>
+        <input autoFocus className="input-mini" style={{ width: "100%", padding: "6px 8px", marginBottom: 6 }} placeholder="Buscar producto nuevo (ej. perno 1/2 1.1/2)" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div style={{ maxHeight: 320, overflowY: "auto" }}>
+          {lista.map((p) => (
+            <button key={p.id} className="fila-elegir" onClick={() => setElegido(p)}>
+              <span>{p.nombre} <span className="mini">· N° {p.codigo} · {p.unidad}</span></span>
+              {verCompras && <span className="mini">{Number(p.precio_compra) > 0 ? `${fmt(p.precio_compra)} ${p.proveedor || ""}` : "sin precio"}</span>}
+            </button>
+          ))}
+          {palabras.length > 0 && !lista.length && <div className="mini">No hay productos con esas palabras. Si no existe, agrégalo primero en Catálogo.</div>}
+        </div>
+      </> : <>
+        <div style={{ marginBottom: 8 }}>Nuevo: <strong>{elegido.nombre}</strong> <span className="mini">· {elegido.unidad}{verCompras ? ` · compra ${Number(elegido.precio_compra) > 0 ? fmt(elegido.precio_compra) : "sin precio"}` : ""}</span> <button className="link mini" onClick={() => setElegido(null)}>cambiar</button></div>
+        <div className="fields-row">
+          <div className="field"><label>Precio de venta c/u (neto)</label><input value={precio} onChange={(e) => setPrecio(e.target.value.replace(/[^\d]/g, ""))} /></div>
+          <div className="field" style={{ maxWidth: 140 }}><label>Cantidad</label><input value={cantidad} onChange={(e) => setCantidad(e.target.value.replace(/[^\d.,]/g, "").replace(",", "."))} /></div>
+        </div>
+        <div className="field"><label>Motivo (queda en el historial)</label><input autoFocus value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej.: el cliente pidió pernos de 1 1/2 en vez de 1 1/4" /></div>
+        {Number(precio) * Number(cantidad) !== Number(linea.precio) * Number(linea.cantidad) && <div className="aviso">El total de la venta cambia {fmt(Number(precio) * Number(cantidad) - Number(linea.precio) * Number(linea.cantidad))} neto. Si ya hay factura, revisa la facturación.</div>}
+      </>}
+    </Modal>
+  );
+}
+
 function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar, puedeVender, notify, onClose, onCambio, irACompra }) {
   const [cuadro, setCuadro] = useState(false);
+  const [cambiar, setCambiar] = useState(null); // índice de la línea a cambiar de producto
+  const puedeCambiar = venta.estado !== "anulada" && (puedeVender || puedeOperar);
   const editaDatos = puedeVender && modo === "comercial";
   const [datos, setDatos] = useState({ plazo_pago_dias: venta.plazo_pago_dias ?? "", base_vencimiento: venta.base_vencimiento || "factura", orden_compra_cliente: venta.orden_compra_cliente || "", id_solicitud: venta.id_solicitud || "", cliente_id: venta.cliente_id || "" });
   const r = venta.resumen;
@@ -360,16 +414,17 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
       {(modo !== "operativo" || venta.facturas?.length > 0) && <PanelFacturas venta={venta} puedeVender={editaDatos || (puedeVender && modo === "finanzas" && esAdmin)} notify={notify} onCambio={onCambio} />}
       <div className="table-wrap">
         <table className="table table-compacta">
-          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th>{verCompras && <th>Costo</th>}{verCompras && <th>Proveedor</th>}<th>Total</th></tr></thead>
+          <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th>{verCompras && <th>Costo</th>}{verCompras && <th>Proveedor</th>}<th>Total</th>{puedeCambiar && <th></th>}</tr></thead>
           <tbody>
             {venta.items.map((i, k) => (
               <tr key={k}>
-                <td>{i.nombre}</td>
+                <td>{i.nombre}{i.cambio && <div className="mini" title={`Cambiado el ${i.cambio.fecha}`}>antes: {i.cambio.antes}</div>}</td>
                 <td className="mini">{i.cantidad} {i.unidad}</td>
                 <td className="price-cell">{fmt(i.precio)}</td>
                 {verCompras && <td className="price-cell compra">{fmt(i.costo)}</td>}
                 {verCompras && <td className="mini">{i.proveedor || "—"}</td>}
                 <td className="price-cell">{fmt(i.precio * i.cantidad)}</td>
+                {puedeCambiar && <td><button className="link mini" title="El cliente cambió de opinión: cambiar este producto (queda en el historial)" onClick={() => setCambiar(k)}>cambiar</button></td>}
               </tr>
             ))}
           </tbody>
@@ -412,6 +467,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         onRegistrar={(body) => accion(() => api(`/ventas/${venta.id}/cobros`, { method: "POST", body }), "✓ Cobro registrado")}
         onEliminar={esAdmin ? async (p) => (await confirmar("¿Eliminar este cobro?", { titulo: "Eliminar cobro", boton: "Eliminar", peligro: true })) && accion(() => api(`/pagos/${p.id}`, { method: "DELETE" }), "Cobro eliminado") : null}
       />}
+      {cambiar != null && <CambiarProducto venta={venta} indice={cambiar} verCompras={verCompras} notify={notify} onClose={() => setCambiar(null)} onHecho={() => { setCambiar(null); onCambio(); }} />}
       {cuadro && <CuadroCompra ventaId={venta.id} esAdmin={esAdmin} notify={notify} irACompra={irACompra} onClose={() => { setCuadro(false); onCambio(); }} />}
     </Modal>
   );

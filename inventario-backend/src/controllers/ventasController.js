@@ -1126,6 +1126,47 @@ const listarFacturas = handler(async (req, res) => {
   res.json({ ok: true, data: facturas.map((f) => ({ ...f.toJSON(), venta: mapa.get(f.venta_id) || null })) });
 });
 
+// POST /api/ventas/:id/cambiar-producto  { indice, producto_id, precio?, cantidad?, motivo }
+// El cliente cambió de opinión (ej. pernos 1/2 x 1 1/4 → 1/2 x 1 1/2): se cambia el producto de la línea de la venta,
+// con el costo y proveedor del catálogo. La cotización queda como se envió (registro de lo ofertado).
+// No se puede si esa línea ya tiene orden de compra: primero se anula o descarta la orden.
+const cambiarProducto = handler(async (req, res) => {
+  const b = req.body || {};
+  const motivo = String(b.motivo || "").trim();
+  if (!motivo) throw new ErrorNegocio("Indica por qué se cambia el producto (queda en el historial)");
+  const r = await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
+    const items = [...v.items];
+    const k = Number(b.indice);
+    const i = items[k];
+    if (!i) throw new ErrorNegocio("Línea no encontrada");
+    const ordenes = await OrdenCompra.findAll({ where: { venta_id: v.id, estado: { [Op.ne]: "anulada" } }, transaction: t });
+    const est = require("../services/cuadroCompra").estadoLineas(items, ordenes)[k];
+    if (est && ["pedido", "parcial", "comprado"].includes(est.estado)) {
+      throw new ErrorNegocio(`${i.nombre} ya está en ${est.compras.map((c) => c.numero).join(", ")}: anula o descarta esa orden antes de cambiar el producto`);
+    }
+    const p = await Producto.findByPk(b.producto_id, { transaction: t });
+    if (!p) throw new ErrorNegocio("Elige el producto nuevo");
+    const precio = b.precio != null && b.precio !== "" ? Math.round(Number(b.precio)) : Number(i.precio);
+    const cantidad = b.cantidad != null && b.cantidad !== "" ? Number(b.cantidad) : Number(i.cantidad);
+    if (!(precio >= 0) || !(cantidad > 0)) throw new ErrorNegocio("Revisa precio y cantidad");
+    const { stock, ...resto } = i; void stock; // el stock marcado era del producto anterior
+    items[k] = { ...resto, producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad || i.unidad, precio, cantidad,
+      costo: Math.round(Number(p.precio_compra) || 0), proveedor: p.proveedor ? normProv(p.proveedor) : SIN_PROVEEDOR,
+      cambio: { antes: i.nombre, fecha: new Date().toISOString().slice(0, 10) } };
+    const totales = calcularTotales(items);
+    const subtotalAntes = Number(v.subtotal) || 0;
+    await v.update({ items, ...totales, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
+    if (totales.subtotal !== subtotalAntes) await recalcularFacturas(v, t);
+    const extra = [precio !== Number(i.precio) ? `precio ${Math.round(i.precio)} → ${precio}` : "", cantidad !== Number(i.cantidad) ? `cantidad ${i.cantidad} → ${cantidad}` : ""].filter(Boolean).join(", ");
+    await HistorialVenta.anotar(v, "paso", `Cambió producto: ${i.nombre} → ${p.nombre}${extra ? ` (${extra})` : ""}`, req, t, motivo);
+    return { linea: items[k], total_cambio: Math.round(totales.subtotal - subtotalAntes) };
+  });
+  res.json({ ok: true, data: r });
+});
+
 // GET /api/ventas/:id/buscar-precio?indice=&q=   (cuadro de compra)
 // Precios de hoy del producto de la línea (todos sus proveedores) y de productos parecidos del catálogo,
 // por si el precio quedó cargado en otro producto (otra forma de escribirlo)
@@ -1201,7 +1242,7 @@ const internaSimple = handler(async (req, res) => {
 });
 
 module.exports = {
-  internaSimple, buscarPrecio, precioLinea,
+  internaSimple, buscarPrecio, precioLinea, cambiarProducto,
   resumenAnulacion,
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
