@@ -33,7 +33,7 @@ async function opcionesPorProducto(ids) {
     out.set(id, vigentesPorProveedor(lista).map((p) => ({
       id: p.id, proveedor: normProv(p.proveedor), precio: Math.round(Number(p.precio)), fecha: String(p.fecha).slice(0, 10),
       valido_hasta: p.valido_hasta ? String(p.valido_hasta).slice(0, 10) : null, pack: Number(p.pack) > 1 ? Number(p.pack) : null,
-      calce: p.calce || null, descripcion: p.descripcion_proveedor || null, documento: p.documento || null,
+      calce: p.calce || null, descripcion: p.descripcion_proveedor || null, documento: p.documento || null, vendedor: p.vendedor || null,
     })));
   }
   return out;

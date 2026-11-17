@@ -55,6 +55,7 @@ async function migrar() {
   await proveedoresGenericosV1(q);
   await proveedoresGenericosV2(q);
   await bacEnPernosBac();
+  await mercadoLibreUnoV1();
   await protegerTablas(q);
 }
 
@@ -164,6 +165,34 @@ async function bacEnPernosBac() {
     console.log("BAC se juntó con PERNOS BAC");
   }
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_bac_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// Mercado Libre queda como un solo proveedor "MERCADO LIBRE"; el vendedor (ej. ATHE3198923) pasa a cada precio. Una vez.
+async function mercadoLibreUnoV1() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_ml_v1'`);
+  if (hecho) return;
+  const { vendedorML } = require("./precios");
+  const RE = "^(MERC(ADO)?\\.?\\s*LIBRE|MERCADOLIBRE)";
+  const [precios] = await sequelize.query(`SELECT DISTINCT proveedor FROM precios_proveedor WHERE upper(trim(proveedor)) ~ '${RE}' AND upper(trim(proveedor)) <> 'MERCADO LIBRE'`);
+  const [fichas] = await sequelize.query(`SELECT id, nombre FROM proveedores WHERE upper(trim(nombre)) ~ '${RE}'`);
+  const [ordenes] = await sequelize.query(`SELECT DISTINCT proveedor_nombre AS proveedor FROM ordenes_compra WHERE upper(trim(proveedor_nombre)) ~ '${RE}' AND upper(trim(proveedor_nombre)) <> 'MERCADO LIBRE'`);
+  const variantes = [...new Set([...precios, ...ordenes].map((x) => x.proveedor).concat(fichas.map((f) => f.nombre)).filter((n) => n && n.trim().toUpperCase() !== "MERCADO LIBRE"))];
+  if (variantes.length) {
+    const { propagarNombre, recalcularDeProveedor } = require("../controllers/proveedoresController");
+    await sequelize.transaction(async (t) => {
+      let [[ml]] = await sequelize.query(`SELECT id FROM proveedores WHERE upper(trim(nombre)) = 'MERCADO LIBRE'`, { transaction: t });
+      if (!ml) [[ml]] = await sequelize.query(`INSERT INTO proveedores (nombre, tipo, "createdAt", "updatedAt") VALUES ('MERCADO LIBRE', 'web', NOW(), NOW()) RETURNING id`, { transaction: t });
+      for (const v of variantes) {
+        const vend = vendedorML(v);
+        if (vend) await sequelize.query(`UPDATE precios_proveedor SET vendedor = :vend WHERE upper(trim(proveedor)) = :v AND vendedor IS NULL`, { replacements: { vend, v: v.trim().toUpperCase() }, transaction: t });
+        await propagarNombre(v, "MERCADO LIBRE", { proveedorId: ml.id, t });
+      }
+      await sequelize.query(`DELETE FROM proveedores WHERE upper(trim(nombre)) ~ '${RE}' AND id <> ${Number(ml.id)}`, { transaction: t });
+    });
+    await recalcularDeProveedor("MERCADO LIBRE", "Sistema", "Mercado Libre como un solo proveedor").catch((e) => console.error("ML", e.message));
+    console.log(`Mercado Libre: ${variantes.length} nombre(s) juntados en MERCADO LIBRE`);
+  }
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_ml_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 async function catalogoPaso7() {

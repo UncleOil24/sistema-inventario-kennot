@@ -199,7 +199,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                       {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); if (!o) return null; const v = vigencia(o); return <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}
                         {v && <div style={{ color: "var(--danger)" }} title={`Cotización válida hasta ${o.valido_hasta}`}>⚠ cotización {v}: confirmar precio</div>}
                         {porConfirmar(o) && <div style={{ color: "var(--warn)" }} title={o.descripcion || ""}>⚠ por confirmar: {o.descripcion || "producto parecido"}</div>}
-                        {o.pack && <div><strong>{textoPack(l.cantidad - (l.stock || 0), o.pack)}</strong></div>}</div>; })()}
+                        {o.pack && <div><strong>{textoPack(l.cantidad - (l.stock || 0), o.pack)}</strong></div>}
+                        {o.vendedor && <div>vendedor: {o.vendedor}</div>}</div>; })()}
                     </td>
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
                     <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
@@ -322,6 +323,7 @@ function BuscarPrecio({ ventaId, indice, notify, onClose, onHecho }) {
   const filas = (ops, desde, actual) => ops.map((o, k) => (
     <tr key={o.proveedor}>
       <td><strong>{o.proveedor}</strong>{k === 0 ? " ★" : ""}{actual && actual === o.proveedor ? <span className="mini"> · elegido</span> : ""}
+        {o.vendedor && <div className="mini">vendedor: <strong>{o.vendedor}</strong></div>}
         {o.descripcion && <div className="mini" title="Así lo escribió el proveedor">{o.descripcion}</div>}
         {marcas(o).length > 0 && <div className="mini" style={{ color: vigencia(o) ? "var(--danger)" : "var(--warn)" }}>{marcas(o).join(" · ")}</div>}</td>
       <td className="price-cell compra">{fmt(o.precio)}{o.pack ? <div className="mini">c/u (pack x{o.pack})</div> : null}</td>

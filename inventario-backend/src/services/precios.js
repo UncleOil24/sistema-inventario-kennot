@@ -13,7 +13,10 @@ const RegistroCambio = require("../models/RegistroCambio");
 const { ErrorNegocio } = require("./erp");
 
 const IVA = 1.19;
-const normProv = (s) => String(s || "").trim().toUpperCase();
+// Mercado Libre es un solo proveedor ("MERC. LIBRE", "MERCADO LIBRE (ATHE3198923)"…); el vendedor va como nota del precio
+const ML = /^(MERC(ADO)?\.?\s*LIBRE|MERCADOLIBRE)\b/;
+const vendedorML = (s) => { const t = String(s || "").trim().toUpperCase(); if (!ML.test(t)) return null; const m = t.match(/\(([^)]+)\)/) || t.replace(ML, "").match(/[-·:\s]+(.+)/); return m ? m[1].trim() : null; };
+const normProv = (s) => { const t = String(s || "").trim().toUpperCase(); return ML.test(t) ? "MERCADO LIBRE" : t; };
 // Nombres de relleno que se escriben mientras no se sabe el proveedor: sirven en la línea, pero no son proveedores
 // (no se guardan como proveedor, ni precios con ellos, ni se crean órdenes a ellos)
 const GENERICOS_PROV = ["OTRO", "OTROS", "COTIZAR", "POR COTIZAR", "A COTIZAR", "VARIOS", "PENDIENTE", "POR DEFINIR", "SIN PROVEEDOR", "SIN IDENTIFICAR", "SISTEMA", "?", "-", "X"];
@@ -142,4 +145,4 @@ const origenDe = async (nombreProveedor, t) => {
 // Qué cuenta como aviso real en REVISAR (el resto del texto es solo el origen del precio, ej. "WEB SODIMAC")
 const SQL_AVISO = `(NOT confirmado AND precio_compra > 0 AND revisar ~* '(revis|verific|m[aá]s barat|m[aá]s car|antes \\$|pendiente)')`;
 
-module.exports = { GENERICOS_PROV, esGenerico, REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
+module.exports = { vendedorML, GENERICOS_PROV, esGenerico, REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
