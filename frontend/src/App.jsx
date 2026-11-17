@@ -102,7 +102,20 @@ const styles = `
   .recorrido .paso.hecho { color: var(--success); border-color: rgba(76,175,125,0.35); }
   .recorrido .paso.actual { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb),0.07); font-weight: 600; }
   .paso-num { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; font-size: 10px; flex-shrink: 0; }
-  .accion-etapa { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 12px; }
+  .accion-etapa { position: relative; padding: 14px 16px; border: 2px solid var(--accent); border-radius: 10px; margin: 4px 0 12px; background: rgba(var(--accent-rgb),0.07); }
+  .accion-etapa::before { content: ""; position: absolute; top: -9px; left: calc(var(--flecha, 10%) - 8px); width: 14px; height: 14px; background: inherit; border-left: 2px solid var(--accent); border-top: 2px solid var(--accent); transform: rotate(45deg); background: #e4ecee; }
+  .accion-etapa.etapa-lista, .accion-etapa.etapa-entregada { border-color: var(--success); background: rgba(76,175,125,0.08); }
+  .accion-etapa.etapa-lista::before, .accion-etapa.etapa-entregada::before { border-color: var(--success); background: #e3eee8; }
+  .accion-cabeza { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .accion-paso { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+  .etapa-lista .accion-paso, .etapa-entregada .accion-paso { color: var(--success); }
+  .accion-texto { font-size: 15px; color: var(--text); }
+  .accion-barra { height: 8px; border-radius: 4px; background: rgba(0,0,0,0.08); margin: 10px 0 2px; overflow: hidden; }
+  .accion-barra span { display: block; height: 100%; background: var(--success); border-radius: 4px; }
+  .accion-botones { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .btn-grande { font-size: 14px; padding: 11px 22px; }
+  .accion-etapa .btn-success.btn-grande { background: var(--success); color: #fff; border-color: var(--success); }
+  @media (max-width: 640px) { .accion-etapa::before { display: none; } }
   .id-solicitud { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 600; }
   .price-cell { font-family: var(--mono); font-size: 12px; color: var(--accent); }
   .price-cell.compra { color: var(--text2); }

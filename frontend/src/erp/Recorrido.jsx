@@ -2,7 +2,7 @@
 // Operativo acepta y confirma (productos listos) → Comercial factura (una o varias facturas) → Operativo despacha → entregada.
 import { useState } from "react";
 import { api, fmt, fecha, hoyISO } from "./lib";
-import { Recorrido, EstadoFactura, confirmar, pedirTexto } from "./ui";
+import { Recorrido, ETAPAS_VENTA, EstadoFactura, confirmar, pedirTexto } from "./ui";
 import { FichaSII, SubirSII, DocumentosSII } from "./SII";
 
 // Llama a la API; si el servidor pide confirmación (409), pregunta y reintenta con { forzar: true }
@@ -31,49 +31,51 @@ export function AccionesVenta({ venta, puedeOperar, notify, onCambio, abrirCuadr
   const c = venta.compras || { ordenes: 0, recibidas: 0 };
   const faltaFactura = venta.estado_factura !== "facturada";
 
-  let contenido = null;
+  // Cada etapa: qué pasa ahora y el botón para pasar a la siguiente (cuadro grande, bajo su paso del recorrido)
+  let texto = null; let botones = null; let progreso = null;
   if (venta.etapa === "registrada") {
-    contenido = puedeOperar
-      ? <><span>Venta nueva: revísala y acéptala para empezar a comprar.</span>
-        <button className="btn btn-primary btn-sm" disabled={enviando} onClick={() => hacer(() => api(`/ventas/${venta.id}/aceptar`, { method: "POST" }), `✓ ${venta.numero} aceptada`)}>✓ Aceptar venta</button>
-        {abrirCuadro && <button className="btn btn-ghost btn-sm" onClick={abrirCuadro}>Ver qué comprar</button>}</>
-      : <span>Esperando que Operativo la acepte y compre.</span>;
+    texto = puedeOperar ? "Venta nueva: revísala y acéptala para empezar a comprar." : "Esperando que Operativo la acepte y compre.";
+    botones = puedeOperar && <>
+      <button className="btn btn-primary btn-grande" disabled={enviando} onClick={() => hacer(() => api(`/ventas/${venta.id}/aceptar`, { method: "POST" }), `✓ ${venta.numero} aceptada`)}>✓ Aceptar venta</button>
+      {abrirCuadro && <button className="btn btn-ghost" onClick={abrirCuadro}>Ver qué comprar</button>}</>;
   } else if (venta.etapa === "aceptada") {
-    const texto = !c.ordenes ? "Aceptada: falta generar las órdenes de compra." : `Compras: ${c.recibidas} de ${c.ordenes} recibidas.`;
-    contenido = puedeOperar
-      ? <><span>{texto} Cuando llegue todo, confírmala para que Comercial facture.</span>
-        {abrirCuadro && <button className="btn btn-ghost btn-sm" onClick={abrirCuadro}>Cuadro de compra</button>}
-        <button className="btn btn-success btn-sm" disabled={enviando} onClick={() => hacer(() => conConfirmacion(`/ventas/${venta.id}/confirmar`), `✓ ${venta.numero} lista: se avisó a Comercial para facturar`)}>✓ Llegaron los productos</button></>
-      : <span>En compra ({texto.toLowerCase()})</span>;
+    texto = !c.ordenes ? "Falta generar las órdenes de compra (Cuadro de compra)." : `Compras: ${c.recibidas} de ${c.ordenes} recibidas.${puedeOperar ? " Cuando llegue todo, confírmalo para que Comercial facture." : ""}`;
+    if (c.ordenes) progreso = Math.round((c.recibidas / c.ordenes) * 100);
+    botones = puedeOperar && <>
+      <button className="btn btn-success btn-grande" disabled={enviando} onClick={() => hacer(() => conConfirmacion(`/ventas/${venta.id}/confirmar`), `✓ ${venta.numero} lista: se avisó a Comercial para facturar`)}>✓ Llegaron los productos</button>
+      {abrirCuadro && <button className="btn btn-ghost" onClick={abrirCuadro}>Cuadro de compra</button>}</>;
   } else if (venta.etapa === "lista") {
-    contenido = <>
-      <span>Productos listos. {faltaFactura ? "Falta la factura (Comercial)." : "Facturada."}</span>
-      {puedeOperar && !despacho && <button className="btn btn-primary btn-sm" onClick={() => setDespacho({ fecha: hoyISO(), guia: "" })}>🚚 Despachar</button>}
-      {puedeOperar && !entrega && <button className="btn btn-ghost btn-sm" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>Retiró / entregada</button>}
-    </>;
+    texto = `Productos listos. ${faltaFactura ? "Falta la factura (Comercial)." : "Facturada."}`;
+    botones = puedeOperar && <>
+      {!despacho && <button className="btn btn-primary btn-grande" onClick={() => setDespacho({ fecha: hoyISO(), guia: "" })}>🚚 Despachar</button>}
+      {!entrega && <button className="btn btn-ghost" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>Retiró / entregada</button>}</>;
   } else if (venta.etapa === "despachada") {
-    contenido = <>
-      <span>Despachada el {fecha(venta.despacho_fecha)}{venta.guia_despacho ? ` · guía ${venta.guia_despacho}` : ""}.</span>
-      {puedeOperar && !entrega && <button className="btn btn-success btn-sm" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>✓ El cliente recibió</button>}
-    </>;
+    texto = `Despachada el ${fecha(venta.despacho_fecha)}${venta.guia_despacho ? ` · guía ${venta.guia_despacho}` : ""}.`;
+    botones = puedeOperar && !entrega && <button className="btn btn-success btn-grande" onClick={() => setEntrega({ fecha: hoyISO(), recibido_por: "" })}>✓ El cliente recibió</button>;
   } else if (venta.etapa === "entregada") {
-    contenido = <span>Entregada el {fecha(venta.entrega_fecha)}{venta.recibido_por ? ` · recibió ${venta.recibido_por}` : ""}.{faltaFactura ? " ⚠ Aún falta facturar." : ""}</span>;
+    texto = `Entregada el ${fecha(venta.entrega_fecha)}${venta.recibido_por ? ` · recibió ${venta.recibido_por}` : ""}.${faltaFactura ? " ⚠ Aún falta facturar." : ""}`;
   }
+  const i = Math.max(0, ETAPAS_VENTA.findIndex(([k]) => k === venta.etapa));
 
   return (
     <>
       <Recorrido etapa={venta.etapa} />
-      <div className="mini" style={{ marginTop: -8, marginBottom: 10 }}>
+      <div className={`accion-etapa etapa-${venta.etapa}`} style={{ "--flecha": `${(i + 0.5) * 20}%` }}>
+        <div className="accion-cabeza">
+          <span className="accion-paso">Paso {i + 1} de {ETAPAS_VENTA.length} · {ETAPAS_VENTA[i][1]}</span>
+          {puedeOperar && venta.etapa !== "registrada" && <button className="link mini" disabled={enviando}
+            onClick={async () => {
+              const motivo = await pedirTexto("¿Por qué se deshace el último paso? Queda registrado en el historial de la venta.", { titulo: "Deshacer último paso", placeholder: "Ej.: se marcó despachada por error", obligatorio: true, boton: "Deshacer" });
+              if (motivo) hacer(() => api(`/ventas/${venta.id}/retroceder`, { method: "POST", body: { motivo } }), "Paso deshecho (queda en el historial)");
+            }}>↺ deshacer último paso</button>}
+        </div>
+        <div className="accion-texto">{texto}</div>
+        {progreso != null && <div className="accion-barra"><span style={{ width: `${progreso}%` }} /></div>}
+        {botones && <div className="accion-botones">{botones}</div>}
+      </div>
+      <div className="mini" style={{ marginTop: -4, marginBottom: 12 }}>
         {[["Registró", venta.creado_por], ["Aceptó", venta.aceptada_por], ["Confirmó productos", venta.lista_por], ["Despachó", venta.despacho_por]]
           .filter(([, q]) => q).map(([t, q]) => `${t}: ${q}`).join(" · ")}
-      </div>
-      <div className="accion-etapa">
-        {contenido}
-        {puedeOperar && venta.etapa !== "registrada" && <button className="link" style={{ marginLeft: "auto" }} disabled={enviando}
-          onClick={async () => {
-            const motivo = await pedirTexto("¿Por qué se deshace el último paso? Queda registrado en el historial de la venta.", { titulo: "Deshacer último paso", placeholder: "Ej.: se marcó despachada por error", obligatorio: true, boton: "Deshacer" });
-            if (motivo) hacer(() => api(`/ventas/${venta.id}/retroceder`, { method: "POST", body: { motivo } }), "Paso deshecho (queda en el historial)");
-          }}>↺ deshacer último paso</button>}
       </div>
       {despacho && (
         <div className="pago-form">
