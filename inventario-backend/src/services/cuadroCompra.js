@@ -48,9 +48,10 @@ function sugerir(lineas, tolerancia = TOLERANCIA) {
     const tope = l.opciones[0].precio * (1 + tolerancia);
     elegibles.set(l.indice, new Map(l.opciones.filter((o) => o.precio <= tope + 0.5).map((o) => [o.proveedor, o.precio])));
   }
-  const sinCubrir = new Set(conPrecio.map((l) => l.indice));
   const cant = new Map(conPrecio.map((l) => [l.indice, Number(l.cantidad) || 0]));
-  const menos = [];
+  // 1) Elegir pocos proveedores: primero el que cubre más líneas (en empate, el que suma menos), y así sucesivamente
+  const sinCubrir = new Set(conPrecio.map((l) => l.indice));
+  const elegidos = [];
   while (sinCubrir.size) {
     const puntaje = new Map(); // proveedor -> { n, total }
     for (const i of sinCubrir) {
@@ -61,11 +62,18 @@ function sugerir(lineas, tolerancia = TOLERANCIA) {
       }
     }
     const [mejor] = [...puntaje.entries()].sort((a, b) => b[1].n - a[1].n || a[1].total - b[1].total);
-    for (const i of [...sinCubrir]) {
-      const precio = elegibles.get(i).get(mejor[0]);
-      if (precio != null) { menos.push({ indice: i, proveedor: mejor[0], precio }); sinCubrir.delete(i); }
-    }
+    elegidos.push(mejor[0]);
+    for (const i of [...sinCubrir]) if (elegibles.get(i).has(mejor[0])) sinCubrir.delete(i);
   }
+  // 2) Sacar proveedores que sobran (todas sus líneas caben en otro elegido)
+  const cubre = (set) => conPrecio.every((l) => [...set].some((p) => elegibles.get(l.indice).has(p)));
+  const set = new Set(elegidos);
+  for (const p of [...elegidos].reverse()) { set.delete(p); if (!cubre(set)) set.add(p); }
+  // 3) Cada línea va al más barato de los proveedores elegidos (no al primero que la cubrió)
+  const menos = conPrecio.map((l) => {
+    const [prov, precio] = [...elegibles.get(l.indice)].filter(([p]) => set.has(p)).sort((a, b) => a[1] - b[1])[0];
+    return { indice: l.indice, proveedor: prov, precio };
+  });
   const resumen = (asig) => {
     const total = asig.reduce((s, a) => s + a.precio * (cant.get(a.indice) || 0), 0);
     return { total: Math.round(total), proveedores: new Set(asig.map((a) => a.proveedor)).size };
