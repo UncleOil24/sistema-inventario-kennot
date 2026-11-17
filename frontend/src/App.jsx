@@ -113,7 +113,7 @@ const styles = `
   .accion-barra { height: 8px; border-radius: 4px; background: rgba(0,0,0,0.08); margin: 10px 0 2px; overflow: hidden; }
   .accion-barra span { display: block; height: 100%; background: var(--success); border-radius: 4px; }
   .accion-botones { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
-  .btn-grande { font-size: 12.5px; padding: 8px 16px; }
+  .btn-grande { font-size: 11.5px; padding: 6px 13px; }
   .accion-etapa .btn-success.btn-grande { background: var(--success); color: #fff; border-color: var(--success); }
   @media (max-width: 640px) { .accion-etapa::before { display: none; } }
   .id-solicitud { font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 600; }
