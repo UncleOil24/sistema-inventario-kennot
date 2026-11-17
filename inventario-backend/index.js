@@ -1,4 +1,5 @@
 // El servidor trabaja en hora de Chile (Render corre en UTC): fechas por defecto, "hoy" y meses del Inicio.
+require("./src/services/nombresArchivo"); // nombres de archivo con tildes (antes de cargar las rutas)
 process.env.TZ = process.env.TZ || "America/Santiago";
 require("dotenv").config();
 const express = require("express");

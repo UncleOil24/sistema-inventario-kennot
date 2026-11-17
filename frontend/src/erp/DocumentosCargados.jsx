@@ -40,24 +40,24 @@ export default function DocumentosCargados({ notify, onClose }) {
   };
 
   return (
-    <Modal titulo="// Documentos de proveedores cargados" onClose={onClose} ancho={1000}
+    <Modal titulo="// Documentos de proveedores cargados" onClose={onClose} ancho={1320}
       footer={<button className="btn btn-ghost" onClick={onClose}>Cerrar</button>}>
       <input className="search-input" placeholder="Buscar por proveedor, N° de documento o archivo..." value={q} onChange={(e) => setQ(e.target.value)} style={{ width: "100%", marginBottom: 10 }} />
       {!lista ? <Cargando /> : !lista.length ? <div className="cot-empty">// sin documentos cargados</div> : (
-        <table className="table table-compacta">
+        <table className="table table-compacta" style={{ tableLayout: "auto", width: "100%" }}>
           <thead><tr><th>Subido</th><th>Proveedor</th><th>N° documento</th><th>Fecha doc.</th><th>Productos</th><th>Cambió</th><th>Por</th><th></th></tr></thead>
           <tbody>
             {lista.map((d, k) => (
               <tr key={`${d.tipo}${d.id || k}`}>
                 <td className="mini">{d.subido ? new Date(d.subido).toLocaleDateString("es-CL") : "—"}</td>
-                <td>{d.proveedor}{d.archivo && <div className="mini">{d.archivo}</div>}</td>
+                <td style={{ maxWidth: 280, wordBreak: "break-word" }}>{d.proveedor}{d.archivo && <div className="mini">{d.archivo}</div>}</td>
                 <td className="mini">{d.documento || "—"}</td>
                 <td className="mini">{d.fecha ? fecha(d.fecha) : "—"}</td>
                 <td className="mini">{d.productos}</td>
                 <td className="mini">{d.cambios == null ? "—" : `${d.cambios} precio(s)`}</td>
-                <td className="mini">{d.usuario || "—"}{d.tipo === "historial" && <div title="Cargado antes de este registro: armado desde el historial de precios">(historial)</div>}</td>
+                <td className="mini" style={{ maxWidth: 150 }}>{d.usuario || "—"}{d.tipo === "historial" && <div title="Cargado antes de este registro: armado desde el historial de precios">(historial)</div>}</td>
                 <td style={{ whiteSpace: "nowrap" }}><button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button>
-                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} title="Si el documento quedó con otro proveedor (ej. SIN IDENTIFICAR)" onClick={() => cambiarProveedor(d)}>Cambiar proveedor</button></td>
+                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} title="Si el documento quedó con otro proveedor (ej. SIN IDENTIFICAR)" onClick={() => cambiarProveedor(d)}>Cambiar prov.</button></td>
               </tr>
             ))}
           </tbody>
