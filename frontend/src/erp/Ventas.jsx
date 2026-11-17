@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar, pedirTexto, imprimirSolicitud } from "./ui";
 import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO, imprimirPDF, imprimirHTML, escaparHTML as h } from "./lib";
 import CuadroCompra, { imprimirCuadro } from "./CuadroCompra";
@@ -53,8 +53,12 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
 
   useEffect(() => { const t = setTimeout(cargar, 250); return () => clearTimeout(t); }, [cargar]);
 
-  const verDetalle = useCallback(async (id) => {
-    try { setDetalle(await api(`/ventas/${id}`)); } catch (e) { notify(e.message, "danger"); }
+  // Venta abierta ahora: si se cierra mientras se recarga (ej. al cerrar el cuadro de compra), no se vuelve a abrir
+  const abierta = useRef(null);
+  const verDetalle = useCallback(async (id, { refrescar = false } = {}) => {
+    if (refrescar && abierta.current !== id) return;
+    abierta.current = id;
+    try { const v = await api(`/ventas/${id}`); if (abierta.current === id) setDetalle(v); } catch (e) { notify(e.message, "danger"); }
   }, [notify]);
 
   // Permite abrir una venta desde otra vista (tareas de Inicio, Cotizaciones...)
@@ -140,7 +144,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
       </div>
 
       {nueva && <NuevaVenta clientes={clientes} notify={notify} onClose={() => setNueva(false)} onCreada={(v) => { setNueva(false); cargar(); verDetalle(v.id); }} />}
-      {detalle && <DetalleVenta venta={detalle} modo={modo} esAdmin={esAdmin} verCompras={verCompras} verCobros={verCobros} puedeOperar={puedeOperar} puedeVender={puedeVender} notify={notify} irACompra={irACompra} onClose={() => setDetalle(null)} onCambio={() => { cargar(); verDetalle(detalle.id); }} />}
+      {detalle && <DetalleVenta venta={detalle} modo={modo} esAdmin={esAdmin} verCompras={verCompras} verCobros={verCobros} puedeOperar={puedeOperar} puedeVender={puedeVender} notify={notify} irACompra={irACompra} onClose={() => { abierta.current = null; setDetalle(null); }} onCambio={() => { cargar(); verDetalle(detalle.id, { refrescar: true }); }} />}
     </>
   );
 }
