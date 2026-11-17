@@ -188,7 +188,9 @@ const styles = `
   .grupo-baja td { opacity: 0.55; } .grupo-baja td strong { text-decoration: line-through; }
   .grupo-botones { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 6px; border: 1px dashed var(--border, #9ab); border-radius: 6px; }
   .reparto-linea { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 4px; } .reparto-linea label { display: inline-flex; gap: 4px; align-items: center; }
-  .fila-stock td { opacity: 0.6; } .fila-stock td:nth-child(2), .fila-stock td.price-cell { text-decoration: line-through; }
+  .fila-elegir { display: flex; justify-content: space-between; width: 100%; padding: 7px 10px; background: none; border: none; border-bottom: 1px solid var(--border, #ddd); cursor: pointer; text-align: left; font: inherit; }
+.fila-elegir:hover { background: rgba(0,0,0,0.05); }
+.fila-stock td { opacity: 0.6; } .fila-stock td:nth-child(2), .fila-stock td.price-cell { text-decoration: line-through; }
   .aviso-envase { margin-top: 4px; padding: 5px 8px; border-radius: 6px; font-size: 12px; background: rgba(var(--accent-rgb), 0.10); border: 1px solid rgba(var(--accent-rgb), 0.35); }
   .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-x: auto; }
   .modal .panel { background: var(--surface2); margin-bottom: 0; }
@@ -295,6 +297,7 @@ const styles = `
   .badge-alerta { color: var(--danger); font-weight: 600; }
   .fila-periodo td { background: var(--surface); font-size: 14px; border-top: 3px solid var(--accent); padding-top: 10px; }
   .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
+  .fila-grupo-margen td { background: var(--surface2); border-top: none; }
   .fila-alerta td { background: rgba(240,190,40,0.16); }
   .link { background: none; border: none; color: var(--info); cursor: pointer; font-family: var(--mono); font-size: 11px; padding: 2px 4px; text-align: left; }
   .link:hover:not(:disabled) { text-decoration: underline; }

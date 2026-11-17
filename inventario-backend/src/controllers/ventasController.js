@@ -17,7 +17,7 @@ const {
   handler, ErrorNegocio, calcularTotales, normalizarItems, estadoPago, sumarDias, redondear,
 } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
-const { normProv } = require("../services/precios");
+const { normProv, esGenerico } = require("../services/precios");
 const { esAdmin, tieneRol, veCostos } = require("../middlewares/auth");
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
 
@@ -456,7 +456,7 @@ async function datosCuadro(venta) {
       gastos: extra.gastos,
       ordenes: ordenesFull.map((o) => ({ id: o.id, numero: o.numero, proveedor_nombre: o.proveedor_nombre, estado: o.estado, subtotal: Number(o.subtotal), total: Number(o.total), documento: o.documento, lineas: (o.items || []).length,
         items: (o.items || []).map((it) => ({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) })), no_vinieron: o.no_vinieron || [] })),
-      proveedores: proveedores.map((p) => p.nombre).sort(),
+      proveedores: proveedores.map((p) => p.nombre).filter((n) => !esGenerico(n)).sort(),
   };
 }
 
@@ -504,6 +504,7 @@ async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
   const prov = normProv(proveedor || "");
   const indices = (indicesBrutos || []).map(Number).filter((n) => n >= 0);
   if (!prov || prov === "SIN PROVEEDOR") throw new ErrorNegocio("Indica a qué proveedor va la orden");
+  if (esGenerico(prov)) throw new ErrorNegocio(`"${prov}" no es un proveedor: elige el proveedor real antes de crear la orden`);
   if (!indices.length) throw new ErrorNegocio("Marca los productos de la orden");
   return sequelize.transaction(async (t) => {
     const v = await Venta.findByPk(ventaId, { transaction: t, lock: t.LOCK.UPDATE });
@@ -936,6 +937,7 @@ const generarOrdenes = handler(async (req, res) => {
       if (filtro && !filtro.has(prov)) continue;
       if (prov === SIN_PROVEEDOR) { omitidos.push(`${items.length} producto(s) sin proveedor`); continue; }
       if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden`); continue; }
+      if (esGenerico(prov)) { omitidos.push(`${items.length} producto(s) con "${prov}" (no es un proveedor)`); continue; }
       let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
       if (!ficha) ficha = await Proveedor.create({ nombre: prov }, { transaction: t });
       const lineas = items.map((i) => ({

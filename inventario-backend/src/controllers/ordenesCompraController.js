@@ -55,7 +55,15 @@ const getOrdenes = handler(async (req, res) => {
   const data = await OrdenCompra.findAll({ where, order: [["id", "DESC"]] });
   // Venta para la que se compró (para agrupar en la lista)
   const ventaIds = [...new Set(data.map((o) => o.venta_id).filter(Boolean))];
-  const ventas = ventaIds.length ? await Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "id_solicitud", "fecha", "subtotal", "empresa", "etapa", "estado"], raw: true }) : [];
+  const ventas = ventaIds.length ? await Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "orden_compra_cliente", "id_solicitud", "fecha", "subtotal", "empresa", "etapa", "estado", "costo_total", "cotizacion_id"], raw: true }) : [];
+  // Costo cotizado (el de la cotización al cotizar) para comparar con lo comprado; solo quien ve costos
+  if (require("../middlewares/auth").veCostos(req)) {
+    const cotIds = ventas.map((x) => x.cotizacion_id).filter(Boolean);
+    const cots = cotIds.length ? await require("../models/Cotizacion").findAll({ where: { id: cotIds }, attributes: ["id", "costo_total"], raw: true }) : [];
+    const cc = new Map(cots.map((c) => [c.id, Number(c.costo_total) || 0]));
+    for (const x of ventas) x.costo_cotizado = cc.get(x.cotizacion_id) || Number(x.costo_total) || 0;
+  }
+  for (const x of ventas) { delete x.costo_total; delete x.cotizacion_id; }
   const v = new Map(ventas.map((x) => [x.id, x]));
   res.json({ ok: true, data: data.map((o) => ({ ...o.toJSON(), venta: v.get(o.venta_id) || null })) });
 });

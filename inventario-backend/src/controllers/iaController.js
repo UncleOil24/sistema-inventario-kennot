@@ -246,6 +246,7 @@ const aprobarDocumento = handler(async (req, res) => {
   const b = req.body || {};
   const proveedor = normProv(b.proveedor);
   if (!proveedor) throw new ErrorNegocio("Indica el proveedor");
+  if (require("../services/precios").esGenerico(proveedor)) throw new ErrorNegocio(`"${proveedor}" no es un proveedor: escribe el nombre real del proveedor del documento`);
   const lineas = (b.lineas || []).filter((l) => !l.omitir);
   if (!lineas.length) throw new ErrorNegocio("No hay líneas para guardar");
 

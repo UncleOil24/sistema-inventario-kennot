@@ -52,6 +52,7 @@ async function migrar() {
   await postuladasV1(q);
   await ocPendienteV1(q);
   await giroEmpresasV1(q);
+  await proveedoresGenericosV1(q);
   await protegerTablas(q);
 }
 
@@ -113,6 +114,27 @@ async function giroEmpresasV1(q) {
 }
 
 // Paso 7 (catálogo): unidad de medida de la lista cerrada (M11) y Brizz Pinturas excluido (M7)
+// Nombres de relleno (OTROS, COTIZAR…) que quedaron guardados como proveedor: se borran sus precios (y se recalcula el
+// precio de esos productos) y la ficha del proveedor si ninguna orden de compra la usa.
+async function proveedoresGenericosV1(q) {
+  const [[hecho]] = await q(`SELECT valor FROM parametros WHERE clave = 'migracion_prov_genericos_v1'`);
+  if (hecho) return;
+  const LISTA = ["OTRO", "OTROS", "COTIZAR", "POR COTIZAR", "A COTIZAR", "VARIOS", "PENDIENTE", "POR DEFINIR"];
+  const enSql = LISTA.map((n) => `'${n}'`).join(",");
+  const [afectados] = await q(`SELECT DISTINCT producto_id FROM precios_proveedor WHERE upper(trim(proveedor)) IN (${enSql})`);
+  const [, borrados] = await q(`DELETE FROM precios_proveedor WHERE upper(trim(proveedor)) IN (${enSql})`);
+  const Producto = require("../models/Producto");
+  const { recalcular } = require("./precios");
+  for (const { producto_id: id } of afectados) {
+    const p = await Producto.findByPk(id);
+    if (p) await recalcular(p, { usuario: "Sistema", motivo: "Se quitaron precios con nombre de relleno (OTROS, COTIZAR…)" }).catch((e) => console.error("recalcular", id, e.message));
+  }
+  const [usados] = await q(`SELECT DISTINCT p.nombre FROM proveedores p JOIN ordenes_compra o ON o.proveedor_id = p.id WHERE upper(trim(p.nombre)) IN (${enSql})`);
+  await q(`DELETE FROM proveedores p WHERE upper(trim(p.nombre)) IN (${enSql}) AND NOT EXISTS (SELECT 1 FROM ordenes_compra o WHERE o.proveedor_id = p.id)`);
+  console.log(`Proveedores de relleno: ${borrados?.rowCount ?? 0} precio(s) borrados, ${afectados.length} producto(s) recalculados${usados.length ? `; quedan por tener órdenes: ${usados.map((u) => u.nombre).join(", ")}` : ""}`);
+  await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_prov_genericos_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
 async function catalogoPaso7() {
   // (Ya no se normalizan las unidades al iniciar: cambiaba BOLSA, PACK o PLANCHA por SACO o PLIEGO. La unidad se guarda tal cual.)
   const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_catalogo_paso7'`);

@@ -496,6 +496,7 @@ const aplicarProveedor = handler(async (req, res) => {
   const b = req.body || {};
   const proveedor = normProv(b.proveedor);
   if (!proveedor) throw new ErrorNegocio("Indica el proveedor");
+  if (require("../services/precios").esGenerico(proveedor)) throw new ErrorNegocio(`"${proveedor}" no es un proveedor: escribe el nombre real del proveedor`);
   const lineas = (b.lineas || []).filter((l) => Number(l.precio) > 0);
   if (!lineas.length) throw new ErrorNegocio("No hay precios para aplicar");
   const cot = await sequelize.transaction(async (t) => {
