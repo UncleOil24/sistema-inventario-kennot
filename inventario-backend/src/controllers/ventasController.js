@@ -1121,6 +1121,60 @@ const listarFacturas = handler(async (req, res) => {
   res.json({ ok: true, data: facturas.map((f) => ({ ...f.toJSON(), venta: mapa.get(f.venta_id) || null })) });
 });
 
+// GET /api/ventas/:id/buscar-precio?indice=&q=   (cuadro de compra)
+// Precios de hoy del producto de la línea (todos sus proveedores) y de productos parecidos del catálogo,
+// por si el precio quedó cargado en otro producto (otra forma de escribirlo)
+const buscarPrecio = handler(async (req, res) => {
+  const venta = await Venta.findByPk(req.params.id);
+  if (!venta) return res.status(404).json({ ok: false, error: "Venta no encontrada" });
+  const linea = (venta.items || [])[Number(req.query.indice)];
+  if (!linea) throw new ErrorNegocio("Línea no encontrada");
+  const { opcionesPorProducto } = require("../services/cuadroCompra");
+  const { buscarParecidos } = require("./productosController");
+  const q = String(req.query.q || "").trim() || linea.nombre;
+  const parecidos = await buscarParecidos(q, linea.producto_id, { minimo: req.query.q ? 0.5 : 0.4 });
+  const ops = await opcionesPorProducto([linea.producto_id, ...parecidos.map((p) => p.id)]);
+  res.json({ ok: true, data: {
+    linea: { indice: Number(req.query.indice), nombre: linea.nombre, codigo: linea.codigo, unidad: linea.unidad, producto_id: linea.producto_id, proveedor: linea.proveedor, costo: Number(linea.costo) || 0 },
+    q, propios: ops.get(linea.producto_id) || [],
+    parecidos: parecidos.map((p) => ({ id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, parecido: p.parecido, opciones: ops.get(p.id) || [] })).filter((p) => p.opciones.length).slice(0, 15),
+  } });
+});
+
+// POST /api/ventas/:id/precio-linea  { indice, proveedor, precio, desde_producto_id, guardar }
+// Usa ese proveedor y precio en la línea. Con "guardar", el precio queda también en el catálogo para el producto
+// de la línea (con la misma fecha), así la próxima vez sale solo.
+const precioLinea = handler(async (req, res) => {
+  const b = req.body || {};
+  const prov = normProv(b.proveedor || ""); const precio = Math.round(Number(b.precio) || 0);
+  if (!prov || !(precio > 0)) throw new ErrorNegocio("Falta el proveedor o el precio");
+  const PrecioProveedor = require("../models/PrecioProveedor");
+  const { origenDe, recalcular, registrar } = require("../services/precios");
+  await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    if (v.estado === "anulada") throw new ErrorNegocio("La venta está anulada");
+    const items = [...v.items];
+    const i = items[Number(b.indice)];
+    if (!i) throw new ErrorNegocio("Línea no encontrada");
+    items[Number(b.indice)] = { ...i, proveedor: prov, costo: precio };
+    await v.update({ items, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
+    if (b.guardar && i.producto_id && Number(b.desde_producto_id) !== Number(i.producto_id)) {
+      const PrecioOrigen = b.desde_producto_id ? await PrecioProveedor.findOne({ where: { producto_id: b.desde_producto_id, proveedor: prov, descartado: false }, order: [["fecha", "DESC"], ["id", "DESC"]], transaction: t }) : null;
+      const desde = b.desde_producto_id ? await Producto.findByPk(b.desde_producto_id, { transaction: t }) : null;
+      await PrecioProveedor.create({
+        producto_id: i.producto_id, proveedor: prov, precio, fecha: PrecioOrigen?.fecha || new Date(), documento: PrecioOrigen?.documento || null,
+        descripcion_proveedor: desde ? `Mismo precio que N° ${desde.codigo ?? desde.id} ${desde.nombre}`.slice(0, 250) : null,
+        origen: await origenDe(prov, t), creado_por: firma(req),
+      }, { transaction: t });
+      const p = await Producto.findByPk(i.producto_id, { transaction: t, lock: t.LOCK.UPDATE });
+      if (p) await recalcular(p, { t, usuario: firma(req), motivo: `Cuadro de compra ${v.numero}: precio de ${prov}${desde ? ` copiado de N° ${desde.codigo ?? desde.id}` : ""}` });
+      await registrar({ usuario: firma(req), tabla: "productos", registro_id: i.producto_id, campo: "precio_proveedor", despues: `${prov} ${precio}`, motivo: `Desde cuadro de compra ${v.numero}` }, t);
+    }
+  });
+  res.json({ ok: true, data: { indice: Number(b.indice), proveedor: prov, costo: precio } });
+});
+
 // GET /api/ventas/:id/interna-simple  (solo quien ve costos) — para imprimir desde la venta:
 // producto cotizado, caso, venta, compra, 3 mejores proveedores del catálogo de hoy y utilidad
 const internaSimple = handler(async (req, res) => {
@@ -1142,7 +1196,7 @@ const internaSimple = handler(async (req, res) => {
 });
 
 module.exports = {
-  internaSimple,
+  internaSimple, buscarPrecio, precioLinea,
   resumenAnulacion,
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,

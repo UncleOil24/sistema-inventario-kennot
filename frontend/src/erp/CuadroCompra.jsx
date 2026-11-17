@@ -16,6 +16,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const [sel, setSel] = useState(new Set());
   const [ocupado, setOcupado] = useState(false);
   const [subir, setSubir] = useState(false);
+  const [buscar, setBuscar] = useState(null); // índice de la línea donde se busca precio
 
   const cargar = useCallback(async () => {
     try { setData(await api(`/ventas/${ventaId}/cuadro-compra`)); }
@@ -55,6 +56,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     asignar(cambios.map((a) => ({ indice: a.indice, proveedor: a.proveedor, costo: a.precio })), `✓ ${cambios.length} producto(s) cambiados de proveedor`);
   };
   const cambiarLinea = async (l, valor) => {
+    if (valor === "__buscar") return setBuscar(l.indice);
     if (valor === "__otro") {
       const prov = await pedirTexto(`¿Con qué proveedor compras "${l.nombre}"?`, { titulo: "Otro proveedor", sugerencias: data.proveedores.slice(0, 12) });
       if (!prov) return;
@@ -188,8 +190,10 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                         {l.opciones.map((o, k) => (
                           <option key={o.proveedor} value={o.proveedor}>{o.proveedor} · {fmt(o.precio)}{k === 0 ? " ★" : ""}</option>
                         ))}
+                        <option value="__buscar">🔍 Buscar precio en el catálogo…</option>
                         <option value="__otro">Otro proveedor…</option>
                       </select>}
+                      {!real && !bloqueada && <button className="link mini" style={{ display: "block" }} title="Todos los precios de este producto y de productos parecidos del catálogo" onClick={() => setBuscar(l.indice)}>🔍 buscar precio</button>}
                       {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); return o ? <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}</div> : null; })()}
                     </td>
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
@@ -245,6 +249,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
           </div>
         </div>
       </div>
+      {buscar != null && <BuscarPrecio ventaId={ventaId} indice={buscar} notify={notify} onClose={() => setBuscar(null)} onHecho={() => { setBuscar(null); cargar(); }} />}
       {subir && <SubirDocumentosVenta venta={venta} lineas={lineas} ordenes={ordenes} proveedores={data.proveedores} notify={notify} onClose={() => { setSubir(false); cargar(); }} />}
     </Modal>
   );
@@ -271,4 +276,59 @@ export function imprimirCuadroDatos(data, esAdmin) {
 // Desde la venta: trae el cuadro y lo imprime
 export async function imprimirCuadro(ventaId, esAdmin) {
   imprimirCuadroDatos(await api(`/ventas/${ventaId}/cuadro-compra`), esAdmin);
+}
+
+// Buscar precio para una línea: todos los proveedores del producto y de productos parecidos del catálogo
+// (precios cargados en otro producto escrito distinto). Al usar uno de un parecido, se puede guardar en el producto de la línea.
+function BuscarPrecio({ ventaId, indice, notify, onClose, onHecho }) {
+  const [d, setD] = useState(null);
+  const [q, setQ] = useState("");
+  const [guardar, setGuardar] = useState(true);
+  const [ocupado, setOcupado] = useState(false);
+  const cargar = useCallback((texto) => {
+    setD(null);
+    api(`/ventas/${ventaId}/buscar-precio?indice=${indice}${texto ? `&q=${encodeURIComponent(texto)}` : ""}`)
+      .then((r) => { setD(r); setQ((x) => x || r.q); }).catch((e) => { notify(e.message, "danger"); onClose(); });
+  }, [ventaId, indice, notify, onClose]);
+  useEffect(() => { cargar(""); }, [cargar]);
+  const usar = async (o, desde) => {
+    setOcupado(true);
+    try {
+      await api(`/ventas/${ventaId}/precio-linea`, { method: "POST", body: { indice, proveedor: o.proveedor, precio: o.precio, desde_producto_id: desde || null, guardar: !!desde && guardar } });
+      notify(`✓ ${d.linea.nombre}: ${o.proveedor} ${fmt(o.precio)}${desde && guardar ? " · guardado en el catálogo" : ""}`);
+      onHecho();
+    } catch (e) { notify(e.message, "danger"); setOcupado(false); }
+  };
+  const fechaTxt = (f) => (f ? f.split("-").reverse().join("-") : "");
+  const filas = (ops, desde, actual) => ops.map((o, k) => (
+    <tr key={o.proveedor}>
+      <td><strong>{o.proveedor}</strong>{k === 0 ? " ★" : ""}{actual && actual === o.proveedor ? <span className="mini"> · elegido</span> : ""}</td>
+      <td className="price-cell compra">{fmt(o.precio)}</td>
+      <td className="mini">{fechaTxt(o.fecha)}</td>
+      <td style={{ textAlign: "right" }}><button className="btn btn-primary btn-sm" disabled={ocupado} onClick={() => usar(o, desde)}>Usar</button></td>
+    </tr>
+  ));
+  return (
+    <Modal titulo="// Buscar precio" onClose={onClose} ancho={760} footer={<button className="btn btn-ghost" onClick={onClose}>Cerrar</button>}>
+      {!d ? <Cargando /> : <>
+        <div style={{ marginBottom: 10 }}><strong>{d.linea.nombre}</strong> <span className="mini">· N° {d.linea.codigo} · {d.linea.unidad} · ahora {d.linea.proveedor} {d.linea.costo ? fmt(d.linea.costo) : "sin precio"}</span></div>
+        <div className="panel-titulo">Precios de este producto</div>
+        {d.propios.length ? <table className="table table-compacta"><tbody>{filas(d.propios, null, d.linea.proveedor)}</tbody></table>
+          : <div className="aviso" style={{ marginBottom: 8 }}>Este producto no tiene precios en el catálogo. Busca abajo si el precio quedó cargado en un producto escrito distinto.</div>}
+        <div className="panel-titulo" style={{ marginTop: 14 }}>Productos parecidos del catálogo con precio</div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+          <input className="input-mini" style={{ flex: 1, padding: "5px 8px" }} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && cargar(q)} placeholder="Ej: perno 1/2 x 1 1/4" />
+          <button className="btn btn-ghost btn-sm" onClick={() => cargar(q)}>Buscar</button>
+        </div>
+        <label className="mini" style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={guardar} onChange={(e) => setGuardar(e.target.checked)} /> Al usar un precio de un producto parecido, guardarlo también en N° {d.linea.codigo} (así la próxima vez sale solo)</label>
+        {!d.parecidos.length ? <div className="mini">No hay productos parecidos con precio. Prueba con menos palabras (ej. "perno 1/2").</div>
+          : d.parecidos.map((p) => (
+            <div key={p.id} style={{ borderTop: "1px solid var(--border, #ddd)", padding: "6px 0" }}>
+              <div>{p.nombre} <span className="mini">· N° {p.codigo} · {p.unidad}{p.unidad !== d.linea.unidad ? " ⚠ otra unidad" : ""} · {p.parecido}% parecido</span></div>
+              <table className="table table-compacta"><tbody>{filas(p.opciones, p.id)}</tbody></table>
+            </div>
+          ))}
+      </>}
+    </Modal>
+  );
 }
