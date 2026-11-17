@@ -53,6 +53,7 @@ async function migrar() {
   await ocPendienteV1(q);
   await giroEmpresasV1(q);
   await proveedoresGenericosV1(q);
+  await proveedoresGenericosV2(q);
   await protegerTablas(q);
 }
 
@@ -133,6 +134,16 @@ async function proveedoresGenericosV1(q) {
   await q(`DELETE FROM proveedores p WHERE upper(trim(p.nombre)) IN (${enSql}) AND NOT EXISTS (SELECT 1 FROM ordenes_compra o WHERE o.proveedor_id = p.id)`);
   console.log(`Proveedores de relleno: ${borrados?.rowCount ?? 0} precio(s) borrados, ${afectados.length} producto(s) recalculados${usados.length ? `; quedan por tener órdenes: ${usados.map((u) => u.nombre).join(", ")}` : ""}`);
   await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_prov_genericos_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// Las órdenes con nombre de relleno quedan sin ficha de proveedor (solo con el nombre) y se borran esas fichas
+async function proveedoresGenericosV2(q) {
+  const [[hecho]] = await q(`SELECT valor FROM parametros WHERE clave = 'migracion_prov_genericos_v2'`);
+  if (hecho) return;
+  const enSql = ["OTRO", "OTROS", "COTIZAR", "POR COTIZAR", "A COTIZAR", "VARIOS", "PENDIENTE", "POR DEFINIR"].map((n) => `'${n}'`).join(",");
+  await q(`UPDATE ordenes_compra o SET proveedor_id = NULL FROM proveedores p WHERE o.proveedor_id = p.id AND upper(trim(p.nombre)) IN (${enSql})`);
+  await q(`DELETE FROM proveedores WHERE upper(trim(nombre)) IN (${enSql})`);
+  await q(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_prov_genericos_v2', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 async function catalogoPaso7() {
