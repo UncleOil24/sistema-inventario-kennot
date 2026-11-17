@@ -10,7 +10,7 @@ const { handler, ErrorNegocio, calcularTotales } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
 const { validarEmpresa, datosEmpresa } = require("../services/empresas");
-const { excelCotizacion, pdfCotizacion, excelInterno, idCotizacion } = require("../services/cotizacionFormato");
+const { excelCotizacion, pdfCotizacion, excelInterno, excelInternoSimple, idCotizacion } = require("../services/cotizacionFormato");
 // borrador = "En ejecución" · espera_proveedor = "Esperando proveedor" · cotizacion = "Enviada" (sin respuesta aún)
 const ESTADOS = ["borrador", "espera_proveedor", "cotizacion", "aceptada", "rechazada", "vencida"];
 const EDITABLES = ["borrador", "espera_proveedor", "cotizacion"];
@@ -553,15 +553,20 @@ const descargarExcel = async (req, res) => {
   }
 };
 
-// GET /api/cotizaciones/:id/interna   (hoja de referencia interna con costos: no se envía)
+// GET /api/cotizaciones/:id/interna?modo=simple|full   (hoja interna con costos: no se envía)
+// simple: cotizado, caso, venta, compra, 3 mejores proveedores y utilidad · full: todo el detalle
 const descargarInterna = async (req, res) => {
   try {
     if (!veCostos(req)) return res.status(403).json({ ok: false, error: "Sin acceso a costos" });
     const cot = await Cotizacion.findByPk(req.params.id);
     if (!cot) return res.status(404).json({ ok: false, error: "Cotización no encontrada" });
-    const wb = await excelInterno(cot.toJSON(), await getParametros(), precioVenta);
+    const simple = req.query.modo === "simple";
+    const c = cot.toJSON();
+    const wb = simple
+      ? await excelInternoSimple(c, await require("../services/cuadroCompra").opcionesPorProducto((c.items || []).map((i) => i.producto_id)))
+      : await excelInterno(c, await getParametros(), precioVenta);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="INTERNA_${nombreArchivo(cot, "xlsx")}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="INTERNA_${simple ? "SIMPLE" : "FULL"}_${nombreArchivo(cot, "xlsx")}"`);
     await wb.xlsx.write(res);
     res.end();
   } catch (error) {
