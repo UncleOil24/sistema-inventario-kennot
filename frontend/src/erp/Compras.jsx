@@ -517,7 +517,7 @@ export function cuerpoOrden(orden) {
     <div class="sub">${[orden.empresa === "tactics" ? "Tactics Inversiones SpA" : orden.empresa === "kenott" ? "Inversiones Kenott SpA" : "", `fecha ${fecha(orden.fecha)}`, orden.notas || "", orden.documento ? `factura ${h(orden.documento)}` : ""].filter(Boolean).map(h).join(" · ")}</div>
     <table><colgroup><col style="width:30px"><col style="width:20px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
     <thead><tr><th class="num">N°</th><th class="chk"></th><th>Material</th><th class="cen">Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
-    ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.nombre)}</td><td class="cen">${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
+    ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.nombre)}${Number(i.pack) > 1 ? (() => { const n = Math.ceil(Number(i.cantidad) / i.pack); const sobra = n * i.pack - Number(i.cantidad); return `<div class="mini">Comprar ${n} pack${n > 1 ? "s" : ""} de ${i.pack}${sobra ? ` (sobran ${sobra})` : ""}</div>`; })() : ""}</td><td class="cen">${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
     </tbody></table>
     <div class="pie">Neto ${fmt(orden.subtotal)} · IVA ${fmt(orden.iva)} · <strong>Total ${fmt(orden.total)}</strong></div>`;
 }

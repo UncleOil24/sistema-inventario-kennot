@@ -157,6 +157,14 @@ const documentoProveedor = handler(async (req, res) => {
   if (!repetido && calzadas.length >= 3 && iguales / Math.max(1, lineas.filter((l) => l.producto).length) >= 0.8) {
     repetido = { motivo: "precios", iguales, total: lineas.length, proveedor: nombreProv };
   }
+  // Vigencia de la cotización: la del documento; si no la dice, la fecha + los días de Configuración (5)
+  if (r.encabezado && r.encabezado.tipo_documento !== "factura" && r.encabezado.tipo_documento !== "boleta" && !r.encabezado.valido_hasta) {
+    const base = r.encabezado.fecha ? new Date(`${r.encabezado.fecha}T12:00:00`) : new Date();
+    const dias = r.encabezado.validez_dias || Number((await getParametros()).vigencia_cotizacion_dias) || 5;
+    base.setDate(base.getDate() + dias);
+    r.encabezado.valido_hasta = base.toISOString().slice(0, 10);
+    r.encabezado.vigencia_supuesta = !r.encabezado.validez_dias;
+  }
   res.json({
     ok: true,
     data: {
@@ -276,10 +284,12 @@ const aprobarDocumento = handler(async (req, res) => {
       } else continue;
 
       const antes = Number(p.precio_compra) || 0;
+      const pack = Number(l.pack) > 1 ? Math.round(Number(l.pack)) : null;
       await PrecioProveedor.create({
         producto_id: p.id, proveedor: ficha.nombre, precio, fecha: b.fecha || new Date(), documento: b.documento || null,
         descripcion_proveedor: l.descripcion_proveedor || null, marca: l.marca || null, unidad: l.unidad || null,
         cantidad: l.cantidad || null, calce: l.calce && l.calce !== "sin_producto" ? l.calce : null, origen, creado_por: firma(req),
+        valido_hasta: /^\d{4}-\d{2}-\d{2}$/.test(b.valido_hasta || "") ? b.valido_hasta : null, pack,
       }, { transaction: t });
       await recalcular(p, { t, usuario: firma(req), motivo: `Documento ${ficha.nombre} ${b.documento || ""}`.trim() });
       out.precios++;

@@ -29,6 +29,7 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
         fecha: e.fecha || hoyISO(),
         origen: r.proveedor_existente?.tipo === "web" || e.tipo_documento === "web" ? "web" : "proveedor",
         razon_social: e.razon_social, rut: e.rut,
+        valido_hasta: e.valido_hasta || "", vigencia_supuesta: !!e.vigencia_supuesta, tipo_documento: e.tipo_documento,
       });
       setLineas(r.lineas.map((l, i) => ({
         // Mismo precio que el último de este proveedor: ya está cargado (queda desmarcado)
@@ -54,7 +55,10 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
             antes: l.anterior?.precio ?? null,
             producto_id: l.accion === "existente" ? l.producto.id : null,
             nuevo: l.accion === "nuevo" ? l.nuevo : null,
-            precio: Number(l.precio_neto), descripcion_proveedor: l.descripcion, marca: l.marca, unidad: l.unidad,
+            // Pack (ej. "pack x4"): el precio leído es del pack; se guarda por unidad
+            precio: Number(l.pack) > 1 ? Math.round(Number(l.precio_neto) / Number(l.pack)) : Number(l.precio_neto),
+            pack: Number(l.pack) > 1 ? Number(l.pack) : null,
+            descripcion_proveedor: l.descripcion, marca: l.marca, unidad: l.unidad,
             cantidad: l.cantidad, calce: l.calce,
           })),
         },
@@ -108,6 +112,10 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
             <div className="field"><label>N° documento</label><input value={enc.documento} onChange={(e) => setEnc({ ...enc, documento: e.target.value })} /></div>
             <div className="field"><label>Fecha</label><input type="date" value={enc.fecha} onChange={(e) => setEnc({ ...enc, fecha: e.target.value })} /></div>
           </div>
+          {!["factura", "boleta"].includes(enc.tipo_documento) && <div className="fields-row" style={{ alignItems: "center" }}>
+            <div className="field" style={{ maxWidth: 220 }}><label>Cotización válida hasta</label><input type="date" value={enc.valido_hasta || ""} onChange={(e) => setEnc({ ...enc, valido_hasta: e.target.value, vigencia_supuesta: false })} /></div>
+            <div className="mini">{enc.vigencia_supuesta ? "El documento no dice vigencia: se usaron los días de Configuración (5)." : "Según el documento."}{enc.valido_hasta && enc.valido_hasta < hoyISO() ? <strong style={{ color: "var(--danger)" }}> Ya está vencida: los precios se guardan marcados como vencidos.</strong> : ""}</div>
+          </div>}
           {(() => {
             const rep = res.repetido; const ya = lineas.filter((l) => l.ya_cargado).length; const cambian = lineas.filter((l) => l.anterior && !l.ya_cargado).length;
             if (!rep && !ya) return null;
@@ -141,7 +149,9 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
                         {l.ya_cargado && <div className="mini"><span className="estado estado-neutral">ya cargado</span> {fmt(l.anterior.precio)}{l.anterior.documento ? ` · ${l.anterior.documento}` : ""}</div>}
                         {l.anterior && !l.ya_cargado && <div className="mini" style={{ color: "var(--warn)" }}>cambió: antes {fmt(l.anterior.precio)} → ahora {fmt(l.precio_neto)}</div>}</td>
                       <td className="mini">{l.cantidad}</td>
-                      <td><input className="qty-input" style={{ width: 90 }} type="number" value={l.precio_neto} onChange={(e) => set(l.i, { precio_neto: e.target.value })} /></td>
+                      <td><input className="qty-input" style={{ width: 90 }} type="number" value={l.precio_neto} onChange={(e) => set(l.i, { precio_neto: e.target.value })} />
+                        <div className="mini" style={{ marginTop: 4, whiteSpace: "nowrap" }} title="Si el precio es de un pack o set (ej. pack x4), cuántas unidades trae">pack de <input className="qty-input" style={{ width: 44 }} type="number" min="1" value={l.pack || ""} placeholder="1" onChange={(e) => set(l.i, { pack: e.target.value })} /></div>
+                        {Number(l.pack) > 1 && <div className="mini">= {fmt(Math.round(Number(l.precio_neto) / Number(l.pack)))} c/u</div>}</td>
                       <td><Estado valor={l.accion === "nuevo" ? "sin_producto" : l.calce} />{l.nota && <div className="mini" style={{ maxWidth: 180 }}>{l.nota}</div>}</td>
                       <td>
                         <select className="select-linea" value={l.accion} onChange={(e) => set(l.i, { accion: e.target.value })} style={{ marginBottom: 4 }}>
@@ -150,7 +160,10 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
                         </select>
                         {l.accion === "existente" ? (
                           <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra}
-                            onChange={(p) => set(l.i, { producto: p, calce: p && p.id !== l.producto?.id ? "exacto" : l.calce, nota: p && p.id !== l.producto?.id ? "Elegido a mano" : l.nota })} />
+                            onChange={(p) => set(l.i, p && p.id !== l.producto?.id
+                              // Otro producto: ya no es "ya cargado" (ese precio no está en el producto nuevo) y queda marcada para guardar
+                              ? { producto: p, calce: "exacto", nota: "Elegido a mano", ya_cargado: false, anterior: null, omitir: false }
+                              : { producto: p })} />
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} placeholder="Descripción estándar" />

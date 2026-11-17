@@ -531,6 +531,12 @@ async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
       lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: cant, precio: Math.round(precio) });
     }
     if (!lineas.length) throw new ErrorNegocio("Las líneas marcadas no existen");
+    // Productos que este proveedor vende en pack (ej. pack x4): la orden indica cuántos packs comprar
+    const ops = await require("../services/cuadroCompra").opcionesPorProducto(lineas.map((l) => l.producto_id));
+    for (const l of lineas) {
+      const o = (ops.get(l.producto_id) || []).find((x) => x.proveedor === prov);
+      if (o?.pack) l.pack = o.pack;
+    }
     const ficha = await fichaProveedor(prov, t);
     const orden = await OrdenCompra.create({
       proveedor_id: ficha?.id || null, proveedor_nombre: ficha?.nombre || prov, venta_id: v.id, empresa: v.empresa,

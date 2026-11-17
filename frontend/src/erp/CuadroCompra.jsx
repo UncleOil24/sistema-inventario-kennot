@@ -11,6 +11,12 @@ const ESTADO_LINEA = {
 };
 
 const AVISO_SEL = "Selecciona productos para generar la orden";
+// Marcas de un precio: vigencia de la cotización, pack y calce dudoso (parecido/equivalente = por confirmar)
+const hoyTxt = () => new Date().toLocaleDateString("sv-SE");
+export const vigencia = (o) => (!o?.valido_hasta ? null : o.valido_hasta < hoyTxt() ? "vencida" : o.valido_hasta === hoyTxt() ? "vence hoy" : null);
+const porConfirmar = (o) => o?.calce === "parecido" || o?.calce === "equivalente";
+const marcas = (o) => [vigencia(o), o?.pack ? `pack x${o.pack}` : null, porConfirmar(o) ? "⚠ por confirmar" : null].filter(Boolean);
+const textoPack = (cant, pack) => { const n = Math.ceil(cant / pack); const sobra = n * pack - cant; return `${cant} un = ${n} pack${n > 1 ? "s" : ""} de ${pack}${sobra ? ` (sobran ${sobra})` : ""}`; };
 export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAdmin }) {
   const [data, setData] = useState(null);
   const [sel, setSel] = useState(new Set());
@@ -83,7 +89,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     for (const l of ls) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
     const repetir = ls.filter((l) => l.no_vino && l.proveedor.toUpperCase() === String(l.no_vino.proveedor).toUpperCase());
     const omitidos = marcadas.length - ls.length;
-    const texto = [...grupos].map(([p, g]) => `• ${p}: ${g.length} prod. · ${fmt(g.reduce((s2, l) => s2 + l.total_compra, 0))}`).join("\n");
+    const texto = [...grupos].map(([p, g]) => { const n = g.reduce((s2, l) => s2 + l.total_compra, 0); return `• ${p}: ${g.length} prod. · ${fmt(n)} neto · ${fmt(Math.round(n * 1.19))} con IVA`; }).join("\n");
     if (!(await confirmar(`Se ${grupos.size === 1 ? "creará 1 orden" : `crearán ${grupos.size} órdenes`} (borrador), cada producto con el proveedor que tiene elegido:\n${texto}${repetir.length ? `\n\nOjo: ${repetir.map((l) => l.nombre).join(", ")} no vino antes con ese mismo proveedor.` : ""}${omitidos ? `\n\n${omitidos} marcado(s) ya tenían orden o estaban comprados: se omiten.` : ""}`, { titulo: "Crear órdenes", boton: grupos.size === 1 ? "Crear orden" : "Crear órdenes" }))) return;
     ejecutar(() => api("/ventas/agrupar/ordenes", { method: "POST", body: { lineas: ls.map((l) => ({ venta_id: ventaId, indice: l.indice, proveedor: l.proveedor })) } }),
       (r) => `✓ ${r.creadas.map((c) => `${c.numero} a ${c.proveedor}`).join(" · ")}`);
@@ -144,7 +150,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                 <span className="mini" style={{ alignSelf: "center" }}>Elegido hoy:</span>
                 {resumen_proveedores.map((p) => (
                   <button key={p.proveedor} className="chip" title={p.contacto || ""} onClick={() => marcarProveedor(p.proveedor)}>
-                    {p.proveedor} · {p.lineas} prod. · {fmt(p.total)}
+                    {p.proveedor} · {p.lineas} prod. · {fmt(p.total)} neto · {fmt(Math.round(p.total * 1.19))} c/IVA
                   </button>
                 ))}
               </div>
@@ -158,6 +164,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
             <button className="btn btn-ghost btn-sm" disabled={ocupado} onClick={asignarMarcadas}>Asignar proveedor…</button>
             <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={crearOrden} title="Una orden por cada proveedor elegido en las líneas marcadas">Crear orden(es)</button>
             <BotonesSolicitud notify={notify} lineas={() => marcadas.map((l) => ({ venta_id: ventaId, indice: l.indice }))} />
+            {(() => { const sp = porComprar.filter((l) => !(l.compra_unit > 0)); return sp.length > 0 && <button className="btn btn-ghost btn-sm" title="Marca los productos por comprar que no tienen precio, para pedir cotización" onClick={() => setSel(new Set(sp.map((l) => l.indice)))}>Sin precio ({sp.length})</button>; })()}
             {sel.size > 0 && <button className="link mini" onClick={() => setSel(new Set())}>Quitar marcas</button>}
           </div>
         )}
@@ -183,13 +190,16 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                       <select className="select-linea" style={{ minWidth: 170 }} disabled={bloqueada || ocupado} value={l.proveedor} onChange={(e) => cambiarLinea(l, e.target.value)}>
                         {!l.opciones.some((o) => o.proveedor === l.proveedor) && <option value={l.proveedor}>{l.proveedor === "SIN PROVEEDOR" ? "— Elegir —" : l.proveedor}</option>}
                         {l.opciones.map((o, k) => (
-                          <option key={o.proveedor} value={o.proveedor}>{o.proveedor} · {fmt(o.precio)}{k === 0 ? " ★" : ""}</option>
+                          <option key={o.proveedor} value={o.proveedor}>{o.proveedor} · {fmt(o.precio)}{k === 0 ? " ★" : ""}{marcas(o).length ? ` · ${marcas(o).join(" · ")}` : ""}</option>
                         ))}
                         <option value="__buscar">🔍 Buscar precio en el catálogo…</option>
                         <option value="__otro">Elegir otro proveedor…</option>
                       </select>}
                       {!real && !bloqueada && <button className="link mini" style={{ display: "block" }} title="Todos los precios de este producto y de productos parecidos del catálogo" onClick={() => setBuscar(l.indice)}>🔍 buscar precio</button>}
-                      {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); return o ? <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}</div> : null; })()}
+                      {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); if (!o) return null; const v = vigencia(o); return <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}
+                        {v && <div style={{ color: "var(--danger)" }} title={`Cotización válida hasta ${o.valido_hasta}`}>⚠ cotización {v}: confirmar precio</div>}
+                        {porConfirmar(o) && <div style={{ color: "var(--warn)" }} title={o.descripcion || ""}>⚠ por confirmar: {o.descripcion || "producto parecido"}</div>}
+                        {o.pack && <div><strong>{textoPack(l.cantidad - (l.stock || 0), o.pack)}</strong></div>}</div>; })()}
                     </td>
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
                     <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
@@ -301,12 +311,24 @@ function BuscarPrecio({ ventaId, indice, notify, onClose, onHecho }) {
     } catch (e) { notify(e.message, "danger"); setOcupado(false); }
   };
   const fechaTxt = (f) => (f ? f.split("-").reverse().join("-") : "");
+  // "No cumple" (ej. fotocelda 5A cuando se pide 10A): ese precio deja de competir para ese producto
+  const noCumple = async (o) => {
+    if (!o.id) return;
+    const motivo = await pedirTexto(`¿Por qué el precio de ${o.proveedor} (${o.descripcion || fmt(o.precio)}) no cumple?`, { titulo: "No cumple la especificación", placeholder: "Ej.: es de 5A, se pide 10A", obligatorio: true, boton: "No cumple" });
+    if (!motivo) return;
+    try { await api(`/precios/${o.id}/no-cumple`, { method: "POST", body: { motivo } }); notify(`Precio de ${o.proveedor} descartado para ese producto`); cargar(q === d?.q ? "" : q); }
+    catch (e) { notify(e.message, "danger"); }
+  };
   const filas = (ops, desde, actual) => ops.map((o, k) => (
     <tr key={o.proveedor}>
-      <td><strong>{o.proveedor}</strong>{k === 0 ? " ★" : ""}{actual && actual === o.proveedor ? <span className="mini"> · elegido</span> : ""}</td>
-      <td className="price-cell compra">{fmt(o.precio)}</td>
-      <td className="mini">{fechaTxt(o.fecha)}</td>
-      <td style={{ textAlign: "right" }}><button className="btn btn-primary btn-sm" disabled={ocupado} onClick={() => usar(o, desde)}>Usar</button></td>
+      <td><strong>{o.proveedor}</strong>{k === 0 ? " ★" : ""}{actual && actual === o.proveedor ? <span className="mini"> · elegido</span> : ""}
+        {o.descripcion && <div className="mini" title="Así lo escribió el proveedor">{o.descripcion}</div>}
+        {marcas(o).length > 0 && <div className="mini" style={{ color: vigencia(o) ? "var(--danger)" : "var(--warn)" }}>{marcas(o).join(" · ")}</div>}</td>
+      <td className="price-cell compra">{fmt(o.precio)}{o.pack ? <div className="mini">c/u (pack x{o.pack})</div> : null}</td>
+      <td className="mini">{fechaTxt(o.fecha)}{o.documento ? <div>{o.documento}</div> : null}{o.valido_hasta ? <div>válida hasta {fechaTxt(o.valido_hasta)}</div> : null}</td>
+      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+        {o.id && !desde && <button className="btn btn-ghost btn-sm" style={{ marginRight: 4 }} disabled={ocupado} title="No cumple la especificación (medida, potencia, amperaje…): deja de competir" onClick={() => noCumple(o)}>No cumple</button>}
+        <button className="btn btn-primary btn-sm" disabled={ocupado} onClick={() => usar(o, desde)}>Usar</button></td>
     </tr>
   ));
   return (

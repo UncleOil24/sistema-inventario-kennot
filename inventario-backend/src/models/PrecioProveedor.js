@@ -22,6 +22,10 @@ const PrecioProveedor = sequelize.define("PrecioProveedor", {
   descuento_pct: { type: DataTypes.DECIMAL(5, 2), allowNull: true },
   descuento_desde: { type: DataTypes.DECIMAL(12, 2), allowNull: true }, // desde qué cantidad aplica
   descartado: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  // Vigencia de la cotización del proveedor (vacía en facturas: es un precio pagado)
+  valido_hasta: { type: DataTypes.DATEONLY, allowNull: true },
+  // Se vende en pack de N unidades (ej. Mercado Libre "pack x4"): precio es por unidad; se compra en múltiplos de N
+  pack: { type: DataTypes.INTEGER, allowNull: true },
   motivo: { type: DataTypes.TEXT, allowNull: true },
   creado_por: { type: DataTypes.STRING(100), allowNull: true },
 }, {
