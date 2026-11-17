@@ -35,6 +35,8 @@ const guardarPendiente = (file) => {
 // Precio de una factura al catálogo: historial con la fecha de la factura, reglas de siempre y aviso de alza (> 10%)
 async function precioDesdeFactura(p, { proveedor, precio, fecha, documento, cantidad, unidad, descripcion, marca, calce, origen, usuario, motivo }, t) {
   const antes = Number(p.precio_compra) || 0;
+  // Nombre de relleno (OTROS, COTIZAR…): no es un proveedor, su precio no va al catálogo
+  if (require("../services/precios").esGenerico(proveedor)) return { antes, despues: antes, alza: null };
   await PrecioProveedor.create({
     producto_id: p.id, proveedor, precio: Math.round(precio), fecha: fecha || hoyISO(), documento, cantidad: cantidad || null, unidad: unidad || null,
     descripcion_proveedor: descripcion || null, marca: marca || null, calce: calce && calce !== "sin_producto" ? calce : null, origen, creado_por: usuario,

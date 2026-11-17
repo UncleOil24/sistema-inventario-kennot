@@ -500,11 +500,17 @@ const crearOrdenVenta = handler(async (req, res) => {
   res.status(201).json({ ok: true, data: oc });
 });
 
+// Ficha del proveedor de una orden (se crea si no existe). Los nombres de relleno (OTROS, COTIZAR…) no tienen ficha:
+// la orden se crea igual con ese nombre, para comprar sin proveedor definido.
+async function fichaProveedor(prov, t) {
+  if (esGenerico(prov)) return null;
+  return (await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t })) || Proveedor.create({ nombre: prov }, { transaction: t });
+}
+
 async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
   const prov = normProv(proveedor || "");
   const indices = (indicesBrutos || []).map(Number).filter((n) => n >= 0);
   if (!prov || prov === "SIN PROVEEDOR") throw new ErrorNegocio("Indica a qué proveedor va la orden");
-  if (esGenerico(prov)) throw new ErrorNegocio(`"${prov}" no es un proveedor: elige el proveedor real antes de crear la orden`);
   if (!indices.length) throw new ErrorNegocio("Marca los productos de la orden");
   return sequelize.transaction(async (t) => {
     const v = await Venta.findByPk(ventaId, { transaction: t, lock: t.LOCK.UPDATE });
@@ -523,10 +529,9 @@ async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
       lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: cant, precio: Math.round(precio) });
     }
     if (!lineas.length) throw new ErrorNegocio("Las líneas marcadas no existen");
-    let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
-    if (!ficha) ficha = await Proveedor.create({ nombre: prov }, { transaction: t });
+    const ficha = await fichaProveedor(prov, t);
     const orden = await OrdenCompra.create({
-      proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v.id, empresa: v.empresa,
+      proveedor_id: ficha?.id || null, proveedor_nombre: ficha?.nombre || prov, venta_id: v.id, empresa: v.empresa,
       items: lineas, ...calcularTotales(lineas),
       notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`, creado_por: firma(req),
     }, { transaction: t });
@@ -937,15 +942,13 @@ const generarOrdenes = handler(async (req, res) => {
       if (filtro && !filtro.has(prov)) continue;
       if (prov === SIN_PROVEEDOR) { omitidos.push(`${items.length} producto(s) sin proveedor`); continue; }
       if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden`); continue; }
-      if (esGenerico(prov)) { omitidos.push(`${items.length} producto(s) con "${prov}" (no es un proveedor)`); continue; }
-      let ficha = await Proveedor.findOne({ where: { nombre: { [Op.iLike]: prov } }, transaction: t });
-      if (!ficha) ficha = await Proveedor.create({ nombre: prov }, { transaction: t });
+      const ficha = await fichaProveedor(prov, t);
       const lineas = items.map((i) => ({
         producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
         cantidad: Number(i.cantidad), precio: Number(i.costo),
       }));
       const oc = await OrdenCompra.create({
-        proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v.id, empresa: v.empresa,
+        proveedor_id: ficha?.id || null, proveedor_nombre: ficha?.nombre || prov, venta_id: v.id, empresa: v.empresa,
         items: lineas, ...calcularTotales(lineas),
         notas: `Para venta ${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}`,
         creado_por: firma(req),

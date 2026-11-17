@@ -377,9 +377,11 @@ function ElegirProveedor({ proveedores, linea, lineas, onElegir, onClose }) {
           ))}
           {!filtrados.length && !nuevo && <div className="mini">No hay proveedores con ese nombre.</div>}
         </div>
+        {!Q && <div className="mini" style={{ marginTop: 8 }}>Sin proveedor definido (se puede crear la orden; no se guarda como proveedor):{" "}
+          {["OTROS", "COTIZAR"].map((n) => <button key={n} className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} onClick={() => tomar(n)}>{n}</button>)}</div>}
         {nuevo && <div style={{ marginTop: 8 }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => tomar(nuevo)}>Usar «{nuevo}» {esRelleno(nuevo) ? "solo como nota" : "(proveedor nuevo)"}</button>
-          <div className="mini">{esRelleno(nuevo) ? `"${nuevo}" no es un proveedor: queda solo en esta línea y no se puede crear orden con ese nombre.` : "No se guarda en ninguna parte hasta crear la orden de compra."}</div>
+          <button className="btn btn-ghost btn-sm" onClick={() => tomar(nuevo)}>Usar «{nuevo}» {esRelleno(nuevo) ? "(sin proveedor definido)" : "(proveedor nuevo)"}</button>
+          <div className="mini">{esRelleno(nuevo) ? `"${nuevo}" no se guarda como proveedor ni con precios en el catálogo, pero se puede crear la orden de compra con ese nombre.` : "No se guarda en ninguna parte hasta crear la orden de compra."}</div>
         </div>}
       </> : <>
         <div style={{ marginBottom: 8 }}>Proveedor: <strong>{elegido}</strong> <button className="link mini" onClick={() => setElegido(null)}>cambiar</button></div>
