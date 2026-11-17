@@ -185,7 +185,8 @@ const documentosCargados = handler(async (req, res) => {
   const lista = [...registrados.map((d) => ({ ...d, tipo: "registrado" })), ...historial.map((d) => ({ ...d, tipo: "historial", cambios: null }))]
     .sort((a, b) => new Date(b.subido) - new Date(a.subido)).slice(0, 300);
   void DocumentoCargado;
-  res.json({ ok: true, data: lista });
+  const { arreglar } = require("../services/nombresArchivo");
+  res.json({ ok: true, data: lista.map((d) => (d.archivo ? { ...d, archivo: arreglar(d.archivo) } : d)) });
 });
 
 // POST /api/ia/documentos-cargados/proveedor   { id? | proveedor, documento, fecha ; nuevo }

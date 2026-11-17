@@ -151,7 +151,9 @@ const unidadValida = (u) => {
 
 // --- Repetidos (M9) ---
 const PALABRAS_VACIAS = new Set(["DE", "PARA", "CON", "EN", "Y", "EL", "LA", "LOS", "LAS", "DEL", "AL", "X", "TIPO", "C", "S"]);
-const tokens = (s) => new Set(sinTildes(String(s || "").toUpperCase()).replace(/[^A-Z0-9.,/]+/g, " ").split(" ").map((w) => w.replace(/[.,]$/, "")).filter((w) => w && !PALABRAS_VACIAS.has(w)));
+// Medidas escritas de distintas formas quedan iguales: 1.1/4" = 1 1/4 = 1-1/4 → 1.1/4 ; 1/2X1 → 1/2 X 1
+const medidas = (s) => s.replace(/(\d)X(\d)/g, "$1 X $2").replace(/(^|[^0-9A-Z./])(\d+)(?:\s+|-|\.)(\d+\/\d+)/g, "$1$2.$3");
+const tokens = (s) => new Set(medidas(sinTildes(String(s || "").toUpperCase())).replace(/[^A-Z0-9.,/]+/g, " ").split(" ").map((w) => w.replace(/[.,]$/, "")).filter((w) => w && !PALABRAS_VACIAS.has(w)));
 const parecido = (a, b) => {
   const A = tokens(a); const B = tokens(b);
   if (!A.size || !B.size) return 0;
