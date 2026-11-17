@@ -128,7 +128,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
                     {modo === "finanzas" && <td><Estado valor={v.estado === "anulada" ? "anulada" : v.estado_pago} /></td>}
                     {modo === "operativo" && <td className="mini">{!v.compras?.ordenes ? <span style={{ color: "var(--warn)" }}>por comprar</span> : `${v.compras.recibidas}/${v.compras.ordenes} recibidas`}</td>}
                     <td><div style={{ display: "flex", gap: 4, flexWrap: "nowrap" }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => verDetalle(v.id)}>Ver</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => verDetalle(v.id)}>{modo === "operativo" && v.estado !== "anulada" ? "Ejecutar acciones" : "Ver"}</button>
                       {modo === "operativo" && v.estado !== "anulada" && (v.items || []).length > 0 && <button className="btn btn-ghost btn-sm" title="Imprime directo el detalle de materiales (solicitud de cotización sencilla)"
                         onClick={() => imprimirSolicitud(v.items.map((_, k) => ({ venta_id: v.id, indice: k }))).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir compra cot.</button>}
                     </div></td>
