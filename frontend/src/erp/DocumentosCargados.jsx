@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Modal, Cargando } from "./ui";
+import { Modal, Cargando, pedirTexto } from "./ui";
 import { api, fmt, fecha } from "./lib";
 
 // Últimos documentos de proveedores cargados al catálogo: para no volver a subir uno que ya está.
@@ -25,6 +25,20 @@ export default function DocumentosCargados({ notify, onClose }) {
     } catch (e) { notify(e.message, "danger"); }
   };
 
+  // Cambiar el proveedor de los precios de un documento (ej. quedó "SIN IDENTIFICAR")
+  const cambiarProveedor = async (d) => {
+    const provs = await api("/proveedores").catch(() => []);
+    const nuevo = await pedirTexto(`¿De qué proveedor es el documento ${d.documento || "sin N°"} (hoy: ${d.proveedor})? Sus precios pasan a ese proveedor en el catálogo y la planilla.`,
+      { titulo: "Cambiar proveedor", obligatorio: true, sugerencias: provs.map((p) => p.nombre).slice(0, 200) });
+    if (!nuevo) return;
+    try {
+      const r = await api("/ia/documentos-cargados/proveedor", { method: "POST", body: d.tipo === "registrado" ? { id: d.id, nuevo } : { proveedor: d.proveedor, documento: d.documento, fecha: String(d.fecha || "").slice(0, 10), nuevo } });
+      notify(`✓ ${r.productos} producto(s) ahora con precio de ${r.proveedor}`);
+      setAbierto(null);
+      setLista(await api(`/ia/documentos-cargados${q ? `?q=${encodeURIComponent(q)}` : ""}`));
+    } catch (e) { notify(e.message, "danger"); }
+  };
+
   return (
     <Modal titulo="// Documentos de proveedores cargados" onClose={onClose} ancho={1000}
       footer={<button className="btn btn-ghost" onClick={onClose}>Cerrar</button>}>
@@ -42,7 +56,8 @@ export default function DocumentosCargados({ notify, onClose }) {
                 <td className="mini">{d.productos}</td>
                 <td className="mini">{d.cambios == null ? "—" : `${d.cambios} precio(s)`}</td>
                 <td className="mini">{d.usuario || "—"}{d.tipo === "historial" && <div title="Cargado antes de este registro: armado desde el historial de precios">(historial)</div>}</td>
-                <td><button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button></td>
+                <td style={{ whiteSpace: "nowrap" }}><button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button>
+                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} title="Si el documento quedó con otro proveedor (ej. SIN IDENTIFICAR)" onClick={() => cambiarProveedor(d)}>Cambiar proveedor</button></td>
               </tr>
             ))}
           </tbody>
@@ -50,7 +65,7 @@ export default function DocumentosCargados({ notify, onClose }) {
       )}
       {abierto && (
         <Modal titulo={`// ${abierto.proveedor} · ${abierto.documento || "sin N°"}`} onClose={() => setAbierto(null)} ancho={760}
-          footer={<button className="btn btn-ghost" onClick={() => setAbierto(null)}>Cerrar</button>}>
+          footer={<><button className="btn btn-ghost" onClick={() => cambiarProveedor(abierto)}>Cambiar proveedor</button><button className="btn btn-ghost" onClick={() => setAbierto(null)}>Cerrar</button></>}>
           <table className="table table-compacta">
             <thead><tr><th>N°</th><th>Producto</th><th>Precio</th><th>Antes</th></tr></thead>
             <tbody>

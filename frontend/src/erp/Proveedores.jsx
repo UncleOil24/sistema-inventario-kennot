@@ -21,9 +21,16 @@ export default function Proveedores({ esAdmin, proveedores, loading, recargar, n
     if (!form.nombre) return notify("El nombre es obligatorio", "danger");
     setGuardando(true);
     try {
+      const antes = form.id ? proveedores.find((p) => p.id === form.id) : null;
+      const nuevo = String(form.nombre).trim().toUpperCase();
+      const renombra = antes && nuevo !== String(antes.nombre).toUpperCase();
+      const existe = renombra && proveedores.find((p) => p.id !== form.id && String(p.nombre).toUpperCase() === nuevo);
+      if (renombra && !(await confirmar(existe
+        ? `Ya existe el proveedor ${nuevo}: ${antes.nombre} se juntará con él. Sus precios del catálogo, compras y documentos pasan a ${nuevo}.`
+        : `El nombre ${antes.nombre} cambia a ${nuevo} en todo el sistema: precios del catálogo, planilla, compras y documentos cargados.`, { titulo: "Cambiar nombre del proveedor", boton: existe ? "Juntar" : "Cambiar nombre" }))) { setGuardando(false); return; }
       if (form.id) await api(`/proveedores/${form.id}`, { method: "PUT", body: form });
       else await api("/proveedores", { method: "POST", body: form });
-      notify(form.id ? "✓ Proveedor actualizado" : "✓ Proveedor agregado");
+      notify(renombra ? `✓ ${antes.nombre} ahora es ${nuevo} en todo el sistema` : form.id ? "✓ Proveedor actualizado" : "✓ Proveedor agregado");
       setForm(null);
       recargar();
     } catch (e) { notify(e.message, "danger"); }
