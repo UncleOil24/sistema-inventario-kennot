@@ -320,6 +320,8 @@ const HERR_PROVEEDOR = {
       tipo_documento: { type: "string", enum: ["cotizacion", "factura", "boleta", "web", "otro"] },
       numero_documento: { type: "string", description: "N° de cotización o factura tal como aparece" },
       fecha: { type: "string", description: "Fecha del documento en formato AAAA-MM-DD" },
+      valido_hasta: { type: "string", description: "Fecha hasta la que vale la cotización (AAAA-MM-DD), si el documento la indica. Omitir si no aparece" },
+      validez_dias: { type: "number", description: "Días de validez de la cotización si se indican así (ej. 'validez 3 días'). Omitir si no aparece" },
       precios_incluyen_iva: { type: "boolean", description: "true si los precios unitarios de las líneas incluyen IVA (típico en boletas y tiendas web)" },
       total_neto: { type: "number", description: "Total neto del documento (sin IVA). Omitir si no aparece" },
       total_documento: { type: "number", description: "Total final con IVA. Omitir si no aparece" },
@@ -335,6 +337,7 @@ const HERR_PROVEEDOR = {
             cantidad: { type: "number" },
             precio_unitario: { type: "number", description: "Precio unitario tal como aparece (después de descuentos de línea si los hay). Omitir si no aparece" },
             total_linea: { type: "number", description: "Total de la línea. Omitir si no aparece" },
+            unidades_por_pack: { type: "number", description: "Si el precio es de un pack, set o kit con varias unidades del mismo producto (ej. 'pack x4', 'set de 4', '4 unidades'), cuántas unidades trae. Omitir si es por unidad" },
           },
           required: ["descripcion", "cantidad"],
         },
@@ -371,6 +374,7 @@ async function extraerDocumentoProveedor(file, usuario) {
     return {
       descripcion: String(l.descripcion).trim(), codigo_proveedor: l.codigo_proveedor || "", marca: l.marca || "",
       unidad: l.unidad || "", cantidad: cant, precio_neto: Math.round(unit), total_linea: Math.round(totalLinea),
+      pack: Number(l.unidades_por_pack) > 1 ? Math.round(Number(l.unidades_por_pack)) : null,
     };
   });
   if (!lineas.length) throw new ErrorNegocio("No encontré líneas de productos en el documento");
@@ -390,6 +394,8 @@ async function extraerDocumentoProveedor(file, usuario) {
       proveedor: String(datos.proveedor || "").trim().toUpperCase(), razon_social: datos.razon_social || "", rut: datos.rut || "",
       tipo_documento: datos.tipo_documento || "cotizacion", numero_documento: datos.numero_documento || "",
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || "") ? datos.fecha : null,
+      valido_hasta: /^\d{4}-\d{2}-\d{2}$/.test(datos.valido_hasta || "") ? datos.valido_hasta : null,
+      validez_dias: Number(datos.validez_dias) > 0 ? Math.round(Number(datos.validez_dias)) : null,
       total_documento: Number(datos.total_documento) > 0 ? Math.round(Number(datos.total_documento)) : null,
     },
     control, lineas, truncado,
