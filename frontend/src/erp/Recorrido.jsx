@@ -17,6 +17,14 @@ export async function conConfirmacion(url, body = {}, method = "POST") {
 }
 
 // Paso actual + el botón de lo que toca hacer ahora (según el departamento)
+// Qué área sigue cuando se confirma cada paso
+const AVISO_ETAPA = {
+  registrada: "Al aceptarla, Comercial ve que Operativo ya está comprando.",
+  aceptada: "Al confirmar que llegaron los productos, Comercial recibe el aviso para facturar.",
+  lista: "Al despachar (o marcar que retiró), Comercial y Finanzas ven que la venta salió.",
+  despachada: "Al confirmar que el cliente recibió, la venta queda entregada y Finanzas sigue con la cobranza.",
+};
+
 export function AccionesVenta({ venta, puedeOperar, notify, onCambio, abrirCuadro }) {
   const [despacho, setDespacho] = useState(null); // { fecha, guia }
   const [entrega, setEntrega] = useState(null); // { fecha, recibido_por }
@@ -72,6 +80,7 @@ export function AccionesVenta({ venta, puedeOperar, notify, onCambio, abrirCuadr
         <div className="accion-texto">{texto}</div>
         {progreso != null && <div className="accion-barra"><span style={{ width: `${progreso}%` }} /></div>}
         {botones && <div className="accion-botones">{botones}</div>}
+        {AVISO_ETAPA[venta.etapa] && <div className="accion-info">ℹ Confirma cada paso aquí apenas ocurra: la otra área se entera por el sistema y puede seguir. {AVISO_ETAPA[venta.etapa]}</div>}
       </div>
       <div className="mini" style={{ marginTop: -4, marginBottom: 12 }}>
         {[["Registró", venta.creado_por], ["Aceptó", venta.aceptada_por], ["Confirmó productos", venta.lista_por], ["Despachó", venta.despacho_por]]
