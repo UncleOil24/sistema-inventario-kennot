@@ -290,6 +290,7 @@ const aprobarDocumento = handler(async (req, res) => {
         descripcion_proveedor: l.descripcion_proveedor || null, marca: l.marca || null, unidad: l.unidad || null,
         cantidad: l.cantidad || null, calce: l.calce && l.calce !== "sin_producto" ? l.calce : null, origen, creado_por: firma(req),
         valido_hasta: /^\d{4}-\d{2}-\d{2}$/.test(b.valido_hasta || "") ? b.valido_hasta : null, pack,
+        vendedor: b.vendedor || require("../services/precios").vendedorML(b.proveedor) || null,
       }, { transaction: t });
       await recalcular(p, { t, usuario: firma(req), motivo: `Documento ${ficha.nombre} ${b.documento || ""}`.trim() });
       out.precios++;

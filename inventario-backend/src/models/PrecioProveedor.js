@@ -26,6 +26,8 @@ const PrecioProveedor = sequelize.define("PrecioProveedor", {
   valido_hasta: { type: DataTypes.DATEONLY, allowNull: true },
   // Se vende en pack de N unidades (ej. Mercado Libre "pack x4"): precio es por unidad; se compra en múltiplos de N
   pack: { type: DataTypes.INTEGER, allowNull: true },
+  // Vendedor dentro de un marketplace (Mercado Libre): para identificar a quién se le compra
+  vendedor: { type: DataTypes.STRING(120), allowNull: true },
   motivo: { type: DataTypes.TEXT, allowNull: true },
   creado_por: { type: DataTypes.STRING(100), allowNull: true },
 }, {
