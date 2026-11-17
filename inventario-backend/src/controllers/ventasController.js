@@ -1189,9 +1189,9 @@ const internaSimple = handler(async (req, res) => {
     const c = (deCot.get(i.clave || i.producto_id) || deCot.get(i.producto_id) || []).shift();
     return { ...i, descripcion_cliente: i.descripcion_cliente || c?.descripcion_cliente, caso: i.caso || c?.caso };
   });
-  const { opcionesPorProducto } = require("../services/cuadroCompra");
+  const { opcionesInterna } = require("../services/cuadroCompra");
   const { filasInternaSimple } = require("../services/cotizacionFormato");
-  const r = filasInternaSimple(items, await opcionesPorProducto(items.map((i) => i.producto_id)));
+  const r = filasInternaSimple(items, await opcionesInterna(items));
   res.json({ ok: true, data: { venta: { numero: venta.numero, cliente: venta.cliente_nombre, empresa: venta.empresa, id_solicitud: venta.id_solicitud, orden_compra_cliente: venta.orden_compra_cliente }, ...r } });
 });
 
