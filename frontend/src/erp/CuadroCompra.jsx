@@ -386,7 +386,7 @@ function ElegirProveedor({ proveedores, linea, lineas, onElegir, onClose }) {
       </> : <>
         <div style={{ marginBottom: 8 }}>Proveedor: <strong>{elegido}</strong> <button className="link mini" onClick={() => setElegido(null)}>cambiar</button></div>
         <div className="field"><label>Precio unitario neto{precios.has(elegido) ? " (del catálogo)" : ""}</label>
-          <input autoFocus value={precio} onChange={(e) => setPrecio(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmarLinea()} placeholder={linea.compra_unit > 0 ? `vacío = mantener ${fmt(linea.compra_unit)}` : "ej. 1500"} /></div>
+          <input autoFocus value={precio} onChange={(e) => setPrecio(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmarLinea()} placeholder={elegido === linea.proveedor && linea.compra_unit > 0 ? `vacío = mantener ${fmt(linea.compra_unit)}` : "vacío = queda sin precio"} /></div>
       </>}
     </Modal>
   );
