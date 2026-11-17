@@ -130,7 +130,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
                     <td><div style={{ display: "flex", gap: 4, flexWrap: "nowrap" }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => verDetalle(v.id)}>Ver</button>
                       {modo === "operativo" && v.estado !== "anulada" && (v.items || []).length > 0 && <button className="btn btn-ghost btn-sm" title="Imprime directo el detalle de materiales (solicitud de cotización sencilla)"
-                        onClick={() => imprimirSolicitud(v.items.map((_, k) => ({ venta_id: v.id, indice: k }))).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
+                        onClick={() => imprimirSolicitud(v.items.map((_, k) => ({ venta_id: v.id, indice: k }))).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir compra cot.</button>}
                     </div></td>
                   </tr>
                 );
