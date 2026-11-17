@@ -188,6 +188,42 @@ const documentosCargados = handler(async (req, res) => {
   res.json({ ok: true, data: lista });
 });
 
+// POST /api/ia/documentos-cargados/proveedor   { id? | proveedor, documento, fecha ; nuevo }
+// Cambia el proveedor de los precios que cargó ese documento (ej. quedó "SIN IDENTIFICAR" y era TIGERO)
+const cambiarProveedorDocumento = handler(async (req, res) => {
+  const DocumentoCargado = require("../models/DocumentoCargado");
+  const nuevo = normProv(req.body?.nuevo || "");
+  if (!nuevo) throw new ErrorNegocio("Indica el proveedor");
+  let prov = req.body?.proveedor ? normProv(req.body.proveedor) : null;
+  let doc = String(req.body?.documento || "").trim() || null;
+  let fecha = req.body?.fecha ? String(req.body.fecha).slice(0, 10) : null;
+  let reg = null;
+  if (req.body?.id) {
+    reg = await DocumentoCargado.findByPk(req.body.id);
+    if (!reg) throw new ErrorNegocio("Documento no encontrado", 404);
+    prov = reg.proveedor; doc = reg.documento; fecha = reg.fecha;
+  }
+  if (!prov) throw new ErrorNegocio("Falta el proveedor actual del documento");
+  const ids = await sequelize.transaction(async (t) => {
+    // La ficha del proveedor nuevo (se crea si no existe)
+    if (!(await Proveedor.findOne({ where: sequelize.where(sequelize.fn("upper", sequelize.col("nombre")), nuevo), transaction: t }))) await Proveedor.create({ nombre: nuevo }, { transaction: t });
+    const [filas] = await sequelize.query(`UPDATE precios_proveedor SET proveedor = :nuevo
+      WHERE UPPER(TRIM(proveedor)) = UPPER(TRIM(:prov)) AND ${doc ? "documento = :doc" : "documento IS NULL"} ${fecha ? "AND fecha::date = :fecha::date" : ""} RETURNING producto_id`,
+    { replacements: { nuevo, prov, doc, fecha }, transaction: t });
+    if (reg) await reg.update({ proveedor: nuevo }, { transaction: t });
+    else await DocumentoCargado.update({ proveedor: nuevo }, { where: { proveedor: prov, documento: doc }, transaction: t });
+    return [...new Set(filas.map((f) => f.producto_id))];
+  });
+  const { recalcular } = require("../services/precios");
+  for (const id of ids) {
+    await sequelize.transaction(async (t) => {
+      const p = await Producto.findByPk(id, { transaction: t, lock: t.LOCK.UPDATE });
+      if (p) await recalcular(p, { t, usuario: firma(req), motivo: `Documento ${doc || "sin N°"}: proveedor ${prov} → ${nuevo}` });
+    });
+  }
+  res.json({ ok: true, data: { productos: ids.length, proveedor: nuevo } });
+});
+
 // GET /api/ia/documentos-cargados/detalle?id=  |  ?proveedor=&documento=&fecha=   -> productos y precios de ese documento
 const detalleDocumento = handler(async (req, res) => {
   const DocumentoCargado = require("../models/DocumentoCargado");
@@ -266,4 +302,4 @@ const auditoria = handler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, documentosCargados, detalleDocumento, auditoria, indiceCatalogo };
+module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, documentosCargados, detalleDocumento, cambiarProveedorDocumento, auditoria, indiceCatalogo };

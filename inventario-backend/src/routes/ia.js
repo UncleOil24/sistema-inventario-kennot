@@ -14,6 +14,7 @@ router.post("/documento-proveedor", catalogoPrecios, subir.single("archivo"), c.
 router.post("/documento-proveedor/aprobar", catalogoPrecios, c.aprobarDocumento);
 router.get("/documentos-cargados", catalogoPrecios, c.documentosCargados);
 router.get("/documentos-cargados/detalle", catalogoPrecios, c.detalleDocumento);
+router.post("/documentos-cargados/proveedor", catalogoPrecios, c.cambiarProveedorDocumento);
 router.get("/auditoria", soloAdmin, c.auditoria);
 
 module.exports = router;
