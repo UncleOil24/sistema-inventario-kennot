@@ -56,6 +56,7 @@ async function migrar() {
   await proveedoresGenericosV2(q);
   await bacEnPernosBac();
   await mercadoLibreUnoV1();
+  await ventasDescripcionClienteV1();
   await protegerTablas(q);
 }
 
@@ -193,6 +194,30 @@ async function mercadoLibreUnoV1() {
     console.log(`Mercado Libre: ${variantes.length} nombre(s) juntados en MERCADO LIBRE`);
   }
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_ml_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// Las ventas guardan lo que pidió el cliente (descripción de la cotización), para mostrarlo en el cuadro, las
+// solicitudes y las órdenes. Las ventas anteriores lo toman de su cotización (misma línea). Una vez.
+async function ventasDescripcionClienteV1() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_desc_cliente_v1'`);
+  if (hecho) return;
+  const [filas] = await sequelize.query(`SELECT v.id, v.items AS vi, c.items AS ci FROM ventas v JOIN cotizaciones c ON c.id = v.cotizacion_id`);
+  let n = 0;
+  for (const f of filas) {
+    const vi = typeof f.vi === "string" ? JSON.parse(f.vi) : f.vi || [];
+    const ci = typeof f.ci === "string" ? JSON.parse(f.ci) : f.ci || [];
+    if (!vi.length || vi.length !== ci.length) continue;
+    let cambio = false;
+    const nuevos = vi.map((it, k) => {
+      const c = ci[k];
+      if (it.descripcion_cliente || !c || Number(c.producto_id ?? c.id) !== Number(it.producto_id)) return it;
+      cambio = true;
+      return { ...it, descripcion_cliente: c.descripcion_cliente || null, caso: it.caso || c.caso || null, clave: it.clave || c.clave || null };
+    });
+    if (cambio) { await sequelize.query(`UPDATE ventas SET items = :items WHERE id = :id`, { replacements: { items: JSON.stringify(nuevos), id: f.id } }); n++; }
+  }
+  console.log(`Descripción del cliente copiada a ${n} venta(s)`);
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_desc_cliente_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 async function catalogoPaso7() {

@@ -504,7 +504,11 @@ async function excelInternoSimple(cot, opciones) {
     if (COLOR[f.caso]) [1, 2, 3].forEach((c) => { row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[f.caso] } }; });
     // El proveedor con que se cotizó, en negrita
     f.proveedores.forEach((o, n) => { if (o.usado) { row.getCell(6 + n * 2).font = { bold: true }; row.getCell(7 + n * 2).font = { bold: true }; } });
-    if (f.margen != null && f.margen < 0) row.getCell(17).font = { bold: true, color: { argb: "FFC00000" } };
+    // Pérdida (compra más cara que la venta): se marca en utilidad y margen, sin tocar descripción, cantidad ni unidad
+    if (f.margen != null && f.margen < 0) {
+      [16, 17].forEach((c) => { row.getCell(c).font = { bold: true, color: { argb: "FFC00000" } }; row.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8D7DA" } }; });
+      row.getCell(16).note = "Pérdida: el precio de compra es mayor que el de venta";
+    }
   });
   ws.addRow([]);
   const fila = (t, v, fmt) => { const r = ws.addRow(["", t, "", v]); r.font = { bold: true }; if (fmt) r.getCell(4).numFmt = fmt; return r; };

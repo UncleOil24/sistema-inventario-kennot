@@ -34,8 +34,10 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
       setLineas(r.lineas.map((l, i) => ({
         // Mismo precio que el último de este proveedor: ya está cargado (queda desmarcado)
         ...l, i, omitir: !!l.ya_cargado,
-        accion: l.producto ? "existente" : "nuevo",
-        nuevo: { nombre: l.descripcion.toUpperCase(), categoria: categorias[0]?.categoria || "GENERAL", unidad: (l.unidad || "UNIDAD").toUpperCase() },
+        // Regla: el precio va al producto exacto que cotizó el proveedor (tineta ≠ galón, otra medida o color ≠).
+        // Si solo hay uno "parecido", se propone crear el producto con la descripción del proveedor.
+        accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo",
+        nuevo: { nombre: l.descripcion.toUpperCase(), categoria: (l.producto?.categoria && categorias.some((c) => c.categoria === l.producto.categoria) ? l.producto.categoria : null) || categorias.find((c) => c.categoria === "POR CLASIFICAR")?.categoria || categorias[0]?.categoria || "GENERAL", unidad: (l.unidad || "UNIDAD").toUpperCase() },
       })));
     } catch (e) { notify(e.message, "danger"); }
     finally { setLeyendo(false); }

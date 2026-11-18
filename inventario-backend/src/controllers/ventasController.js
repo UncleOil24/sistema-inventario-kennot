@@ -88,6 +88,10 @@ const crearVentaEnTransaccion = async (datos, t) => {
       precio: precioDado === undefined || precioDado === null || precioDado === "" ? precioVenta(costo, tipo, params) : Number(precioDado),
       costo,
       proveedor: original.proveedor !== undefined ? original.proveedor : (p?.proveedor || null),
+      // Lo que pidió el cliente (tal como se cotizó): es lo que se compra y lo que sale en las hojas
+      ...(original.descripcion_cliente ? { descripcion_cliente: original.descripcion_cliente } : {}),
+      ...(original.caso ? { caso: original.caso } : {}),
+      ...(original.clave ? { clave: original.clave } : {}),
     };
   });
   const totales = calcularTotales(itemsFinal);
@@ -202,6 +206,9 @@ const getVenta = handler(async (req, res) => {
   res.json({ ok: true, data: { ...verVenta(req, venta), pagos, facturas, historial, compras: { ordenes: ocs.length, recibidas: ocs.filter((o) => o.estado === "recibida").length, detalle: ocs }, ...extra } });
 });
 
+// Lo que pidió el cliente (descripción de la cotización); si no hay, el nombre del catálogo
+const descCliente = (i) => String(i?.descripcion_cliente || "").trim() || i?.nombre || "";
+
 // POST /api/ventas   (venta directa, sin cotización)
 const crearVenta = handler(async (req, res) => {
   const venta = await sequelize.transaction((t) =>
@@ -238,6 +245,7 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
       items: cot.items.map((i) => ({
         producto_id: i.producto_id ?? i.id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
         cantidad: i.cantidad, precio: i.precio,
+        descripcion_cliente: i.descripcion_cliente || null, caso: i.caso || null, clave: i.clave || null,
         // Cotizaciones antiguas no guardaban costo: se toma del catálogo
         ...(i.costo !== undefined ? { costo: i.costo, proveedor: i.proveedor ?? null } : {}),
       })),
@@ -410,7 +418,8 @@ async function datosCuadro(venta) {
     const totalVenta = Number(i.precio) * Number(i.cantidad);
     const p = prodMap.get(i.producto_id);
     return {
-      indice, producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: Number(i.cantidad),
+      // Se muestra lo que pidió el cliente; el producto del catálogo queda como referencia (precios)
+      indice, producto_id: i.producto_id, codigo: i.codigo, nombre: descCliente(i), nombre_catalogo: i.nombre, caso: i.caso || null, unidad: i.unidad, cantidad: Number(i.cantidad),
       proveedor: prov, compra_unit: Number(i.costo), total_compra: redondear(totalCompra),
       venta_unit: Number(i.precio), total_venta: redondear(totalVenta),
       margen: redondear(totalVenta - totalCompra), margen_pct: totalVenta ? Math.round(((totalVenta - totalCompra) / totalVenta) * 100) : 0,
@@ -528,7 +537,7 @@ async function crearOrdenDe(ventaId, indicesBrutos, proveedor, req) {
       items[k] = { ...i, proveedor: prov, costo: Math.round(precio) };
       const cant = Number(i.cantidad) - require("../services/cuadroCompra").stockDe(i);
       if (cant <= 0) continue; // cubierto con stock
-      lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad, cantidad: cant, precio: Math.round(precio) });
+      lineas.push({ producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, descripcion_cliente: i.descripcion_cliente || null, unidad: i.unidad, cantidad: cant, precio: Math.round(precio) });
     }
     if (!lineas.length) throw new ErrorNegocio("Las líneas marcadas no existen");
     // Productos que este proveedor vende en pack (ej. pack x4): la orden indica cuántos packs comprar
@@ -579,7 +588,7 @@ const pedidoExcel = handler(async (req, res) => {
   const h = ws.addRow(["N°", "Producto", "Unidad", "Cantidad"]);
   h.font = { bold: true }; h.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDDE7E7" } }; });
   items.forEach((i, n) => {
-    ws.addRow([n + 1, i.nombre, i.unidad || "", Number(i.cantidad)]);
+    ws.addRow([n + 1, descCliente(i), i.unidad || "", Number(i.cantidad)]);
   });
   const nombre = `Pedido_${prov || "materiales"}_${v.numero}.xlsx`.replace(/[^\w.-]+/g, "_");
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -689,8 +698,8 @@ async function solicitudSimple(req, res, { pedidas, ventas, proyectoDe, params }
     const proy = proyectoDe(v);
     if (!sec.proyectos.includes(proy)) sec.proyectos.push(proy);
     if (!proyectos.includes(proy)) proyectos.push(proy);
-    const pk = it.producto_id || it.nombre;
-    const x = sec.lineas.get(pk) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map(), ordenes: new Set() };
+    const pk = `${it.producto_id || ""}|${descCliente(it)}`; // mismo producto con otra descripción del cliente: fila aparte
+    const x = sec.lineas.get(pk) || { nombre: descCliente(it), unidad: it.unidad, cantidad: 0, detalle: new Map(), ordenes: new Set() };
     x.cantidad += cant; x.detalle.set(v.numero, (x.detalle.get(v.numero) || 0) + cant); // de qué venta es cada cantidad
     if (o) x.ordenes.add(o.numero); // solo el N° de la orden, sin proveedor
     sec.lineas.set(pk, x);
@@ -770,8 +779,8 @@ const solicitudCotizacion = handler(async (req, res) => {
     const g = porEmpresa.get(emp);
     const proy = proyectoDe(v);
     if (!g.proyectos.includes(proy)) g.proyectos.push(proy);
-    const k = it.producto_id || it.nombre;
-    const x = g.lineas.get(k) || { nombre: it.nombre, unidad: it.unidad, cantidad: 0, detalle: new Map() };
+    const k = `${it.producto_id || ""}|${descCliente(it)}`;
+    const x = g.lineas.get(k) || { nombre: descCliente(it), unidad: it.unidad, cantidad: 0, detalle: new Map() };
     x.cantidad += cant; x.detalle.set(proy, (x.detalle.get(proy) || 0) + cant);
     g.lineas.set(k, x);
   }
@@ -837,7 +846,7 @@ const agruparExcel = handler(async (req, res) => {
       // Mismo producto en varias ventas: una fila con la cantidad sumada y el detalle por venta
       const m = new Map();
       for (const l of g.ls) {
-        const k = l.producto_id || `${l.nombre}`;
+        const k = `${l.producto_id || ""}|${l.nombre}`;
         const x = m.get(k) || { ...l, cantidad: 0, detalle: [], estados: new Set(), ordenes: new Set() };
         x.cantidad += Number(l.cantidad || 0); x.detalle.push(`${l.venta}: ${l.cantidad}`); x.estados.add(l.estado); (l.ordenes || []).forEach((o) => x.ordenes.add(o));
         m.set(k, x);
@@ -952,7 +961,7 @@ const generarOrdenes = handler(async (req, res) => {
       if (yaTiene.has(prov)) { omitidos.push(`${prov} ya tiene orden`); continue; }
       const ficha = await fichaProveedor(prov, t);
       const lineas = items.map((i) => ({
-        producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
+        producto_id: i.producto_id, codigo: i.codigo, nombre: i.nombre, descripcion_cliente: i.descripcion_cliente || null, unidad: i.unidad,
         cantidad: Number(i.cantidad), precio: Number(i.costo),
       }));
       const oc = await OrdenCompra.create({
