@@ -113,8 +113,12 @@ const licitacion = handler(async (req, res) => {
   // Sin productos detallados en Mercado Público: se devuelve vacío para que suban las bases o el anexo
   if (!l.items?.length) return res.json({ ok: true, data: { ...base, lineas: [], sin_detalle: true, aviso_mp: avisoMP } });
   const lineas = l.items.map((i) => {
-    const extra = i.descripcion && sinTildes(i.descripcion) !== sinTildes(i.producto) ? ` - ${String(i.descripcion).slice(0, 160)}` : "";
-    return { descripcion: `${i.producto}${extra}`.trim(), cantidad: Number(i.cantidad) || 1, unidad: i.unidad || "" };
+    // Lo que escribió el comprador es lo que se cotiza; el nombre de producto de Mercado Público es una categoría
+    // genérica ("Focos cialiticos", "Piso del andamiaje"…) y solo se antepone si el comprador escribió muy poco
+    const { limpiarTexto } = require("../services/textos");
+    const desc = limpiarTexto(i.descripcion || ""); const prod = limpiarTexto(i.producto || "");
+    const texto = desc && desc.split(/\s+/).length >= 3 ? desc : desc && sinTildes(desc) !== sinTildes(prod) ? `${prod} - ${desc}` : prod || desc;
+    return { descripcion: texto.slice(0, 250), cantidad: Number(i.cantidad) || 1, unidad: i.unidad || "" };
   });
   const { indice, productos } = await indiceCatalogo();
   const calzadas = await ia.calzarLineas(lineas, indice, { usuario: firma(req), tipo: "licitacion", archivo: l.codigo });

@@ -301,7 +301,7 @@ async function leerListaCliente(file, indice, usuario) {
   await auditar({ tipo: "lectura_lista_cliente", archivo: file.originalname, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: datos });
   const lineas = (datos.lineas || [])
     .filter((l) => l.descripcion && String(l.descripcion).trim())
-    .map((l) => ({ descripcion: String(l.descripcion).trim(), cantidad: Number(l.cantidad) > 0 ? Number(l.cantidad) : 1, unidad: l.unidad || "" }));
+    .map((l) => ({ descripcion: require("./textos").limpiarTexto(l.descripcion), cantidad: Number(l.cantidad) > 0 ? Number(l.cantidad) : 1, unidad: l.unidad || "" }));
   if (!lineas.length) throw new ErrorNegocio("No encontré productos en el archivo");
   const calzadas = await calzarLineas(lineas, indice, { usuario, tipo: "lista_cliente", archivo: file.originalname });
   return { lineas: calzadas, cliente: datos.cliente || "", observaciones: datos.observaciones || "", truncado };
@@ -360,7 +360,7 @@ async function leerCotizacionExterna(file, indice, usuario) {
       const cant = Number(l.cantidad) > 0 ? Number(l.cantidad) : 1;
       let unit = Number(l.precio_unitario) || (Number(l.total_linea) > 0 ? Number(l.total_linea) / cant : 0);
       if (iva) unit /= 1.19;
-      return { descripcion: String(l.descripcion).trim(), cantidad: cant, unidad: l.unidad || "", precio: Math.round(unit) };
+      return { descripcion: require("./textos").limpiarTexto(l.descripcion), cantidad: cant, unidad: l.unidad || "", precio: Math.round(unit) };
     });
   if (!lineas.length) throw new ErrorNegocio("No encontré productos con precio en el archivo");
   const calzadas = await calzarLineas(lineas, indice, { usuario, tipo: "cotizacion_externa", archivo: file.originalname });
