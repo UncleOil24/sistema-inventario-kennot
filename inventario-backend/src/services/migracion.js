@@ -57,6 +57,7 @@ async function migrar() {
   await bacEnPernosBac();
   await mercadoLibreUnoV1();
   await ventasDescripcionClienteV1();
+  await limpiarDescripcionesV1();
   await protegerTablas(q);
 }
 
@@ -218,6 +219,35 @@ async function ventasDescripcionClienteV1() {
   }
   console.log(`Descripción del cliente copiada a ${n} venta(s)`);
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_desc_cliente_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// Descripciones con la cantidad pegada con un tabulador o con signos raros (salían como "“3", "“@", "•12" en el PDF):
+// se limpian en cotizaciones, ventas, órdenes de compra y nombres de productos. Una vez.
+async function limpiarDescripcionesV1() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_limpiar_desc_v1'`);
+  if (hecho) return;
+  const { limpiarTexto } = require("./textos");
+  let n = 0;
+  for (const [tabla, campos] of [["cotizaciones", ["descripcion_cliente", "nombre"]], ["ventas", ["descripcion_cliente", "nombre"]], ["ordenes_compra", ["descripcion_cliente", "nombre"]]]) {
+    const [filas] = await sequelize.query(`SELECT id, items FROM ${tabla}`);
+    for (const f of filas) {
+      const items = typeof f.items === "string" ? JSON.parse(f.items) : f.items || [];
+      let cambio = false;
+      const nuevos = items.map((it) => {
+        const x = { ...it };
+        for (const c of campos) if (typeof x[c] === "string") { const l = limpiarTexto(x[c]); if (l !== x[c]) { x[c] = l; cambio = true; } }
+        return x;
+      });
+      if (cambio) { await sequelize.query(`UPDATE ${tabla} SET items = :items WHERE id = :id`, { replacements: { items: JSON.stringify(nuevos), id: f.id } }); n++; }
+    }
+  }
+  const [prods] = await sequelize.query(`SELECT id, nombre FROM productos`);
+  for (const p of prods) {
+    const l = limpiarTexto(p.nombre);
+    if (l && l !== p.nombre) { await sequelize.query(`UPDATE productos SET nombre = :l WHERE id = :id`, { replacements: { l, id: p.id } }); n++; }
+  }
+  console.log(`Descripciones limpiadas en ${n} registro(s)`);
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_limpiar_desc_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 async function catalogoPaso7() {

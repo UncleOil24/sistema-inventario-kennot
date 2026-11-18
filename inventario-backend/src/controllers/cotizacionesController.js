@@ -6,6 +6,7 @@ const Cliente = require("../models/Cliente");
 const Producto = require("../models/Producto");
 const Licitacion = require("../models/Licitacion");
 const { asignarUnidadCliente } = require("../services/clientesMP");
+const { limpiarTexto } = require("../services/textos");
 const { handler, ErrorNegocio, calcularTotales } = require("../services/erp");
 const { getParametros, precioVenta } = require("../services/parametros");
 const { veCostos } = require("../middlewares/auth");
@@ -82,7 +83,7 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
     if (!(cantidad > 0)) throw new ErrorNegocio(`Cantidad inválida en la línea ${idx + 1}`);
     const precioDado = b.precio === "" || b.precio == null ? null : Number(b.precio);
     if (precioDado !== null && !(precioDado >= 0)) throw new ErrorNegocio(`Precio inválido en la línea ${idx + 1}`);
-    const desc = String(b.descripcion_cliente || "").trim() || null;
+    const desc = limpiarTexto(b.descripcion_cliente || "") || null; // sin la cantidad pegada ni signos raros
     const comun = {
       cantidad,
       grupo: b.grupo !== undefined ? (String(b.grupo || "").trim() || null) : null, // grupo del presupuesto (M27)
