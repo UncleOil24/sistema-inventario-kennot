@@ -115,6 +115,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const sinPrecio = items.filter((i) => !(Number(i.precio) > 0)).length;
   const antiguos = items.filter((i) => i.precio_antiguo).length;
 
+  const [externa, setExterna] = useState(false);
   const limpiar = () => setBorrador((b) => ({ empresa: b.empresa || "kenott", cliente_id: "", tipo_precio: "convenio", nombre_cotizacion: "", validez_dias: 30, notas: "", id_solicitud: "", plazo_entrega: "", cliente_nombre_doc: "", presupuesto: null, lugar_entrega: "", items: [] }));
   const empresa = borrador.empresa || "kenott";
   // El nombre no repite el ID del proceso (ya va en su recuadro): "Compra Ágil 2440-2281-COT26 – Materiales..." -> "Materiales..."
@@ -144,6 +145,28 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
     });
     setImportar(false);
     notify(`✓ ${nuevas.length} líneas agregadas desde la lista del cliente${convertidas ? ` · ${convertidas} convertida(s) a envases: revísalas (marcadas en azul)` : ""}`);
+  };
+
+  // Cotización hecha fuera del sistema: líneas con su precio tal cual; se completan los datos vacíos que traiga el documento
+  const agregarExterna = (nuevas, res) => {
+    const e = res.encabezado || {};
+    const rut = (x) => String(x || "").replace(/[^0-9kK]/g, "").toUpperCase();
+    const cli = e.rut_cliente ? (clientes || []).find((c) => c.rut && rut(c.rut) === rut(e.rut_cliente)) : null;
+    setBorrador((b) => ({
+      ...b,
+      items: [...b.items, ...nuevas.map((n) => ({ ...n, clave: nuevaClave() }))],
+      externa: true,
+      archivo_cliente: res.archivo,
+      empresa: b.items.length ? b.empresa : e.empresa || b.empresa,
+      cliente_id: b.cliente_id || (cli ? String(cli.id) : ""),
+      id_solicitud: b.id_solicitud || e.id_solicitud || "",
+      nombre_cotizacion: b.nombre_cotizacion || e.proyecto || "",
+      plazo_entrega: b.plazo_entrega || e.plazo_entrega || "",
+      lugar_entrega: b.lugar_entrega || e.lugar_entrega || "",
+      notas: [b.notas, `Cotización externa${e.numero ? ` N° ${e.numero}` : ""}${e.fecha ? ` del ${e.fecha.split("-").reverse().join("-")}` : ""} (${res.archivo})${e.cliente && !cli ? ` · cliente en el documento: ${e.cliente}` : ""}`].filter(Boolean).join("\n"),
+    }));
+    setExterna(false);
+    notify(`✓ ${nuevas.length} líneas de la cotización externa, con sus precios. Completa cliente e ID si faltan y guárdala como enviada.`);
   };
 
   const guardar = async (estadoPedido, salida = null) => {
@@ -272,6 +295,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       {items.length === 0 ? (
         <div className="toolbar" style={{ marginBottom: 8 }}>
           <button className="btn btn-ghost" onClick={() => setImportar(true)}>⇪ Subir lista del cliente (Excel, PDF, Word o foto)</button>
+          <button className="btn btn-ghost" title="Cotización nuestra hecha fuera del sistema: se pasa al formato del sistema con sus precios tal cual" onClick={() => setExterna(true)}>⇪ Incluir cotización externa</button>
         </div>
       ) : borrador.archivo_cliente && <div className="mini" style={{ marginBottom: 8 }}>Lista del cliente: {borrador.archivo_cliente}</div>}
       <div className="field" style={{ position: "relative", marginBottom: "1rem" }}>
@@ -391,8 +415,10 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
         <button className="btn btn-ghost" title="Descarga el detalle de materiales sin valores (hoja General y una por especialidad) para enviar a cotizar. Queda en Esperando proveedor." onClick={() => guardar("espera_proveedor", "pedido-proveedor")} disabled={!items.length || guardando}>Pedir cotización a proveedor{sinCostoTodas ? ` (${sinCostoTodas})` : ""}</button>
         <button className="btn btn-ghost" title="Queda en Enviadas" onClick={() => guardar("cotizacion", "excel")} disabled={!items.length || guardando}>Finalizar + Excel</button>
         <button className="btn btn-primary" title="Queda en Enviadas" onClick={() => guardar("cotizacion", "pdf")} disabled={!items.length || guardando}>Finalizar + PDF</button>
+        {borrador.externa && !borrador.id && <button className="btn btn-success" title="Ya se envió al cliente fuera del sistema: queda en Enviadas sin descargar nada" onClick={() => guardar("cotizacion")} disabled={!items.length || guardando}>✓ Guardar como enviada</button>}
       </div>
       {importar && <ImportarLista tipo={tipo} esAdmin={esAdmin} notify={notify} onClose={() => setImportar(false)} onAgregar={agregarLista} />}
+      {externa && <ImportarLista externa tipo={tipo} esAdmin={esAdmin} notify={notify} onClose={() => setExterna(false)} onAgregar={agregarExterna} />}
     </>
   );
 }
