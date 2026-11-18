@@ -183,7 +183,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                 return (
                   <tr key={l.indice} className={l.estado === "stock" ? "fila-stock" : !(l.compra_unit > 0) ? "fila-alerta" : ""}>
                     <td><input type="checkbox" disabled={anulada} checked={sel.has(l.indice)} onChange={() => toggle(l.indice)} /></td>
-                    <td>{l.nombre}<div className="mini">{l.codigo ? `N° ${l.codigo}` : ""}</div></td>
+                    <td>{l.nombre}<div className="mini">{l.codigo ? `N° ${l.codigo}` : ""}</div>
+                      {l.caso === "similar" && l.nombre_catalogo && l.nombre_catalogo !== l.nombre && <div className="mini" style={{ color: "var(--warn)" }} title="Los precios de las opciones son de este producto del catálogo: revisa que cumpla lo que pidió el cliente">precios de: {l.nombre_catalogo}</div>}</td>
                     <td className="mini">{l.cantidad} {l.unidad}</td>
                     <td>
                       {real ? <span><strong>{real.proveedor}</strong> <span className="mini">· {fmt(real.precio)}</span></span> :
@@ -205,7 +206,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
                     <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
                     <td className="price-cell">{fmt(l.venta_unit)}</td>
-                    <td className="mini" style={{ color: l.margen < 0 ? "var(--danger)" : undefined }}>{fmt(l.margen)} · {l.margen_pct}%</td>
+                    <td className="mini" style={{ color: l.margen < 0 ? "var(--danger)" : undefined }}>{fmt(l.margen)} · {l.margen_pct}%
+                      {l.compra_unit > 0 && l.compra_unit > l.venta_unit && <div><span className="estado estado-danger" title="El precio de compra es mayor que el de venta">⚠ pérdida</span></div>}</td>
                     <td>
                       <span className={`estado estado-${tono}`}>{txt}</span>
                       {l.stock > 0 && <div className="mini">{l.stock} de stock{l.stock < l.cantidad ? ` · faltan ${l.cantidad - l.stock}` : ""}{!anulada && <> · <button className="link mini" onClick={() => quitarStock(l)}>deshacer</button></>}</div>}

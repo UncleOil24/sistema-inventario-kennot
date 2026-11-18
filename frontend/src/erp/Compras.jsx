@@ -372,7 +372,7 @@ function RepartirCompra({ orden, notify, onClose, onListo }) {
         <div className="mini" style={{ marginBottom: 8 }}>Indica cuánto de cada producto va a cada venta. Se crea una compra por venta con el mismo documento ({orden.documento || "sin N°"}); el IVA se reparte en proporción y en Por pagar sigue siendo una sola factura.</div>
         <table className="table table-compacta"><tbody>
           {items.map((i) => (
-            <tr key={i.indice}><td>{i.nombre}<div className="mini">{i.cantidad} {i.unidad} · {fmt(i.precio)} c/u</div>
+            <tr key={i.indice}><td>{i.descripcion_cliente || i.nombre}<div className="mini">{i.cantidad} {i.unidad} · {fmt(i.precio)} c/u</div>
               <RepartoLinea l={i} onChange={(r) => setItems((xs) => xs.map((x) => (x.indice === i.indice ? { ...x, reparto: r } : x)))} /></td></tr>
           ))}
         </tbody></table>
@@ -449,7 +449,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
           <tbody>
             {orden.items.map((i, k) => (
               <tr key={k}>
-                <td>{i.nombre}</td>
+                <td>{i.descripcion_cliente || i.nombre}</td>
                 <td className="mini">{i.cantidad} {i.unidad}</td>
                 <td className="price-cell compra">{fmt(i.precio)}</td>
                 <td className="price-cell">{fmt(i.precio * i.cantidad)}</td>
@@ -517,7 +517,7 @@ export function cuerpoOrden(orden) {
     <div class="sub">${[orden.empresa === "tactics" ? "Tactics Inversiones SpA" : orden.empresa === "kenott" ? "Inversiones Kenott SpA" : "", `fecha ${fecha(orden.fecha)}`, orden.notas || "", orden.documento ? `factura ${h(orden.documento)}` : ""].filter(Boolean).map(h).join(" · ")}</div>
     <table><colgroup><col style="width:30px"><col style="width:20px"><col><col style="width:72px"><col style="width:55px"><col style="width:85px"><col style="width:90px"></colgroup>
     <thead><tr><th class="num">N°</th><th class="chk"></th><th>Material</th><th class="cen">Unidad</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Total</th></tr></thead><tbody>
-    ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.nombre)}${Number(i.pack) > 1 ? (() => { const n = Math.ceil(Number(i.cantidad) / i.pack); const sobra = n * i.pack - Number(i.cantidad); return `<div class="mini">Comprar ${n} pack${n > 1 ? "s" : ""} de ${i.pack}${sobra ? ` (sobran ${sobra})` : ""}</div>`; })() : ""}</td><td class="cen">${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
+    ${its.map((i, k) => `<tr><td class="num">${k + 1}</td><td class="chk">☐</td><td>${h(i.descripcion_cliente || i.nombre)}${Number(i.pack) > 1 ? (() => { const n = Math.ceil(Number(i.cantidad) / i.pack); const sobra = n * i.pack - Number(i.cantidad); return `<div class="mini">Comprar ${n} pack${n > 1 ? "s" : ""} de ${i.pack}${sobra ? ` (sobran ${sobra})` : ""}</div>`; })() : ""}</td><td class="cen">${h(i.unidad || "")}</td><td class="num">${Number(i.cantidad)}</td><td class="num">${fmt(i.precio)}</td><td class="num">${fmt(Number(i.precio) * Number(i.cantidad))}</td></tr>`).join("")}
     </tbody></table>
     <div class="pie">Neto ${fmt(orden.subtotal)} · IVA ${fmt(orden.iva)} · <strong>Total ${fmt(orden.total)}</strong></div>`;
 }
