@@ -23,7 +23,9 @@ const categoriaSugerida = (l) => (l.producto && l.calce !== "nuevo" ? l.producto
 // Sube la lista del cliente (Excel, PDF, Word o foto), Claude calza cada línea con el catálogo
 // y aquí se revisa antes de agregarla a la cotización. Los precios los pone el sistema.
 // cargar (opcional): función que devuelve el resultado ya calzado (p.ej. una licitación), en vez de subir archivo
-export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar, esAdmin, titulo = "// Cotizar lista del cliente" }) {
+// externa: cotización nuestra hecha fuera del sistema; cada línea trae su precio y se mantiene tal cual
+export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar, esAdmin, externa = false, titulo = externa ? "// Incluir cotización externa" : "// Cotizar lista del cliente" }) {
+  const RUTA = externa ? "/ia/cotizacion-externa" : "/ia/lista-cliente";
   const productos = useProductos();
   const [alCatalogo, setAlCatalogo] = useState(null); // línea que se está creando en el catálogo
   const [creandoTodas, setCreandoTodas] = useState(false);
@@ -53,7 +55,7 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
     if (!archivo) return;
     setLeyendo(true);
     try {
-      const r = await subirArchivo("/ia/lista-cliente", archivo);
+      const r = await subirArchivo(RUTA, archivo);
       setRes(r);
       setLineas(r.lineas.map((l, i) => ({ ...l, i, incluir: true })));
     } catch (e) { notify(e.message, "danger"); }
@@ -96,7 +98,34 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
   const elegidas = lineas.filter((l) => l.incluir);
   const revisar = lineas.filter((l) => l.calce === "parecido" || l.calce === "sin_producto" || (l.producto && !(precioSegun(l.producto, tipo) > 0))).length;
 
+  // Cotización externa: las líneas sin producto se crean solas en el catálogo (POR CLASIFICAR, sin precio ni proveedor)
+  // y cada línea queda con su descripción y su precio exactos; no se juntan líneas
+  const agregarExterna = async () => {
+    setCreandoTodas(true);
+    try {
+      const out = [];
+      for (const l of elegidas) {
+        let p = l.producto;
+        if (!p) {
+          const nombre = nombreSugerido(l.descripcion);
+          p = (productos || []).find((x) => sinTildes(x.nombre) === sinTildes(nombre))
+            || await api("/productos", { method: "POST", body: { nombre, unidad: unidadCatalogo(l.unidad), categoria: categoriaSugerida(l) || "POR CLASIFICAR", forzar: true } });
+        }
+        const similar = l.calce === "parecido";
+        out.push({
+          ...lineaDesdeProducto(p, tipo), cantidad: Number(l.cantidad) || 1, descripcion_cliente: l.descripcion,
+          precio: Math.round(Number(l.precio) || 0), auto: false,
+          caso: similar ? "similar" : "mismo", nota_interna: similar ? `Cotizado con similar: ${p.nombre}${l.nota ? ` (${l.nota})` : ""}` : null,
+        });
+      }
+      invalidarProductos();
+      onAgregar(out, res);
+    } catch (e) { notify(e.message, "danger"); }
+    finally { setCreandoTodas(false); }
+  };
+
   const agregar = () => {
+    if (externa) return agregarExterna();
     // Si el cliente pidió el mismo producto en dos líneas, se suman las cantidades
     // Cada línea queda en su caso (M20): mismo producto, similar (amarillo) o no está en catálogo (rojo)
     const porProducto = new Map();
@@ -122,16 +151,18 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{elegidas.length} de {lineas.length} líneas se agregarán{revisar ? ` · ${revisar} para revisar (en amarillo)` : ""}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!elegidas.length} onClick={agregar}>Agregar a la cotización</button>
+        <button className="btn btn-primary" disabled={!elegidas.length || creandoTodas} onClick={agregar}>{creandoTodas ? <><span className="spinner"></span>Agregando...</> : externa ? "Pasar a la cotización" : "Agregar a la cotización"}</button>
       </> : <>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        {!cargar && <button className="btn btn-primary" disabled={!archivo || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo con Claude...</> : "Leer lista"}</button>}
+        {!cargar && <button className="btn btn-primary" disabled={!archivo || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo con Claude...</> : externa ? "Leer cotización" : "Leer lista"}</button>}
       </>}>
       {!res && cargar ? (
         <div className="cot-empty"><span className="spinner"></span>Buscando cada producto en el catálogo con Claude...</div>
       ) : !res ? (
         <>
-          <div className="mini">Sube la lista tal como la mandó el cliente: Excel, PDF, Word o una foto. Claude lee cada línea y propone el producto de nuestro catálogo; tú revisas antes de agregar. Puede tardar unos segundos por cada 30 líneas.</div>
+          <div className="mini">{externa
+            ? "Sube la cotización hecha fuera del sistema (PDF, Excel o foto). Se mantienen la descripción y el precio de cada línea tal cual; Claude propone el producto del catálogo de cada una (para comprar después). Las que no están en el catálogo se crean solas como POR CLASIFICAR, sin precio ni proveedor. Cliente, ID y demás datos los completas después en la cotización."
+            : "Sube la lista tal como la mandó el cliente: Excel, PDF, Word o una foto. Claude lee cada línea y propone el producto de nuestro catálogo; tú revisas antes de agregar. Puede tardar unos segundos por cada 30 líneas."}</div>
           <input type="file" accept=".xlsx,.xlsm,.pdf,.docx,.csv,.txt,.jpg,.jpeg,.png,.webp" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
           {leyendo && <div className="aviso" style={{ marginBottom: 0 }}>Leyendo el archivo y buscando cada producto en el catálogo...</div>}
         </>
@@ -145,6 +176,13 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
             {res.presupuesto && <span className="id-solicitud">Presupuesto de la propuesta: {fmt(res.presupuesto)}</span>}
             {res.cierre && <span>Cierra {new Date(res.cierre).toLocaleString("es-CL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
           </div>
+          {externa && res.encabezado && <div className="hist-meta">
+            {res.encabezado.numero && <span>Cotización externa N° <strong>{res.encabezado.numero}</strong></span>}
+            {res.encabezado.empresa && <span>{res.encabezado.empresa === "tactics" ? "Tactics" : "Kenott"}</span>}
+            {res.encabezado.id_solicitud && <span className="id-solicitud">ID {res.encabezado.id_solicitud}</span>}
+            {(() => { const t = elegidas.reduce((s2, l) => s2 + Math.round(Number(l.precio) || 0) * Number(l.cantidad || 0), 0); const doc = res.encabezado.total_neto;
+              return <span>Total neto <strong>{fmt(t)}</strong>{doc ? (Math.abs(doc - t) > 2 ? <strong style={{ color: "var(--danger)" }}> · el documento dice {fmt(doc)}: revisa</strong> : " · cuadra con el documento") : ""}</span>; })()}
+          </div>}
           {res.aviso_mp && <div className="aviso">⚠ {res.aviso_mp}</div>}
           {res.sin_detalle && <div className="aviso">Mercado Público no trae el detalle de productos de este proceso. Sube las bases o el anexo con la lista (desde el computador o con el enlace) y Claude la lee.</div>}
           {cargar && (
@@ -161,11 +199,11 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
           {res.truncado && <div className="aviso">El documento es muy largo y la lectura pudo quedar incompleta: revisa que estén todas las líneas.</div>}
           <div className="table-wrap">
             <table className="table table-compacta">
-              <thead><tr><th></th><th>Lo que pidió el cliente</th><th>Cant.</th><th>Calce</th><th className="col-desc">Producto nuestro</th><th>Precio</th><th>Total</th></tr></thead>
+              <thead><tr><th></th><th>{externa ? "Descripción de la cotización" : "Lo que pidió el cliente"}</th><th>Cant.</th><th>Calce</th><th className="col-desc">Producto nuestro</th><th>{externa ? "Precio neto" : "Precio"}</th><th>Total</th></tr></thead>
               <tbody>
                 {lineas.map((l) => {
-                  const precio = l.producto ? precioSegun(l.producto, tipo) : 0;
-                  const alerta = l.calce === "parecido" || l.calce === "sin_producto" || (l.producto && !(precio > 0));
+                  const precio = externa ? Math.round(Number(l.precio) || 0) : l.producto ? precioSegun(l.producto, tipo) : 0;
+                  const alerta = l.calce === "parecido" || l.calce === "sin_producto" || (!externa && l.producto && !(precio > 0));
                   return (
                     <tr key={l.i} className={alerta ? "fila-alerta" : ""}>
                       <td><input type="checkbox" checked={l.incluir} title={l.producto ? "" : "Se agrega como línea que no está en catálogo (rojo), con precio a mano"} onChange={(e) => set(l.i, { incluir: e.target.checked })} /></td>
@@ -178,7 +216,9 @@ export default function ImportarLista({ tipo, notify, onClose, onAgregar, cargar
                         {l.producto && <div className="mini">{l.producto.unidad}{l.producto.precio_antiguo && <span className="antiguo"> · ⏱ precio {haceMeses(l.producto.fecha_precio)}</span>}</div>}
                         {(!l.producto || l.calce === "parecido") && <button className="link" onClick={() => setAlCatalogo(l)}>+ Agregar al catálogo como producto nuevo</button>}
                       </td>
-                      <td className="price-cell">{l.producto ? (precio > 0 ? fmt(precio) : "sin precio") : "—"}</td>
+                      <td className="price-cell">{externa ? <input className="qty-input" style={{ width: 90 }} type="number" value={l.precio} onChange={(e) => set(l.i, { precio: e.target.value })} />
+                        : l.producto ? (precio > 0 ? fmt(precio) : "sin precio") : "—"}
+                        {externa && !l.producto && <div className="mini">se crea POR CLASIFICAR</div>}</td>
                       <td className="price-cell">{precio > 0 ? fmt(precio * Number(l.cantidad || 0)) : ""}</td>
                     </tr>
                   );

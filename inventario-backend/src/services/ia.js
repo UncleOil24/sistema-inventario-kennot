@@ -307,6 +307,75 @@ async function leerListaCliente(file, indice, usuario) {
   return { lineas: calzadas, cliente: datos.cliente || "", observaciones: datos.observaciones || "", truncado };
 }
 
+// --- Cotización nuestra hecha fuera del sistema (Excel/PDF/foto de Kenott o Tactics) ---------
+const HERR_COT_EXTERNA = {
+  name: "registrar_cotizacion_externa",
+  description: "Registra la cotización (hecha por Kenott o Tactics fuera del sistema) con sus líneas y precios tal cual.",
+  input_schema: {
+    type: "object",
+    properties: {
+      empresa: { type: "string", enum: ["kenott", "tactics", "no_se"], description: "Empresa que emite la cotización (Inversiones Kenott SpA o Tactics Inversiones SpA), por el logo o la razón social" },
+      numero: { type: "string", description: "N° de la cotización tal como aparece. Omitir si no aparece" },
+      fecha: { type: "string", description: "Fecha AAAA-MM-DD. Omitir si no aparece" },
+      cliente: { type: "string", description: "Nombre del cliente (Señor(es)). Omitir si no aparece" },
+      rut_cliente: { type: "string", description: "RUT del cliente. Omitir si no aparece" },
+      id_solicitud: { type: "string", description: "ID de Mercado Público u otro ID de la solicitud (ej. 2436-1811-COT26). Omitir si no aparece" },
+      proyecto: { type: "string", description: "Descripción o nombre del proyecto. Omitir si no aparece" },
+      plazo_entrega: { type: "string" },
+      lugar_entrega: { type: "string" },
+      precios_incluyen_iva: { type: "boolean", description: "true si los precios unitarios de las líneas incluyen IVA" },
+      total_neto: { type: "number", description: "Total neto (sin IVA). Omitir si no aparece" },
+      lineas: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            descripcion: { type: "string", description: "Descripción tal cual aparece en la cotización" },
+            unidad: { type: "string" },
+            cantidad: { type: "number" },
+            precio_unitario: { type: "number", description: "Precio unitario tal cual aparece" },
+            total_linea: { type: "number", description: "Total de la línea. Omitir si no aparece" },
+          },
+          required: ["descripcion", "cantidad", "precio_unitario"],
+        },
+      },
+    },
+    required: ["lineas"],
+  },
+};
+
+async function leerCotizacionExterna(file, indice, usuario) {
+  const contenido = await contenidoArchivo(file);
+  const { datos, uso, truncado } = await llamar({
+    system: "Lees cotizaciones de una ferretería chilena (Inversiones Kenott SpA o Tactics Inversiones SpA) hechas fuera del sistema, en Excel, PDF o foto. Extrae el encabezado si aparece y cada línea de producto con su descripción, unidad, cantidad y precio unitario exactamente como están. No inventes datos que no aparecen. Ignora totales, condiciones comerciales y firmas como líneas.",
+    contenido: [...contenido, { type: "text", text: "Extrae la cotización completa." }],
+    herramienta: HERR_COT_EXTERNA,
+    maxTokens: 16000,
+  });
+  await auditar({ tipo: "lectura_cotizacion_externa", archivo: file.originalname, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: datos });
+  const iva = !!datos.precios_incluyen_iva;
+  const lineas = (datos.lineas || [])
+    .filter((l) => l.descripcion && String(l.descripcion).trim())
+    .map((l) => {
+      const cant = Number(l.cantidad) > 0 ? Number(l.cantidad) : 1;
+      let unit = Number(l.precio_unitario) || (Number(l.total_linea) > 0 ? Number(l.total_linea) / cant : 0);
+      if (iva) unit /= 1.19;
+      return { descripcion: String(l.descripcion).trim(), cantidad: cant, unidad: l.unidad || "", precio: Math.round(unit) };
+    });
+  if (!lineas.length) throw new ErrorNegocio("No encontré productos con precio en el archivo");
+  const calzadas = await calzarLineas(lineas, indice, { usuario, tipo: "cotizacion_externa", archivo: file.originalname });
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || "") ? datos.fecha : null;
+  return {
+    lineas: calzadas, truncado,
+    encabezado: {
+      empresa: ["kenott", "tactics"].includes(datos.empresa) ? datos.empresa : null,
+      numero: datos.numero || null, fecha, cliente: datos.cliente || "", rut_cliente: datos.rut_cliente || "",
+      id_solicitud: datos.id_solicitud || "", proyecto: datos.proyecto || "", plazo_entrega: datos.plazo_entrega || "",
+      lugar_entrega: datos.lugar_entrega || "", total_neto: Number(datos.total_neto) || null,
+    },
+  };
+}
+
 // --- Documento de proveedor (cotización o factura) -----------------------------------
 const HERR_PROVEEDOR = {
   name: "registrar_documento",
@@ -514,5 +583,5 @@ async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistem
 module.exports = {
   clasificarProcesos,
   calzarLineas,
-  iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerDocumentoProveedor, extraerDocumentoProveedor, leerDocumentoSII, crearIndice, candidatos, normalizar, contenidoArchivo,
+  iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerCotizacionExterna, leerDocumentoProveedor, extraerDocumentoProveedor, leerDocumentoSII, crearIndice, candidatos, normalizar, contenidoArchivo,
 };

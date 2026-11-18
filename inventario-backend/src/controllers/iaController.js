@@ -78,6 +78,27 @@ const listaCliente = handler(async (req, res) => {
   });
 });
 
+// POST /api/ia/cotizacion-externa  (archivo)  -> cotización nuestra hecha fuera del sistema: líneas con su precio
+// tal cual y el producto del catálogo propuesto; encabezado si aparece (cliente, ID, N°, empresa)
+const cotizacionExterna = handler(async (req, res) => {
+  if (!req.file) throw new ErrorNegocio("Sube la cotización (PDF, Excel o foto)");
+  const { indice, productos } = await indiceCatalogo();
+  const r = await ia.leerCotizacionExterna(req.file, indice, firma(req));
+  const ver = vista(req, await getParametros());
+  res.json({
+    ok: true,
+    data: {
+      archivo: req.file.originalname, encabezado: r.encabezado, truncado: r.truncado, externa: true,
+      cliente: r.encabezado.cliente, observaciones: "",
+      lineas: r.lineas.map((l) => ({
+        descripcion: l.descripcion, cantidad: l.cantidad, unidad: l.unidad, precio: l.precio, calce: l.calce, nota: l.nota,
+        producto: l.producto_id ? ver(productos.get(l.producto_id)) : null,
+        candidatos: l.candidatos.slice(0, 6).map((p) => ver(p)),
+      })),
+    },
+  });
+});
+
 // POST /api/ia/licitacion/:codigo   -> los productos de la licitación calzados con el catálogo
 const licitacion = handler(async (req, res) => {
   const l = await Licitacion.findByPk(req.params.codigo);
@@ -315,4 +336,5 @@ const auditoria = handler(async (req, res) => {
   res.json({ ok: true, data });
 });
 
-module.exports = { licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, documentosCargados, detalleDocumento, cambiarProveedorDocumento, auditoria, indiceCatalogo };
+module.exports = {
+  cotizacionExterna, licitacion, estado, listaCliente, documentoProveedor, aprobarDocumento, documentosCargados, detalleDocumento, cambiarProveedorDocumento, auditoria, indiceCatalogo };
