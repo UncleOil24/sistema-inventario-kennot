@@ -140,9 +140,13 @@ export function imprimirHTML(titulo, cuerpo, { horizontal = null } = {}) {
     td { border-bottom: 1px solid #ccc; padding: 3px 4px; vertical-align: top; }
     .num { text-align: right; white-space: nowrap; } .chk { width: 18px; font-size: 13px; } .mini { color: #555; font-size: 9px; }
     .tot td { font-weight: bold; border-top: 1.5px solid #333; } .aviso { color: #a33; }
-    .pie { margin-top: 10px; font-size: 11px; } .grupo { page-break-inside: avoid; }
+    .pie { margin-top: 10px; font-size: 11px; }
+    /* Un proveedor con pocas líneas no se corta entre hojas; uno largo sí (si no, la hoja anterior quedaba en blanco) */
+    .grupo.corto { page-break-inside: avoid; } h2 { page-break-after: avoid; break-after: avoid; }
   </style></head><body>${cuerpo}</body></html>`);
   d.close();
+  // Hoja Carta ~ 1000 px de alto útil: solo se mantienen juntos los grupos que caben en media hoja
+  d.querySelectorAll(".grupo").forEach((g) => { if (g.offsetHeight < 480) g.classList.add("corto"); });
   setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); }, 300);
 }
 
