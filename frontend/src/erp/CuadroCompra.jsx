@@ -207,7 +207,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                     <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
                     <td className="price-cell">{fmt(l.venta_unit)}</td>
                     <td className="mini" style={{ color: l.margen < 0 ? "var(--danger)" : undefined }}>{fmt(l.margen)} · {l.margen_pct}%
-                      {l.compra_unit > 0 && l.compra_unit > l.venta_unit && <div><span className="estado estado-danger" title="El precio de compra es mayor que el de venta">⚠ pérdida</span></div>}</td>
+                      {l.compra_unit > 0 && l.compra_unit > l.venta_unit && <div><span className="estado estado-danger" title="El precio de compra es mayor que el de venta">⚠ pérdida</span><div style={{ color: "var(--danger)" }}>revisar unidad / presentación del costo</div></div>}
+                      {l.compra_unit > 0 && l.venta_unit > 0 && l.margen_pct >= 75 && <div style={{ color: "var(--warn)" }}>⚠ margen muy alto: revisar unidad / presentación</div>}</td>
                     <td>
                       <span className={`estado estado-${tono}`}>{txt}</span>
                       {l.stock > 0 && <div className="mini">{l.stock} de stock{l.stock < l.cantidad ? ` · faltan ${l.cantidad - l.stock}` : ""}{!anulada && <> · <button className="link mini" onClick={() => quitarStock(l)}>deshacer</button></>}</div>}

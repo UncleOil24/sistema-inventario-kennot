@@ -58,6 +58,7 @@ async function migrar() {
   await mercadoLibreUnoV1();
   await ventasDescripcionClienteV1();
   await limpiarDescripcionesV1();
+  await acidoMuriaticoLitroV1();
   await protegerTablas(q);
 }
 
@@ -248,6 +249,39 @@ async function limpiarDescripcionesV1() {
   }
   console.log(`Descripciones limpiadas en ${n} registro(s)`);
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_limpiar_desc_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// N° 937 ácido muriático (por LITRO): el precio CYC $2.746 era del bidón de 5 L cargado como litro (pérdida falsa de −29%
+// en la V-0004). Queda por litro: los precios CYC de bidón se dividen por 5, se agrega la factura CYC 142913 ($2.600 el bidón
+// = $520/L), las ventas con ese costo pasan a $520 y se recuerda CYC [54514] → N° 937 × 5. Una vez.
+async function acidoMuriaticoLitroV1() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_acido_937_v1'`);
+  if (hecho) return;
+  const [[p]] = await sequelize.query(`SELECT id, nombre FROM productos WHERE codigo = 937 AND upper(nombre) LIKE '%MURI%'`);
+  if (p) {
+    await sequelize.transaction(async (t) => {
+      await sequelize.query(`UPDATE precios_proveedor SET precio = round(precio / 5), descripcion_proveedor = coalesce(descripcion_proveedor, '') || ' (bidón 5 L ÷ 5)' WHERE producto_id = ${p.id} AND upper(trim(proveedor)) = 'CYC' AND precio >= 2000`, { transaction: t });
+      const [[ya]] = await sequelize.query(`SELECT id FROM precios_proveedor WHERE producto_id = ${p.id} AND upper(trim(proveedor)) = 'CYC' AND documento LIKE '%142913%'`, { transaction: t });
+      if (!ya) await sequelize.query(`INSERT INTO precios_proveedor (producto_id, proveedor, precio, fecha, documento, descripcion_proveedor, origen, descartado, "createdAt", "updatedAt")
+        VALUES (${p.id}, 'CYC', 520, '2026-11-19', 'FAC 142913', '[54514] ACIDO MURIATICO 5 LT DIDEVAL (bidón $2.600 ÷ 5)', 'proveedor', false, NOW(), NOW())`, { transaction: t });
+      const [ventas] = await sequelize.query(`SELECT id, items FROM ventas WHERE estado <> 'anulada'`, { transaction: t });
+      for (const v of ventas) {
+        const items = typeof v.items === "string" ? JSON.parse(v.items) : v.items || [];
+        let cambio = false;
+        const nuevos = items.map((it) => (Number(it.producto_id) === p.id && String(it.proveedor || "").toUpperCase() === "CYC" && Number(it.costo) >= 2000 ? (cambio = true, { ...it, costo: 520 }) : it));
+        if (cambio) {
+          const costo = require("./cuadroCompra").costoItems(nuevos);
+          await sequelize.query(`UPDATE ventas SET items = :items, costo_total = :costo WHERE id = :id`, { replacements: { items: JSON.stringify(nuevos), costo: Math.round(costo), id: v.id }, transaction: t });
+        }
+      }
+      await require("./presentaciones").aprender({ proveedor: "CYC", codigo_proveedor: "54514", descripcion: "ACIDO MURIATICO 5 LT DIDEVAL", producto_id: p.id, factor: 5, usuario: "Sistema" }, t);
+    });
+    const Producto = require("../models/Producto");
+    const prod = await Producto.findByPk(p.id);
+    await require("./precios").recalcular(prod, { usuario: "Sistema", motivo: "CYC ácido muriático por litro (bidón 5 L ÷ 5)" }).catch((e) => console.error("937", e.message));
+    console.log("N° 937 ácido muriático: precio CYC por litro ($520)");
+  }
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_acido_937_v1', '${new Date().toISOString()}', NOW(), NOW())`);
 }
 
 async function catalogoPaso7() {

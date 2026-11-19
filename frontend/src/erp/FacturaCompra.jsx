@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -54,8 +54,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
           ...enc, archivo_token: res.archivo_token, orden_id: enc.orden_id || null, gasto_id: gasto?.id || null,
           lineas: activas.map((l) => ({
             producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
-            descripcion: l.descripcion, cantidad: Number(l.cantidad), precio: Number(l.precio_neto), unidad: l.unidad, marca: l.marca, calce: l.calce,
-            reparto: repartoParaEnviar(l),
+            descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce,
+            ...presentacionParaEnviar(l, repartoParaEnviar(l)), // bidón 5 L → litros, con su costo por litro
           })),
         },
       });
@@ -170,6 +170,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => set(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
+                      <PresentacionLinea l={l} productos={productos} onChange={(c) => set(l.i, c)}
+                        items={(res.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}`, etiqueta: res.orden?.numero || "Pedido" }))} />
                       <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} />
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
                         <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
@@ -181,7 +183,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
                         {l.alza && <div style={{ color: "var(--danger)" }}>▲ alza {l.alza}%</div>}
                         {Number(l.precio_neto) < Number(l.producto.precio_compra) && <div style={{ color: "var(--success)" }}>más barato</div>}</> : <span style={{ color: "var(--success)" }}>sin precio: se llena</span>) : "—"}
                     </td>
-                    {res.orden && <td className="mini">{l.diferencia || "✓"}</td>}
+                    {res.orden && <td className="mini">{l.para ? "✓ asociada a mano (ver abajo del producto)" : l.diferencia || "✓"}</td>}
                   </tr>
                 ))}
               </tbody>
