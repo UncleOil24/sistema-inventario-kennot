@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PresentacionLinea, presentacionParaEnviar } from "./ui";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { TIPOS_PAGO } from "./lib";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
@@ -70,8 +71,8 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             ...d.enc, archivo_token: d.res.archivo_token, orden_id: d.enc.orden_id || null, venta_id: venta.id, empresa: venta.empresa,
             lineas: activas.map((l) => ({
               producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
-              descripcion: l.descripcion, cantidad: Number(l.cantidad), precio: Number(l.precio_neto), unidad: l.unidad, marca: l.marca, calce: l.calce,
-              reparto: repartoParaEnviar(l),
+              descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce,
+              ...presentacionParaEnviar(l, repartoParaEnviar(l)),
             })),
           },
         });
@@ -218,13 +219,15 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => setLinea(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => setLinea(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
+                      <PresentacionLinea l={l} productos={productos} onChange={(c) => setLinea(l.i, c)}
+                        items={(d.res.venta_items || []).map((x) => ({ ...x, clave: `v${x.k}`, etiqueta: venta.numero }))} />
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
                         <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
                           <button className="link" onClick={() => setLinea(l.i, { cantidad: e.cantidad, precio_neto: e.precio, envase_ok: true })}>Convertir</button>{" · "}
                           <button className="link" onClick={() => setLinea(l.i, { envase_ok: true })}>Está bien así</button></div>) : null; })()}
                     </td>
                     <td className="mini">
-                      {l.venta_linea ? <>✓ {l.venta_linea.nombre}<div>necesita {l.venta_linea.cantidad}{Number(l.cantidad) > l.venta_linea.cantidad ? ` · se compraron ${l.cantidad}: cuenta el total pagado` : Number(l.cantidad) < l.venta_linea.cantidad ? ` · faltan ${l.venta_linea.cantidad - Number(l.cantidad)}` : ""}</div></>
+                      {l.venta_linea ? (() => { const c = Number(l.cantidad) * (Number(l.factor) > 0 ? Number(l.factor) : 1); return <>✓ {l.venta_linea.nombre}<div>necesita {l.venta_linea.cantidad}{c > l.venta_linea.cantidad ? ` · se compraron ${c}, se pidieron ${l.venta_linea.cantidad}: lo que sobra cuenta como compra extra` : c < l.venta_linea.cantidad ? ` · faltan ${l.venta_linea.cantidad - c}: siguen por comprar` : ""}</div></>; })()
                         : <span style={{ color: "var(--warn)" }}>no está en la venta: compra extra, su costo suma a la venta</span>}
                       <RepartoLinea l={l} onChange={(r) => setLinea(l.i, { reparto: r })} />
                     </td>

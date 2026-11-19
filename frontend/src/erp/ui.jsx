@@ -385,6 +385,53 @@ export function RepartoLinea({ l, onChange }) {
   );
 }
 // Reparto que se manda al registrar (lo que no se asignó queda sin venta)
+// --- Presentación de compra (bidón 5 L = 5 litros, rollo 50 m = 50 metros, caja 100 = 100 unidades) ---------------
+const UNIDAD_BASE = (u) => { const t = String(u || "").toUpperCase(); return /^L(T|ITRO)/.test(t) ? "LITRO" : /^M(T|ETRO)/.test(t) && !/^M2|^M3/.test(t) ? "METRO" : /^K(G|ILO)/.test(t) ? "KILO" : /^UN/.test(t) ? "UNIDAD" : t; };
+const factorDe = (l) => (Number(l.factor) > 0 ? Number(l.factor) : 1);
+// Al elegir "Es para:" una línea del pedido o de la venta: ese producto, y el factor que dice la descripción si calza la unidad
+export function elegirPara(l, item, productos) {
+  if (!item) return { para: "" };
+  const p = productos.find((x) => x.id === item.producto_id) || { id: item.producto_id, nombre: item.nombre, unidad: item.unidad };
+  const s = l.factor_sugerido;
+  const factor = factorDe(l) === 1 && s && UNIDAD_BASE(p.unidad) === s.unidad ? s.factor : factorDe(l);
+  return { para: item.clave, accion: "existente", producto: { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor }, calce: "exacto", factor };
+}
+// Lo que se manda al registrar: cantidad y precio en unidad base, y lo que el sistema debe recordar
+export function presentacionParaEnviar(l, reparto) {
+  const f = factorDe(l);
+  const cant = Number(l.cantidad) || 0; const precio = Number(l.precio_neto) || 0;
+  const aprender = l.accion === "existente" && l.producto && (f !== 1 || l.para || l.aprendido) ? { codigo_proveedor: l.codigo_proveedor || null, descripcion: l.descripcion, factor: f } : undefined;
+  return {
+    cantidad: cant * f, precio: f !== 1 ? precio / f : precio, aprender,
+    presentacion: f !== 1 ? `${cant} × ${f} (${l.descripcion})` : undefined,
+    reparto: reparto && f !== 1 ? reparto.map((r) => ({ ...r, cantidad: r.cantidad * f })) : reparto,
+  };
+}
+export function PresentacionLinea({ l, items = [], productos, onChange }) {
+  const f = factorDe(l);
+  const u = l.producto ? UNIDAD_BASE(l.producto.unidad) : "";
+  const s = l.factor_sugerido;
+  const cant = Number(l.cantidad) || 0;
+  return (
+    <div className="mini" style={{ marginTop: 4 }}>
+      {items.length > 0 && <div style={{ display: "flex", gap: 4, alignItems: "center" }}>Es para:
+        <select className="select-linea" style={{ flex: 1, padding: "2px 4px" }} value={l.para || ""} onChange={(e) => onChange(elegirPara(l, items.find((x) => x.clave === e.target.value), productos))}>
+          <option value="">— como está —</option>
+          {items.map((x) => <option key={x.clave} value={x.clave}>{x.etiqueta}: {x.nombre} · {x.cantidad} {x.unidad || ""}</option>)}
+        </select></div>}
+      {l.accion === "existente" && l.producto && <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
+        1 de la factura = <input className="qty-input" style={{ width: 54 }} type="number" min="0.01" step="any" value={l.factor ?? 1} onChange={(e) => onChange({ factor: e.target.value })} /> {u || "un"}
+        {f === 1 && s && UNIDAD_BASE(l.producto.unidad) === s.unidad && <button className="link" onClick={() => onChange({ factor: s.factor })}>usar × {s.factor} (lo dice la descripción)</button>}
+        {f !== 1 && <strong style={{ color: "var(--accent)" }}>{cant} × {f} = {cant * f} {u} · {fmt(Math.round((Number(l.precio_neto) || 0) / f))} por {u.toLowerCase() || "unidad"}</strong>}
+        {l.aprendido && <span title="Lo recordó de una factura anterior de este proveedor">· aprendido</span>}
+      </div>}
+      {(() => { const it = items.find((x) => x.clave === l.para) || (l.producto && items.find((x) => x.producto_id === l.producto.id)); if (!it) return null; const c = cant * f;
+        return c > it.cantidad ? <div style={{ color: "var(--warn)" }}>⚠ se compraron {c} {u.toLowerCase()}, se pidieron {it.cantidad}: lo que sobra es compra extra</div>
+          : c < it.cantidad ? <div style={{ color: "var(--warn)" }}>faltan {it.cantidad - c}: siguen "por comprar"</div> : <div style={{ color: "var(--success)" }}>✓ completa lo pedido ({it.cantidad})</div>; })()}
+    </div>
+  );
+}
+
 export const repartoParaEnviar = (l) => {
   if (!l.producto || l.producto.id !== l.reparto_de || !(l.reparto || []).length) return undefined;
   const cant = Number(l.cantidad) || 0;

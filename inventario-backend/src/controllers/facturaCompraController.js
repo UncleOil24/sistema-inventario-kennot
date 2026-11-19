@@ -69,14 +69,20 @@ const leer = handler(async (req, res) => {
 
   const ver = (p) => (p ? { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor } : null);
   const usados = new Set();
+  // Lo aprendido de este proveedor (código o descripción → producto nuestro + factor de la presentación)
+  const { equivalenciasDe, factorDeDescripcion } = require("../services/presentaciones");
+  const eqs = await equivalenciasDe(r.encabezado.proveedor || orden?.proveedor_nombre);
   const lineas = r.lineas.map((l, i) => {
-    const prod = l.producto_id ? productos.get(l.producto_id) : null;
+    const eq = eqs.buscar(l);
+    const prod = eq && productos.get(eq.producto_id) ? productos.get(eq.producto_id) : l.producto_id ? productos.get(l.producto_id) : null;
+    const factor = eq ? Number(eq.factor) || 1 : 1;
     let pedido = null;
     if (orden) {
       const k = orden.items.findIndex((it, j) => !usados.has(j) && prod && it.producto_id === prod.id);
-      if (k >= 0) { usados.add(k); pedido = { cantidad: Number(orden.items[k].cantidad), precio: Number(orden.items[k].precio) }; }
+      if (k >= 0) { usados.add(k); pedido = { cantidad: Number(orden.items[k].cantidad), precio: Number(orden.items[k].precio), indice: k }; }
     }
     const precio = Number(l.precio_neto) || 0;
+    const cantBase = Number(l.cantidad) * factor; const precioBase = precio / factor;
     const antes = Number(prod?.precio_compra) || 0;
     let venta_indice = null;
     if (venta && prod) {
@@ -86,14 +92,15 @@ const leer = handler(async (req, res) => {
     return {
       venta_indice, venta_linea: venta_indice != null ? { nombre: venta.items[venta_indice].nombre, cantidad: Number(venta.items[venta_indice].cantidad) } : null,
       i, descripcion: l.descripcion, codigo_proveedor: l.codigo_proveedor, marca: l.marca, unidad: l.unidad, cantidad: l.cantidad,
-      precio_neto: precio, total_linea: l.total_linea, calce: l.calce, nota: l.nota,
+      precio_neto: precio, total_linea: l.total_linea, calce: eq ? "exacto" : l.calce, nota: eq ? `Aprendido: ${eq.codigo_proveedor ? `código ${eq.codigo_proveedor}` : "misma descripción"} → × ${factor}` : l.nota,
+      factor, aprendido: !!eq, factor_sugerido: factorDeDescripcion(l.descripcion),
       producto: ver(prod), candidatos: (l.candidatos || []).slice(0, 6).map(ver),
       pedido,
       diferencia: orden ? (!pedido ? "No estaba en la compra" : [
-        Math.abs(pedido.precio - precio) > Math.max(1, pedido.precio * 0.01) ? `precio ${pesos(pedido.precio)} → ${pesos(precio)}` : null,
-        Number(pedido.cantidad) !== Number(l.cantidad) ? `cantidad ${pedido.cantidad} → ${l.cantidad}` : null,
+        Math.abs(pedido.precio - precioBase) > Math.max(1, pedido.precio * 0.01) ? `precio ${pesos(pedido.precio)} → ${pesos(Math.round(precioBase))}` : null,
+        Number(pedido.cantidad) !== cantBase ? `cantidad ${pedido.cantidad} → ${cantBase}` : null,
       ].filter(Boolean).join(" · ") || null) : null,
-      alza: antes > 0 && precio > antes * (1 + ALZA) ? Math.round((precio / antes - 1) * 100) : null,
+      alza: antes > 0 && precioBase > antes * (1 + ALZA) ? Math.round((precioBase / antes - 1) * 100) : null,
     };
   });
   // Qué ventas necesitan cada producto (primero la venta desde la que se sube, después las más antiguas) y reparto propuesto
@@ -132,6 +139,9 @@ const leer = handler(async (req, res) => {
       totales: { neto, iva: Math.round(neto * 0.19), total: neto + Math.round(neto * 0.19) },
       orden: orden ? { id: orden.id, numero: orden.numero, total: Number(orden.total), estado: orden.estado, documento: orden.documento } : null,
       venta: venta ? { id: venta.id, numero: venta.numero, empresa: venta.empresa } : null,
+      // Para asociar a mano una línea de la factura con una línea del pedido o de la venta ("Es para:")
+      orden_items: orden ? orden.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
+      venta_items: venta ? venta.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
     },
   });
 });
@@ -178,8 +188,13 @@ const registrarFactura = handler(async (req, res) => {
         resumen.productos_nuevos++;
       }
       items.push({ p, l });
+      // Presentación (bidón 5 L, rollo 50 m…): se recuerda proveedor + código/descripción → producto + factor
+      if (l.aprender && Number(l.aprender.factor) > 0) {
+        await require("../services/presentaciones").aprender({ proveedor: ficha.nombre, codigo_proveedor: l.aprender.codigo_proveedor, descripcion: l.aprender.descripcion || l.descripcion, producto_id: p.id, factor: Number(l.aprender.factor), usuario }, t);
+      }
     }
-    const itemsOrden = items.map(({ p, l }) => ({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: Number(l.cantidad), precio: Math.round(Number(l.precio)) }));
+    const itemsOrden = items.map(({ p, l }) => ({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: Number(l.cantidad), precio: Math.round(Number(l.precio)),
+      ...(l.presentacion ? { presentacion: String(l.presentacion).slice(0, 120) } : {}) }));
     const repartos = items.map(({ l }) => l.reparto);
     const netoLineas = itemsOrden.reduce((s, i) => s + i.precio * i.cantidad, 0);
     let neto = Number(b.neto) > 0 ? Math.round(Number(b.neto)) : netoLineas;
