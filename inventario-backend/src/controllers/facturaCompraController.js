@@ -215,13 +215,39 @@ const registrarFactura = handler(async (req, res) => {
     const empresa = ["kenott", "tactics"].includes(b.empresa) ? b.empresa : venta?.empresa || null;
     const nota = partes.length > 1 ? ` (1 de ${partes.length})` : "";
     const tipoPago = ["contado", "credito_empresa", "credito_proveedor"].includes(b.tipo_pago) ? b.tipo_pago : "contado";
+    // "Es para:" una línea del pedido o de la venta. Si lo comprado quedó en otro producto del catálogo (se decidió crear
+    // uno nuevo o guardar en otro), la línea de la venta pasa a ese producto (la descripción del cliente no cambia),
+    // así queda comprada y el catálogo guarda el precio en el producto que de verdad se compró.
+    const ventaPara = ventaBase ? await Venta.findByPk(ventaBase, { transaction: t, lock: t.LOCK.UPDATE }) : null;
+    const cubre = items.map(({ p, l }) => {
+      const pa = l.para || null;
+      if (!pa) return null;
+      const viejo = pa.tipo === "orden" ? ordenPrevia?.items?.[pa.indice]?.producto_id : ventaPara?.items?.[pa.indice]?.producto_id;
+      return viejo && Number(viejo) !== p.id ? { viejo: Number(viejo), pa, p, l } : null;
+    });
+    if (ventaPara && cubre.some(Boolean)) {
+      const vItems = [...ventaPara.items];
+      const tocadas = new Set();
+      for (const c of cubre.filter(Boolean)) {
+        const k = c.pa.tipo === "venta" ? c.pa.indice : vItems.findIndex((it, j) => !tocadas.has(j) && Number(it.producto_id) === c.viejo);
+        const it = vItems[k];
+        if (!it || Number(it.producto_id) !== c.viejo) continue;
+        tocadas.add(k);
+        vItems[k] = { ...it, producto_id: c.p.id, codigo: c.p.codigo, nombre: c.p.nombre, costo: Math.round(Number(c.l.precio)), proveedor: ficha.nombre,
+          cambio: { antes: it.nombre, fecha: String(fecha).slice(0, 10), motivo: `Comprado como ${c.p.nombre} (${doc} ${ficha.nombre})` } };
+      }
+      if (tocadas.size) {
+        await ventaPara.update({ items: vItems, costo_total: require("../services/cuadroCompra").costoItems(vItems) }, { transaction: t });
+        resumen.lineas_venta_cambiadas = [...tocadas].length;
+      }
+    }
     if (b.orden_id) {
       orden = ordenPrevia;
       if (!orden) throw new ErrorNegocio("Compra no encontrada", 404);
       if (orden.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
       // Lo pedido que no vino en la factura (sin stock o vino menos): vuelve a "por comprar" en el cuadro de la venta
       const llego = new Map();
-      for (const it of itemsOrden) llego.set(it.producto_id, (llego.get(it.producto_id) || 0) + Number(it.cantidad));
+      itemsOrden.forEach((it, k) => { const pid = cubre[k]?.viejo || it.producto_id; llego.set(pid, (llego.get(pid) || 0) + Number(it.cantidad)); });
       const noVinieron = [];
       for (const it of orden.items || []) {
         if (!it.producto_id) continue;

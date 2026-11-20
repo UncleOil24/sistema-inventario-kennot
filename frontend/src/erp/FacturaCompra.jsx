@@ -98,7 +98,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{activas.length} de {lineas.length} líneas · neto {fmt(neto)}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || guardando} onClick={registrar}>
+        {activas.some((l) => l.decidir) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
+        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || guardando || activas.some((l) => l.decidir)} onClick={registrar}>
           {guardando ? "Guardando..." : enc.orden_id ? "Registrar factura y recibir compra" : "Crear compra con esta factura"}
         </button>
       </> : <>
