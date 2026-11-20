@@ -102,6 +102,19 @@ const styles = `
   .recorrido .paso.hecho { color: var(--success); border-color: rgba(76,175,125,0.35); }
   .recorrido .paso.actual { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb),0.07); font-weight: 600; }
   .paso-num { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid currentColor; font-size: 10px; flex-shrink: 0; }
+  .aviso-clave { font-size: 11.5px; padding: 6px 10px; margin: 0 0 8px; border-left: 3px solid var(--accent); background: rgba(var(--accent-rgb),0.07); border-radius: 4px; }
+  .field.campo-clave > label { color: var(--accent); font-weight: 700; }
+  .field.campo-clave input, .field.campo-clave select { border-color: rgba(var(--accent-rgb),0.6); border-width: 1.5px; }
+  .field.campo-clave.vacio input, .field.campo-clave.vacio select { border-color: var(--danger); background: rgba(184,56,44,0.04); }
+  .empresa-compra { padding: 6px 8px; border: 1.5px solid rgba(var(--accent-rgb),0.6); border-radius: 8px; background: rgba(var(--accent-rgb),0.04); }
+  .empresa-compra.vacio { border-color: var(--danger); background: rgba(184,56,44,0.05); }
+  .empresa-botones { display: flex; gap: 6px; }
+  .empresa-btn { flex: 1; padding: 6px 8px; border-radius: 6px; border: 1.5px solid #c9d3d5; background: #fff; font-size: 12px; font-weight: 600; cursor: pointer; color: #555; }
+  .empresa-btn.kenott.activo { background: #1f5f9e; border-color: #1f5f9e; color: #fff; }
+  .empresa-btn.tactics.activo { background: #b5651d; border-color: #b5651d; color: #fff; }
+  .empresa-aviso { font-size: 10.5px; margin-top: 4px; color: #666; line-height: 1.35; }
+  .empresa-aviso .ok { color: var(--success); font-weight: 600; }
+  .empresa-aviso .mal { color: var(--danger); font-weight: 600; }
   .accion-etapa { position: relative; padding: 14px 16px; border: 2px solid var(--accent); border-radius: 10px; margin: 4px 0 12px; background: rgba(var(--accent-rgb),0.07); }
   .accion-etapa::before { content: ""; position: absolute; top: -9px; left: calc(var(--flecha, 10%) - 8px); width: 14px; height: 14px; background: inherit; border-left: 2px solid var(--accent); border-top: 2px solid var(--accent); transform: rotate(45deg); background: #e4ecee; }
   .accion-etapa.etapa-lista, .accion-etapa.etapa-entregada { border-color: var(--success); background: rgba(76,175,125,0.08); }

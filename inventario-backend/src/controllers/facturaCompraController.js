@@ -9,6 +9,8 @@ const Gasto = require("../models/Gasto");
 const PrecioProveedor = require("../models/PrecioProveedor");
 const DocumentoCompra = require("../models/DocumentoCompra");
 const { handler, ErrorNegocio } = require("../services/erp");
+const { empresaCompradora } = require("../services/empresas");
+const { getParametros } = require("../services/parametros");
 const { recalcular, origenDe, normProv, registrar } = require("../services/precios");
 const { unidadDeProducto } = require("../services/unidades");
 const ia = require("../services/ia");
@@ -133,7 +135,9 @@ const leer = handler(async (req, res) => {
     ok: true,
     data: {
       archivo_token: guardarPendiente(req.file), archivo: req.file.originalname,
-      encabezado: { ...e, proveedor: prov?.nombre || e.proveedor },
+      encabezado: { ...e, proveedor: prov?.nombre || e.proveedor,
+        // A nombre de quién viene el documento: su IVA va a esa empresa
+        empresa_documento: empresaCompradora(e.cliente_rut, e.cliente_razon_social, await getParametros()) },
       proveedor_existente: prov ? { id: prov.id, nombre: prov.nombre } : null,
       control: r.control, truncado: r.truncado, lineas, faltan, sugeridas, ya_registrada: yaRegistrada,
       totales: { neto, iva: Math.round(neto * 0.19), total: neto + Math.round(neto * 0.19) },

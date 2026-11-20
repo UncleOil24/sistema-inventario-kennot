@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -34,7 +34,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
       setEnc({
         proveedor: e.proveedor || orden?.proveedor_nombre || "", documento: e.numero_documento || "", fecha: e.fecha || hoyISO(),
         neto: r.totales.neto, iva: r.totales.iva, total: r.control.precios_incluyen_iva && r.control.total_documento ? r.control.total_documento : r.totales.total,
-        orden_id: orden?.id || "", empresa: orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut, tipo_pago: orden?.tipo_pago || "contado",
+        orden_id: orden?.id || "", empresa: e.empresa_documento || orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut, tipo_pago: orden?.tipo_pago || "contado",
       });
       const items = (r.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}` }));
       setLineas(prepararLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })), items, productos));
@@ -98,8 +98,9 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{activas.length} de {lineas.length} líneas · neto {fmt(neto)}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        {!enc.empresa && <span className="mini" style={{ color: "var(--danger)" }}>Elige la empresa que compra</span>}
         {activas.some((l) => l.decidir) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
-        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || guardando || activas.some((l) => l.decidir)} onClick={registrar}>
+        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || !enc.empresa || guardando || activas.some((l) => l.decidir)} onClick={registrar}>
           {guardando ? "Guardando..." : enc.orden_id ? "Registrar factura y recibir compra" : "Crear compra con esta factura"}
         </button>
       </> : <>
@@ -117,20 +118,21 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
         </>
       ) : (
         <>
+          <AvisoCamposClave />
           <div className="fields-row tres">
-            <div className="field">
-              <label>Proveedor {res.proveedor_existente ? "" : "(nuevo)"}</label>
+            <div className={`field campo-clave ${enc.proveedor ? "" : "vacio"}`}>
+              <label>★ Proveedor {res.proveedor_existente ? "" : "(nuevo)"}</label>
               <input list="lista-prov-fc" value={enc.proveedor} onChange={(e) => setEnc({ ...enc, proveedor: e.target.value.toUpperCase() })} />
               <datalist id="lista-prov-fc">{proveedores.map((p) => <option key={p.id} value={p.nombre} />)}</datalist>
             </div>
-            <div className="field"><label>N° factura</label><input value={enc.documento} onChange={(e) => setEnc({ ...enc, documento: e.target.value })} /></div>
-            <div className="field"><label>Fecha factura</label><input type="date" value={enc.fecha} onChange={(e) => setEnc({ ...enc, fecha: e.target.value })} /></div>
-            <div className="field"><label>Tipo de pago</label><select value={enc.tipo_pago} onChange={(e) => setEnc({ ...enc, tipo_pago: e.target.value })}>{TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
+            <div className={`field campo-clave ${enc.documento ? "" : "vacio"}`}><label>★ N° factura</label><input value={enc.documento} onChange={(e) => setEnc({ ...enc, documento: e.target.value })} /></div>
+            <div className={`field campo-clave ${enc.fecha ? "" : "vacio"}`}><label>★ Fecha factura</label><input type="date" value={enc.fecha} onChange={(e) => setEnc({ ...enc, fecha: e.target.value })} /></div>
+            <div className="field campo-clave"><label>★ Tipo de pago</label><select value={enc.tipo_pago} onChange={(e) => setEnc({ ...enc, tipo_pago: e.target.value })}>{TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
           </div>
           <div className="fields-row tres">
-            <div className="field"><label>Neto</label><input type="number" value={enc.neto} onChange={(e) => setEnc({ ...enc, neto: e.target.value })} /></div>
-            <div className="field"><label>IVA</label><input type="number" value={enc.iva} onChange={(e) => setEnc({ ...enc, iva: e.target.value })} /></div>
-            <div className="field"><label>Total</label><input type="number" value={enc.total} onChange={(e) => setEnc({ ...enc, total: e.target.value })} /></div>
+            <div className="field campo-clave"><label>★ Neto</label><input type="number" value={enc.neto} onChange={(e) => setEnc({ ...enc, neto: e.target.value })} /></div>
+            <div className="field campo-clave"><label>★ IVA</label><input type="number" value={enc.iva} onChange={(e) => setEnc({ ...enc, iva: e.target.value })} /></div>
+            <div className="field campo-clave"><label>★ Total</label><input type="number" value={enc.total} onChange={(e) => setEnc({ ...enc, total: e.target.value })} /></div>
           </div>
           <div className="fields-row tres">
             {!orden && (
@@ -140,10 +142,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
                   {res.sugeridas.map((o) => <option key={o.id} value={o.id}>{o.numero} · {o.fecha} · {fmt(o.total)}</option>)}
                 </select></div>
             )}
-            <div className="field"><label>Empresa que compra</label>
-              <select value={enc.empresa} onChange={(e) => setEnc({ ...enc, empresa: e.target.value })}>
-                <option value="">— Elegir —</option><option value="kenott">Kenott</option><option value="tactics">Tactics</option>
-              </select></div>
+            <EmpresaCompra valor={enc.empresa} detectada={res.encabezado.empresa_documento} ventaEmpresa={res.venta?.empresa || orden?.empresa || null}
+              onChange={(empresa) => setEnc({ ...enc, empresa })} />
           </div>
           <div className="pago-form">
             {res.control.precios_incluyen_iva && <span className="estado estado-info">Precios venían con IVA: ya se dividieron por 1,19</span>}

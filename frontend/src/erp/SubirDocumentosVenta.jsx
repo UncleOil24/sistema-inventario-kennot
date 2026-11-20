@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PresentacionLinea, presentacionParaEnviar, prepararLineas } from "./ui";
+import { PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave } from "./ui";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { TIPOS_PAGO } from "./lib";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
@@ -34,6 +34,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             neto: r.totales.neto, iva: boleta ? 0 : r.totales.iva,
             total: e.total_documento || (r.control.precios_incluyen_iva && r.control.total_documento ? r.control.total_documento : r.totales.total),
             orden_id: propia ? String(propia.id) : "", razon_social: e.razon_social, rut: e.rut,
+            empresa: e.empresa_documento || venta.empresa || "",
           },
           gasto: { tipo: "flete", descripcion: "" },
           // Cada línea se conecta con su línea de la venta (aunque el documento la escriba distinto) y su presentación
@@ -60,7 +61,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
       if (d.como === "gasto") {
         resultado = await api("/ordenes-compra/factura/gasto", {
           method: "POST",
-          body: { archivo_token: d.res.archivo_token, venta_id: venta.id, empresa: venta.empresa, tipo: d.gasto.tipo, descripcion: d.gasto.descripcion || TIPOS_GASTO.find(([v]) => v === d.gasto.tipo)?.[1],
+          body: { archivo_token: d.res.archivo_token, venta_id: venta.id, empresa: d.enc.empresa, tipo: d.gasto.tipo, descripcion: d.gasto.descripcion || TIPOS_GASTO.find(([v]) => v === d.gasto.tipo)?.[1],
             proveedor: d.enc.proveedor, documento: d.enc.documento, tipo_documento: d.enc.tipo_documento, fecha: d.enc.fecha, total: d.enc.total, iva: d.enc.iva },
         });
         resultado = { texto: `Gasto de la venta · ${fmt(resultado.monto)}` };
@@ -70,7 +71,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
         const r = await api("/ordenes-compra/factura/registrar", {
           method: "POST",
           body: {
-            ...d.enc, archivo_token: d.res.archivo_token, orden_id: d.enc.orden_id || null, venta_id: venta.id, empresa: venta.empresa,
+            ...d.enc, archivo_token: d.res.archivo_token, orden_id: d.enc.orden_id || null, venta_id: venta.id, empresa: d.enc.empresa,
             lineas: activas.map((l) => ({
               producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
               descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce,
@@ -114,7 +115,8 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
         <span className="mini" style={{ marginRight: "auto" }}>{pendientes} por revisar</span>
         <button className="btn btn-ghost" disabled={guardando} onClick={omitir}>Omitir este</button>
         {d.como === "materiales" && d.lineas.some((l) => !l.omitir && l.decidir) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
-        <button className="btn btn-primary" disabled={guardando || (d.como === "materiales" && (!d.enc.proveedor || (!d.enc.documento && d.enc.tipo_documento !== "boleta") || d.lineas.some((l) => !l.omitir && l.decidir)))} onClick={guardar}>
+        {!d.enc.empresa && <span className="mini" style={{ color: "var(--danger)" }}>Elige la empresa que compra</span>}
+        <button className="btn btn-primary" disabled={guardando || !d.enc.empresa || (d.como === "materiales" && (!d.enc.proveedor || (!d.enc.documento && d.enc.tipo_documento !== "boleta") || d.lineas.some((l) => !l.omitir && l.decidir)))} onClick={guardar}>
           {guardando ? "Guardando..." : d.como === "gasto" ? "Guardar como gasto de la venta" : d.enc.orden_id ? "Guardar y recibir la compra" : "Guardar compra"}
         </button>
       </> : <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>}>
@@ -140,6 +142,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
       {d && (d.estado === "guardado" || d.estado === "omitido") && !terminado && <div className="mini">{d.estado === "guardado" ? `✓ ${d.resultado.texto}` : "Omitido"}</div>}
 
       {d && d.estado === "leido" && <>
+        <AvisoCamposClave />
         <div className="fields-row tres">
           <div className="field"><label>Este documento es</label>
             <div className="chips">
@@ -151,16 +154,17 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             <select value={d.enc.tipo_documento} onChange={(e) => setEnc({ tipo_documento: e.target.value, ...(e.target.value === "boleta" ? { iva: 0 } : {}) })}>
               <option value="factura">Factura (con IVA)</option><option value="boleta">Boleta (sin crédito de IVA)</option>
             </select></div>
-          <div className="field"><label>Proveedor {d.res.proveedor_existente ? "" : "(nuevo)"}</label>
+          <div className={`field campo-clave ${d.enc.proveedor ? "" : "vacio"}`}><label>★ Proveedor {d.res.proveedor_existente ? "" : "(nuevo)"}</label>
             <input list="lista-prov-docs" value={d.enc.proveedor} onChange={(e) => setEnc({ proveedor: e.target.value.toUpperCase() })} />
             <datalist id="lista-prov-docs">{proveedores.map((p) => <option key={p} value={p} />)}</datalist></div>
         </div>
         <div className="fields-row tres">
-          <div className="field"><label>N° {d.enc.tipo_documento === "boleta" ? "boleta (opcional)" : "factura"}</label><input value={d.enc.documento} onChange={(e) => setEnc({ documento: e.target.value })} /></div>
-          <div className="field"><label>Fecha</label><input type="date" value={d.enc.fecha} onChange={(e) => setEnc({ fecha: e.target.value })} /></div>
-          {d.como !== "gasto" && <div className="field"><label>Tipo de pago</label><select value={d.enc.tipo_pago || "contado"} onChange={(e) => setEnc({ tipo_pago: e.target.value })}>{TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>}
-          <div className="field"><label>Total pagado</label><input type="number" value={d.enc.total} onChange={(e) => setEnc({ total: e.target.value })} /></div>
+          <div className={`field campo-clave ${d.enc.documento || d.enc.tipo_documento === "boleta" ? "" : "vacio"}`}><label>★ N° {d.enc.tipo_documento === "boleta" ? "boleta (opcional)" : "factura"}</label><input value={d.enc.documento} onChange={(e) => setEnc({ documento: e.target.value })} /></div>
+          <div className={`field campo-clave ${d.enc.fecha ? "" : "vacio"}`}><label>★ Fecha</label><input type="date" value={d.enc.fecha} onChange={(e) => setEnc({ fecha: e.target.value })} /></div>
+          {d.como !== "gasto" && <div className="field campo-clave"><label>★ Tipo de pago</label><select value={d.enc.tipo_pago || "contado"} onChange={(e) => setEnc({ tipo_pago: e.target.value })}>{TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>}
+          <div className="field campo-clave"><label>★ Total pagado</label><input type="number" value={d.enc.total} onChange={(e) => setEnc({ total: e.target.value })} /></div>
         </div>
+        <div className="fields-row"><EmpresaCompra valor={d.enc.empresa} detectada={d.res.encabezado.empresa_documento} ventaEmpresa={venta.empresa} onChange={(empresa) => setEnc({ empresa })} /></div>
         {d.enc.tipo_documento === "boleta" && <div className="mini">Boleta: el costo de la venta es el total pagado (no hay crédito de IVA). Los precios pasan al catálogo sin IVA.</div>}
 
         {d.como === "gasto" ? (
@@ -173,8 +177,8 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
         ) : <>
           <div className="fields-row tres">
             {d.enc.tipo_documento !== "boleta" && <>
-              <div className="field"><label>Neto</label><input type="number" value={d.enc.neto} onChange={(e) => setEnc({ neto: e.target.value })} /></div>
-              <div className="field"><label>IVA</label><input type="number" value={d.enc.iva} onChange={(e) => setEnc({ iva: e.target.value })} /></div>
+              <div className="field campo-clave"><label>★ Neto</label><input type="number" value={d.enc.neto} onChange={(e) => setEnc({ neto: e.target.value })} /></div>
+              <div className="field campo-clave"><label>★ IVA</label><input type="number" value={d.enc.iva} onChange={(e) => setEnc({ iva: e.target.value })} /></div>
             </>}
             <div className="field"><label>Orden de compra de esta venta</label>
               <select value={d.enc.orden_id} onChange={(e) => setEnc({ orden_id: e.target.value })}>

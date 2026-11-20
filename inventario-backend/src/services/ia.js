@@ -386,6 +386,8 @@ const HERR_PROVEEDOR = {
       proveedor: { type: "string", description: "Nombre comercial del proveedor (corto, ej. MADESUR, CYC, SODIMAC)" },
       razon_social: { type: "string" },
       rut: { type: "string" },
+      cliente_razon_social: { type: "string", description: "A nombre de quién se emite el documento (Señor(es), Cliente, Receptor, Razón social del comprador). Omitir si no aparece" },
+      cliente_rut: { type: "string", description: "RUT del comprador / receptor del documento. Omitir si no aparece" },
       tipo_documento: { type: "string", enum: ["cotizacion", "factura", "boleta", "web", "otro"] },
       numero_documento: { type: "string", description: "N° de cotización o factura tal como aparece" },
       fecha: { type: "string", description: "Fecha del documento en formato AAAA-MM-DD" },
@@ -461,6 +463,7 @@ async function extraerDocumentoProveedor(file, usuario) {
   return {
     encabezado: {
       proveedor: String(datos.proveedor || "").trim().toUpperCase(), razon_social: datos.razon_social || "", rut: datos.rut || "",
+      cliente_razon_social: datos.cliente_razon_social || "", cliente_rut: datos.cliente_rut || "",
       tipo_documento: datos.tipo_documento || "cotizacion", numero_documento: datos.numero_documento || "",
       fecha: /^\d{4}-\d{2}-\d{2}$/.test(datos.fecha || "") ? datos.fecha : null,
       valido_hasta: /^\d{4}-\d{2}-\d{2}$/.test(datos.valido_hasta || "") ? datos.valido_hasta : null,
