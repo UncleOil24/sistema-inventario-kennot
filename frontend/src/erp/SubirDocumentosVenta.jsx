@@ -104,6 +104,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
           el documento, calza los productos con la venta y actualiza los precios del catálogo. Lo que no es material (flete, combustible, otros)
           lo puedes dejar como gasto de la venta. Nada se guarda hasta que revises cada documento.
         </div>
+<div className="aviso-clave" style={{ marginTop: 8 }}>⚠ Cada factura se sube <strong>una sola vez</strong> al sistema. Si sirve a varias ventas, se reparte al subirla (en "Para:" de cada línea) o después con "Repartir entre ventas" en la compra. Subirla de nuevo duplica el monto y el IVA.</div>
         <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setArchivos([...(e.target.files || [])])} style={{ marginTop: 10 }} />
         {archivos.length > 0 && <ul className="mini" style={{ margin: "8px 0 0 18px" }}>{archivos.map((a) => <li key={a.name}>{a.name}</li>)}</ul>}
       </Modal>
