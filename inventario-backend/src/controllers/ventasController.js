@@ -1213,6 +1213,34 @@ const cambiarProducto = handler(async (req, res) => {
   res.json({ ok: true, data: r });
 });
 
+// POST /api/ventas/:id/linea-comprada   { indice, orden_id, item }  (cuadro de compra, Operativo y gerencia)
+// Corrige una línea que quedó "por comprar" o "no vino" aunque se compró: la línea pasa al producto con que quedó
+// registrado en la compra (ej. la factura conectó el guardapolvo con el junquillo). La descripción del cliente no cambia.
+const lineaComprada = handler(async (req, res) => {
+  const b = req.body || {};
+  const r = await sequelize.transaction(async (t) => {
+    const v = await Venta.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+    const items = [...v.items];
+    const k = Number(b.indice);
+    const i = items[k];
+    if (!i) throw new ErrorNegocio("Línea no encontrada");
+    const o = await OrdenCompra.findOne({ where: { id: Number(b.orden_id), venta_id: v.id, estado: { [Op.ne]: "anulada" } }, transaction: t });
+    if (!o) throw new ErrorNegocio("Compra no encontrada en esta venta");
+    const it = (o.items || [])[Number(b.item)];
+    if (!it || !it.producto_id) throw new ErrorNegocio("Producto de la compra no encontrado");
+    if (Number(it.producto_id) === Number(i.producto_id)) throw new ErrorNegocio("La línea ya tiene ese producto");
+    const { stock, ...resto } = i; void stock;
+    items[k] = { ...resto, producto_id: Number(it.producto_id), codigo: it.codigo ?? null, nombre: it.nombre, unidad: it.unidad || i.unidad,
+      costo: Math.round(Number(it.precio) || 0), proveedor: o.proveedor_nombre || i.proveedor,
+      cambio: { antes: i.nombre, fecha: new Date().toISOString().slice(0, 10), motivo: `Comprado en ${o.numero}` } };
+    await v.update({ items, costo_total: require("../services/cuadroCompra").costoItems(items) }, { transaction: t });
+    await HistorialVenta.anotar(v, "paso", `Línea conectada con lo comprado: ${i.descripcion_cliente || i.nombre} → ${it.nombre} (${o.numero})`, req, t, String(b.motivo || "").trim() || "Corrección: ya se compró");
+    return { linea: items[k] };
+  });
+  res.json({ ok: true, data: r });
+});
+
 // GET /api/ventas/:id/buscar-precio?indice=&q=   (cuadro de compra)
 // Precios de hoy del producto de la línea (todos sus proveedores) y de productos parecidos del catálogo,
 // por si el precio quedó cargado en otro producto (otra forma de escribirlo)
@@ -1293,5 +1321,5 @@ module.exports = {
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
-  getCuadroCompra, marcarStock, solicitudCotizacion, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
+  getCuadroCompra, marcarStock, lineaComprada, solicitudCotizacion, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
 };
