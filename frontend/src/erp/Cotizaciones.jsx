@@ -63,6 +63,7 @@ export default function Cotizaciones({ esAdmin, esGerencia, notify, onEditar, on
           convenio: Number(p.precio_convenio) || 0, particular: Number(p.precio_particular) || 0,
           costo: i.costo, proveedor: i.proveedor, descripcion_cliente: i.descripcion_cliente, grupo: i.grupo || "",
           caso: i.caso || (i.producto_id ? "mismo" : "nuevo"), clave: i.clave, nota_interna: i.nota_interna || "",
+          ...(i.componentes?.length ? { componentes: i.componentes } : {}),
         };
       });
       onEditar({

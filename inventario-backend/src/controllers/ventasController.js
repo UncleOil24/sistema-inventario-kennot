@@ -92,6 +92,7 @@ const crearVentaEnTransaccion = async (datos, t) => {
       ...(original.descripcion_cliente ? { descripcion_cliente: original.descripcion_cliente } : {}),
       ...(original.caso ? { caso: original.caso } : {}),
       ...(original.clave ? { clave: original.clave } : {}),
+      ...(original.complemento_de ? { complemento_de: original.complemento_de } : {}),
     };
   });
   const totales = calcularTotales(itemsFinal);
@@ -242,13 +243,23 @@ const ventaDesdeCotizacion = handler(async (req, res) => {
       empresa: cot.empresa,
       creado_por: firma(req),
       notas: req.body?.notas || cot.nombre_cotizacion,
-      items: cot.items.map((i) => ({
-        producto_id: i.producto_id ?? i.id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
-        cantidad: i.cantidad, precio: i.precio,
-        descripcion_cliente: i.descripcion_cliente || null, caso: i.caso || null, clave: i.clave || null,
-        // Cotizaciones antiguas no guardaban costo: se toma del catálogo
-        ...(i.costo !== undefined ? { costo: i.costo, proveedor: i.proveedor ?? null } : {}),
-      })),
+      // Cada línea y, debajo, sus componentes (ej. bisagras de la puerta) como líneas a comprar con precio 0:
+      // no se facturan al cliente, pero su costo es de la venta y aparecen en el cuadro de compra.
+      items: cot.items.flatMap((i) => {
+        const linea = {
+          producto_id: i.producto_id ?? i.id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
+          cantidad: i.cantidad, precio: i.precio,
+          descripcion_cliente: i.descripcion_cliente || null, caso: i.caso || null, clave: i.clave || null,
+          // Cotizaciones antiguas no guardaban costo: se toma del catálogo
+          ...(i.costo !== undefined ? { costo: i.costo, proveedor: i.proveedor ?? null } : {}),
+        };
+        const comps = (i.componentes || []).map((c) => ({
+          producto_id: c.producto_id, codigo: c.codigo, nombre: c.nombre, unidad: c.unidad,
+          cantidad: Math.round(Number(c.por_unidad) * Number(i.cantidad) * 1000) / 1000, precio: 0, costo: Number(c.costo) || 0, proveedor: c.proveedor ?? null,
+          complemento_de: i.descripcion_cliente || i.nombre,
+        }));
+        return [linea, ...comps];
+      }),
     }, t);
     await cot.update({ estado: "aceptada", venta_id: nueva.id, motivo_estado: null }, { transaction: t });
     return nueva;
@@ -420,6 +431,7 @@ async function datosCuadro(venta) {
     return {
       // Se muestra lo que pidió el cliente; el producto del catálogo queda como referencia (precios)
       indice, producto_id: i.producto_id, codigo: i.codigo, nombre: descCliente(i), nombre_catalogo: i.nombre, caso: i.caso || null, unidad: i.unidad, cantidad: Number(i.cantidad),
+      complemento_de: i.complemento_de || null,
       proveedor: prov, compra_unit: Number(i.costo), total_compra: redondear(totalCompra),
       venta_unit: Number(i.precio), total_venta: redondear(totalVenta),
       margen: redondear(totalVenta - totalCompra), margen_pct: totalVenta ? Math.round(((totalVenta - totalCompra) / totalVenta) * 100) : 0,

@@ -36,12 +36,16 @@ function deshacerConversion(i) {
   return { ...i, cantidad: i.envase.convertido, descripcion_cliente: base === i.nombre ? "" : base, envase: { sin_conversion: true } };
 }
 
+// Costo por unidad de una línea: el suyo más el de sus componentes (ej. puerta + 3 bisagras)
+const costoUnit = (i) => Number(i.costo || 0) + (i.componentes || []).reduce((s, c) => s + Number(c.costo || 0) * Number(c.por_unidad || 0), 0);
+
 export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, notify, onGuardada, irAClientes }) {
   const productos = useProductos();
   const [q, setQ] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [importar, setImportar] = useState(false);
   const [asociando, setAsociando] = useState(null); // línea "no está en catálogo" a la que se le busca producto
+  const [componenteDe, setComponenteDe] = useState(null); // línea a la que se le agrega un componente (ej. bisagras de la puerta)
   const { items } = borrador;
   const cliente = clientes.find((c) => String(c.id) === String(borrador.cliente_id));
   const tipo = borrador.tipo_precio || cliente?.tipo || "convenio";
@@ -81,6 +85,13 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   }, [q, productos]);
 
   const agregar = (p) => {
+    if (componenteDe) {
+      // Componente: no se imprime ni cambia el precio; su costo suma a la línea y en la venta se compra aparte
+      setItems((l) => l.map((i) => (idL(i) === componenteDe ? { ...i, componentes: [...(i.componentes || []), { producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, por_unidad: 1, costo: Number(p.precio_compra) || 0, proveedor: p.proveedor || null }] } : i)));
+      setComponenteDe(null);
+      setQ("");
+      return;
+    }
     if (asociando) {
       // La línea roja pasa a cotizarse con este producto (similar): se mantiene lo que pidió el cliente
       setItems((l) => l.map((i) => (idL(i) === asociando ? {
@@ -107,7 +118,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
   const restaurarPrecio = (id) => setItems((l) => l.map((i) => (idL(i) === id ? { ...i, precio: tipo === "particular" ? i.particular : i.convenio, auto: true } : i)));
 
   const subtotal = items.reduce((s, i) => s + Number(i.precio || 0) * Number(i.cantidad || 0), 0);
-  const costo = items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad || 0), 0);
+  const costo = items.reduce((s, i) => s + costoUnit(i) * Number(i.cantidad || 0), 0);
   // Margen solo de las líneas con costo (las que no están en catálogo aún no tienen compra)
   const ventaConCosto = items.filter((i) => Number(i.costo) > 0).reduce((s, i) => s + Number(i.precio || 0) * Number(i.cantidad || 0), 0);
   const sinCosto = items.filter((i) => !(Number(i.costo) > 0)).length;
@@ -198,6 +209,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
           producto_id: i.producto_id || null, clave: i.clave || null, caso: i.caso || "mismo", cantidad: Number(i.cantidad),
           precio: i.precio === "" ? null : Number(i.precio), descripcion_cliente: i.descripcion_cliente || null, grupo: i.grupo || null,
           nota_interna: i.nota_interna || null, unidad: i.unidad, envase: i.envase || null,
+          componentes: (i.componentes || []).filter((c) => Number(c.por_unidad) > 0).map((c) => ({ producto_id: c.producto_id, por_unidad: Number(c.por_unidad), costo: c.costo })),
         })),
       };
       // Si la otra empresa ya cotizó este proceso, el servidor avisa (art. 60) y se pide confirmación
@@ -300,10 +312,11 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
       ) : borrador.archivo_cliente && <div className="mini" style={{ marginBottom: 8 }}>Lista del cliente: {borrador.archivo_cliente}</div>}
       <div className="field" style={{ position: "relative", marginBottom: "1rem" }}>
         <label>Agregar producto</label>
+        {componenteDe && <div className="aviso">Agregando un <strong>componente</strong> a "{(() => { const x = items.find((i) => idL(i) === componenteDe); return x?.descripcion_cliente || x?.nombre; })()}" (se compra aparte, no se imprime): busca el producto y elígelo. <button className="link" onClick={() => setComponenteDe(null)}>Cancelar</button></div>}
         {asociando && <div className="aviso">Buscando el producto nuestro para "{items.find((i) => idL(i) === asociando)?.descripcion_cliente}": elige uno de la lista. <button className="link" onClick={() => setAsociando(null)}>Cancelar</button></div>}
         <div style={{ display: "flex", gap: 6 }}>
           <input className="search-input" style={{ paddingLeft: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder='Palabras en cualquier orden o N°. Ej: "cemento 25", "1416"' />
-          {!asociando && q.trim() && <button className="btn btn-ghost btn-sm" title="Agrega lo escrito como línea que no está en el catálogo (en rojo), con precio a mano" onClick={agregarNoEsta}>+ No está en catálogo</button>}
+          {!asociando && !componenteDe && q.trim() && <button className="btn btn-ghost btn-sm" title="Agrega lo escrito como línea que no está en el catálogo (en rojo), con precio a mano" onClick={agregarNoEsta}>+ No está en catálogo</button>}
         </div>
         {sugerencias.length > 0 && (
           <div className="sugerencias">
@@ -335,8 +348,11 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
               <tbody>
                 {items.map((i) => {
                   const k = idL(i);
-                  const m = (Number(i.precio) - Number(i.costo || 0)) * Number(i.cantidad);
-                  const mp = Number(i.precio) ? Math.round(((Number(i.precio) - Number(i.costo || 0)) / Number(i.precio)) * 100) : 0;
+                  const cu = costoUnit(i);
+                  const m = (Number(i.precio) - cu) * Number(i.cantidad);
+                  const mp = Number(i.precio) ? Math.round(((Number(i.precio) - cu) / Number(i.precio)) * 100) : 0;
+                  const setComp = (n, cambios) => setItems((l) => l.map((x) => (idL(x) === k ? { ...x, componentes: (x.componentes || []).map((c, j) => (j === n ? { ...c, ...cambios } : c)) } : x)));
+                  const quitarComp = (n) => setItems((l) => l.map((x) => (idL(x) === k ? { ...x, componentes: (x.componentes || []).filter((_, j) => j !== n) } : x)));
                   const caso = i.caso || "mismo";
                   const totalLinea = Number(i.precio || 0) * Number(i.cantidad || 0);
                   const resto = subtotal - totalLinea;
@@ -370,6 +386,17 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                         )}
                         {i.envase?.convertido && <div className="mini" style={{ color: "var(--accent)" }}>Convertido desde {miles(i.envase.convertido)} un · <button className="link" onClick={() => setItems((l) => l.map((x) => (idL(x) === k ? deshacerConversion(x) : x)))}>deshacer</button></div>}
                         {raro && <div className="mini" style={{ color: "var(--danger)" }}>⚠ Esta línea vale {fmt(totalLinea)}{presuTotal > 0 && totalLinea * 1.19 > presuTotal ? ", más que todo el presupuesto" : ", más de 5 veces todo el resto de la cotización"}: revisa la cantidad y la unidad.</div>}
+                        {(i.componentes || []).map((c, n) => (
+                          <div key={n} className="componente-linea">
+                            ↳ <strong>{c.nombre}</strong>
+                            <input className="qty-input" style={{ width: 52 }} type="number" min="0" step="any" value={c.por_unidad} onChange={(e) => setComp(n, { por_unidad: e.target.value })} title="Cuántos por cada unidad de la línea" />
+                            por {String(i.unidad || "unidad").toLowerCase()} = {Math.round(Number(c.por_unidad || 0) * Number(i.cantidad || 0) * 1000) / 1000} {c.unidad}
+                            {esAdmin && <> · costo {fmt(c.costo)}</>}
+                            <button className="link" onClick={() => quitarComp(n)} title="Quitar componente">✕</button>
+                          </div>
+                        ))}
+                        {i.producto_id && <button className="link mini" title="Producto que va con esta línea y se compra aparte (no se imprime ni cambia el precio; su costo suma a la línea). Ej: bisagras de una puerta, rodillo de la pintura"
+                          onClick={() => { setComponenteDe(k); setAsociando(null); setQ(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}>+ componente</button>}
                         {caso !== "mismo" && <input className="desc-cliente nota" value={i.nota_interna || ""} placeholder="Nota interna (no se imprime)" onChange={(e) => setLinea(k, "nota_interna", e.target.value)} />}
                       </td>
                       {grupos.length > 0 && <td>
@@ -383,7 +410,7 @@ export default function Cotizador({ borrador, setBorrador, clientes, esAdmin, no
                         {!i.auto && i.producto_id && <button className="link" title="Volver al precio calculado" onClick={() => restaurarPrecio(k)}>↺</button>}
                       </td>
                       <td className="price-cell">{fmt(Number(i.precio || 0) * Number(i.cantidad))}</td>
-                      {esAdmin && <td className="price-cell compra">{i.costo ? fmt(i.costo) : "—"}</td>}
+                      {esAdmin && <td className="price-cell compra">{i.costo ? fmt(cu) : "—"}{i.componentes?.length > 0 && i.costo ? <div className="mini">con componentes</div> : null}</td>}
                       {esAdmin && <td className="mini" style={{ color: m < 0 ? "var(--danger)" : undefined }}>{i.costo ? `${fmt(m)} · ${mp}%` : "—"}</td>}
                       <td><button className="btn btn-danger btn-sm" onClick={() => setItems((l) => l.filter((x) => idL(x) !== k))}>✕</button></td>
                     </tr>

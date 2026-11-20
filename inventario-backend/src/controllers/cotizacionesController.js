@@ -33,7 +33,7 @@ const vista = (req) => (c) => {
     // Margen solo de las líneas con costo conocido (las "no está en catálogo" no tienen compra todavía)
     const conCosto = (j.items || []).filter((i) => Number(i.costo) > 0);
     const venta = conCosto.length === (j.items || []).length ? Number(j.subtotal) : conCosto.reduce((s, i) => s + Number(i.precio) * Number(i.cantidad), 0);
-    const costo = conCosto.length === (j.items || []).length ? Number(j.costo_total || 0) : conCosto.reduce((s, i) => s + Number(i.costo) * Number(i.cantidad), 0);
+    const costo = conCosto.length === (j.items || []).length ? Number(j.costo_total || 0) : conCosto.reduce((s, i) => s + costoLineaUnit(i) * Number(i.cantidad), 0);
     j.margen = Math.round(venta - costo);
     j.margen_pct = venta ? Math.round((j.margen / venta) * 100) : 0;
     j.lineas_sin_costo = (j.items || []).length - conCosto.length;
@@ -70,13 +70,27 @@ const marcarVencidas = () => Cotizacion.update(
 // El precio de venta se calcula por tipo de cliente salvo que venga corregido a mano.
 // Si una línea ya existía en la cotización, conserva su costo (no cambia el margen).
 const CASOS = ["mismo", "similar", "nuevo"];
+// Costo de una línea por unidad: su costo más el de sus componentes
+const costoLineaUnit = (i) => Number(i.costo || 0) + (i.componentes || []).reduce((s, c) => s + Number(c.costo || 0) * Number(c.por_unidad || 0), 0);
+const costoCotizacion = (items) => (items || []).reduce((s, i) => s + costoLineaUnit(i) * Number(i.cantidad || 0), 0);
+
 const armarItems = async (itemsBody, tipo, anteriores, t) => {
   if (!Array.isArray(itemsBody) || itemsBody.length === 0) throw new ErrorNegocio("Debe incluir al menos una línea");
   const params = await getParametros(t);
-  const ids = itemsBody.map((i) => Number(i.producto_id ?? i.id)).filter(Boolean);
+  const ids = [...itemsBody.map((i) => Number(i.producto_id ?? i.id)), ...itemsBody.flatMap((i) => (Array.isArray(i.componentes) ? i.componentes : []).map((c) => Number(c.producto_id)))].filter(Boolean);
   const productos = ids.length ? await Producto.findAll({ where: { id: ids }, transaction: t }) : [];
   const mapa = new Map(productos.map((p) => [p.id, p]));
   const previos = new Map((anteriores || []).map((i) => [i.producto_id ? `p${i.producto_id}` : `c${i.clave}`, i]));
+  // Componentes de una línea (ej. bisagras de una puerta): no se imprimen ni cambian el precio; su costo suma a la línea
+  // y en la venta pasan a líneas para comprar. por_unidad = cuántos van por cada unidad de la línea.
+  const componentesDe = (b, previo) => (Array.isArray(b.componentes) ? b.componentes : []).map((c) => {
+    const p = mapa.get(Number(c.producto_id));
+    const por = Number(c.por_unidad);
+    if (!p || !(por > 0)) return null;
+    const ant = (previo?.componentes || []).find((x) => Number(x.producto_id) === p.id);
+    const costo = c.costo !== undefined && c.costo !== null && c.costo !== "" ? Number(c.costo) : ant ? Number(ant.costo) : Number(p.precio_compra) || 0;
+    return { producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, por_unidad: por, costo, proveedor: ant?.proveedor ?? p.proveedor ?? null };
+  }).filter(Boolean);
   return itemsBody.map((b, idx) => {
     const producto_id = Number(b.producto_id ?? b.id) || null;
     const cantidad = Number(b.cantidad);
@@ -99,6 +113,7 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
         ...comun, producto_id: null, clave: String(b.clave || `n${Date.now()}${idx}`), codigo: null,
         nombre: desc, descripcion_cliente: desc, unidad: String(b.unidad || "UNIDAD").toUpperCase(),
         precio: precioDado ?? 0, costo: Number(b.costo) || 0, proveedor: null, fecha_precio: null, caso: "nuevo",
+      ...(() => { const c = componentesDe(b, previos.get(`c${b.clave}`)); return c.length ? { componentes: c } : {}; })(),
       };
     }
     const p = mapa.get(producto_id);
@@ -122,6 +137,7 @@ const armarItems = async (itemsBody, tipo, anteriores, t) => {
       caso,
       // Similar: nota interna con el producto usado
       nota_interna: comun.nota_interna || (caso === "similar" ? `Cotizado con similar: ${p.nombre}` : null),
+      ...(() => { const c = componentesDe(b, previo); return c.length ? { componentes: c } : {}; })(),
     };
   });
 };
@@ -276,7 +292,7 @@ const crearCotizacion = handler(async (req, res) => {
       notas: b.notas || null,
       archivo_cliente: b.archivo_cliente || null,
       items, ...calcularTotales(items),
-      costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0),
+      costo_total: costoCotizacion(items),
       creado_por: firma(req),
     }, { transaction: t });
     await anotarPostulacion(idSol, t);
@@ -308,7 +324,7 @@ const actualizarCotizacion = handler(async (req, res) => {
     if (b.lugar_entrega !== undefined) cambios.lugar_entrega = String(b.lugar_entrega || "").trim() || null;
     if (b.items) {
       const items = await armarItems(b.items, cambios.tipo_precio || c.tipo_precio, b.actualizar_costos ? null : c.items, t);
-      Object.assign(cambios, { items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + i.costo * i.cantidad, 0) });
+      Object.assign(cambios, { items, ...calcularTotales(items), costo_total: costoCotizacion(items) });
     }
     if (b.nombre_cotizacion !== undefined) cambios.nombre_cotizacion = sinIdEnNombre(b.nombre_cotizacion, b.id_solicitud !== undefined ? b.id_solicitud : c.id_solicitud);
     if (b.notas !== undefined) cambios.notas = b.notas;
@@ -531,7 +547,7 @@ const aplicarProveedor = handler(async (req, res) => {
         precio: precioVenta(precio, c.tipo_precio, params),
       });
     }
-    await c.update({ items, ...calcularTotales(items), costo_total: items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad), 0), estado: c.estado === "espera_proveedor" ? "borrador" : c.estado }, { transaction: t });
+    await c.update({ items, ...calcularTotales(items), costo_total: costoCotizacion(items), estado: c.estado === "espera_proveedor" ? "borrador" : c.estado }, { transaction: t });
     return c;
   });
   res.json({ ok: true, data: vista(req)(cot) });
@@ -600,7 +616,8 @@ const descargarPdf = async (req, res) => {
 const lineasCosto = (cot) => (cot.items || []).map((i, k) => {
   const cant = Number(i.cantidad) || 0, costo = Number(i.costo) || 0, precio = Number(i.precio_unitario ?? i.precio) || 0;
   return { k, descripcion: i.descripcion_cliente || i.nombre || "", nombre: i.nombre || "", unidad: i.unidad || "", cantidad: cant,
-    costo, precio, total_costo: Math.round(costo * cant), total_venta: Math.round(precio * cant),
+    costo, precio, componentes: (i.componentes || []).map((c) => ({ nombre: c.nombre, por_unidad: Number(c.por_unidad), costo: Number(c.costo) || 0 })),
+    total_costo: Math.round(costoLineaUnit(i) * cant), total_venta: Math.round(precio * cant),
     sospechosa: costo > 0 && precio > 0 && costo > precio * 1.5, corregido: i.costo_corregido || null };
 });
 const getCostos = handler(async (req, res) => {
@@ -629,7 +646,7 @@ const corregirCostos = handler(async (req, res) => {
       it.costo_corregido = { antes: Number(it.costo || 0), fecha: new Date().toISOString().slice(0, 10), usuario: firma(req), motivo };
       it.costo = nuevo;
     }
-    const costo_total = items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad || 0), 0);
+    const costo_total = costoCotizacion(items);
     await c.update({ items, costo_total }, { transaction: t });
     return c;
   });
@@ -637,7 +654,7 @@ const corregirCostos = handler(async (req, res) => {
 });
 
 module.exports = {
-  getCostos, corregirCostos,
+  getCostos, corregirCostos, costoLineaUnit, costoCotizacion,
   postularCotizacion,
   descargarPedidoProveedor, leerProveedor, aplicarProveedor,
   registrarSeguimiento, cantidadPorSeguir, wherePorSeguir,

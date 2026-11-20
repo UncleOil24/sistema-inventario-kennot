@@ -137,7 +137,7 @@ const leer = handler(async (req, res) => {
   const sugeridas = !orden && donde ? await OrdenCompra.findAll({ where: donde, attributes: ["id", "numero", "fecha", "total", "venta_id", "proveedor_nombre"], order: [["id", "DESC"]], limit: 15, raw: true }) : [];
   const neto = lineas.reduce((s, l) => s + Math.round(l.precio_neto * l.cantidad), 0);
   // Venta de esta compra (la de la venta desde donde se sube, o la de la orden) para mostrarla arriba
-  const ventaTitulo = venta || (orden?.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["id", "numero", "empresa", "cliente_nombre"] }) : null);
+  const ventaTitulo = venta || (orden?.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["id", "numero", "empresa", "cliente_nombre", "items"] }) : null);
   res.json({
     ok: true,
     data: {
@@ -153,6 +153,8 @@ const leer = handler(async (req, res) => {
       // Para asociar a mano una línea de la factura con una línea del pedido o de la venta ("Es para:")
       orden_items: orden ? orden.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
       venta_items: venta ? venta.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
+      // Líneas de la venta de esta compra, para marcar un producto como "complemento de" una de ellas
+      complementos: ventaTitulo ? (ventaTitulo.items || []).map((it, k) => ({ k, nombre: it.descripcion_cliente || it.nombre, complemento: !!it.complemento_de })).filter((x) => !x.complemento) : [],
     },
   });
 });
@@ -230,6 +232,21 @@ const registrarFactura = handler(async (req, res) => {
     // uno nuevo o guardar en otro), la línea de la venta pasa a ese producto (la descripción del cliente no cambia),
     // así queda comprada y el catálogo guarda el precio en el producto que de verdad se compró.
     const ventaPara = ventaBase ? await Venta.findByPk(ventaBase, { transaction: t, lock: t.LOCK.UPDATE }) : null;
+    // "Complemento de" una línea de la venta (ej. bisagras de una puerta que no estaban cotizadas): se agrega a la venta
+    // como componente sin precio de esa línea; su costo es de la venta y queda comprado
+    if (ventaPara && items.some(({ l }) => l.para?.tipo === "complemento")) {
+      const vItems = [...ventaPara.items];
+      for (const { p, l } of items) {
+        if (l.para?.tipo !== "complemento") continue;
+        const padre = vItems[Number(l.para.indice)];
+        if (!padre) { l.para = null; continue; }
+        vItems.push({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: Number(l.cantidad), precio: 0,
+          costo: Math.round(Number(l.precio)), proveedor: ficha.nombre, complemento_de: padre.descripcion_cliente || padre.nombre });
+        l.para = { tipo: "venta", indice: vItems.length - 1 };
+      }
+      await ventaPara.update({ items: vItems, costo_total: require("../services/cuadroCompra").costoItems(vItems) }, { transaction: t });
+      ventaPara.items = vItems;
+    }
     const cubre = items.map(({ p, l }) => {
       const pa = l.para || null;
       if (!pa) return null;
