@@ -129,6 +129,11 @@ const leer = handler(async (req, res) => {
   const folioDoc = String(e.numero_documento || "").trim();
   const yaRegistrada = prov && folioDoc ? await OrdenCompra.findAll({ where: { proveedor_id: prov.id, estado: { [Op.ne]: "anulada" },
     documento: { [Op.in]: [folioDoc, `BOL ${folioDoc}`] } }, attributes: ["id", "numero", "fecha_factura", "venta_id", "total"], raw: true }) : [];
+  // Venta de cada compra ya registrada con este documento, para decir dónde quedó
+  if (yaRegistrada.length) {
+    const vs = await Venta.findAll({ where: { id: yaRegistrada.map((o) => o.venta_id).filter(Boolean) }, attributes: ["id", "numero", "cliente_nombre"], raw: true });
+    for (const o of yaRegistrada) { const v = vs.find((x) => x.id === o.venta_id); o.venta = v ? `${v.numero}${v.cliente_nombre ? ` · ${v.cliente_nombre}` : ""}` : "sin venta"; }
+  }
   const sugeridas = !orden && donde ? await OrdenCompra.findAll({ where: donde, attributes: ["id", "numero", "fecha", "total", "venta_id", "proveedor_nombre"], order: [["id", "DESC"]], limit: 15, raw: true }) : [];
   const neto = lineas.reduce((s, l) => s + Math.round(l.precio_neto * l.cantidad), 0);
   // Venta de esta compra (la de la venta desde donde se sube, o la de la orden) para mostrarla arriba

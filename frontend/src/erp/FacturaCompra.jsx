@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, aplicarFactorPrecios, montosTrasFactor } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, confirmar, aplicarFactorPrecios, montosTrasFactor } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -47,6 +47,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
   const neto = activas.reduce((s, l) => s + Math.round(Number(l.precio_neto) * Number(l.cantidad)), 0);
 
   const registrar = async () => {
+    if (res.ya_registrada?.length && !(await confirmar(`Este documento ya está registrado: ${res.ya_registrada.map((o) => `${o.numero} (${o.venta})`).join(", ")}.\n\nGuardarlo otra vez DUPLICA el monto (dos compras y doble IVA). Si parte de la factura era para otra venta, no la subas de nuevo: abre la compra ya registrada y usa "Repartir entre ventas".`, { titulo: "Documento ya registrado", boton: "Guardar igual", peligro: true }))) return;
     setGuardando(true);
     try {
       const r = await api("/ordenes-compra/factura/registrar", {
@@ -158,7 +159,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
             {res.control.precios_incluyen_iva && <span className="estado estado-info">Precios venían con IVA: ya se dividieron por 1,19</span>}
             <CuadreDocumento control={res.control} lineas={lineas} onAplicar={(f) => { const nl = aplicarFactorPrecios(lineas, f); setLineas(nl); setEnc({ ...enc, ...montosTrasFactor(nl, res.control) }); }} />
           </div>
-          {res.ya_registrada?.length > 0 && <div className="aviso" style={{ color: "var(--danger)" }}>⚠ Este documento ya está registrado: {res.ya_registrada.map((o) => o.numero).join(", ")}. Revisa antes de guardarlo otra vez.</div>}
+          {res.ya_registrada?.length > 0 && <div className="aviso" style={{ color: "var(--danger)" }}>⚠ Este documento ya está registrado: {res.ya_registrada.map((o) => `${o.numero} (${o.venta})`).join(", ")}. Guardarlo otra vez duplica el monto; para pasar parte a otra venta usa "Repartir entre ventas" en esa compra.</div>}
           {res.orden && res.faltan.length > 0 && <div className="aviso">En la compra {res.orden.numero} y no en la factura: {res.faltan.map((f) => `${f.nombre} (${f.cantidad})`).join(" · ")}</div>}
           {res.truncado && <div className="aviso">La factura es muy larga y la lectura pudo quedar incompleta.</div>}
           <div className="table-wrap">

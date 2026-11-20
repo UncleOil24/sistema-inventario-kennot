@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, aplicarFactorPrecios, montosTrasFactor } from "./ui";
+import { PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, confirmar, aplicarFactorPrecios, montosTrasFactor } from "./ui";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { TIPOS_PAGO } from "./lib";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
@@ -55,6 +55,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
   const siguientePendiente = (ds) => { const k = ds.findIndex((x) => x.estado === "leido"); if (k >= 0) setActual(k); };
 
   const guardar = async () => {
+    if (d.res.ya_registrada?.length && !(await confirmar(`Este documento ya está registrado: ${d.res.ya_registrada.map((o) => `${o.numero} (${o.venta})`).join(", ")}.\n\nGuardarlo otra vez DUPLICA el monto (dos compras y doble IVA). Si parte de la factura era para otra venta, no la subas de nuevo: abre la compra ya registrada y usa "Repartir entre ventas".`, { titulo: "Documento ya registrado", boton: "Guardar igual", peligro: true }))) return;
     setGuardando(true);
     try {
       let resultado;
@@ -203,7 +204,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             );
           })()}
           <div className="pago-form">
-            {d.res.ya_registrada?.length > 0 && <span className="estado estado-danger">⚠ Ya registrado: {d.res.ya_registrada.map((o) => o.numero).join(", ")}</span>}
+            {d.res.ya_registrada?.length > 0 && <span className="estado estado-danger">⚠ Ya registrado: {d.res.ya_registrada.map((o) => `${o.numero} (${o.venta})`).join(", ")}</span>}
             {d.res.control.precios_incluyen_iva && <span className="estado estado-info">Precios con IVA: ya se dividieron por 1,19</span>}
             {d.como !== "gasto" && <CuadreDocumento control={d.res.control} lineas={d.lineas} onAplicar={(f) => { const nl = aplicarFactorPrecios(d.lineas, f); const m = montosTrasFactor(nl, d.res.control);
               setDoc({ lineas: nl, enc: { ...d.enc, neto: m.neto, iva: d.enc.tipo_documento === "boleta" ? 0 : m.iva, total: d.enc.tipo_documento === "boleta" ? d.enc.total : m.total } }); }} />}
