@@ -35,7 +35,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const lineas = data?.lineas || [];
   const marcadas = lineas.filter((l) => sel.has(l.indice));
 
-  if (!data) return <Modal titulo="// Cuadro de compra" onClose={onClose} ancho={1250}><Cargando /></Modal>;
+  if (!data) return <Modal titulo="// Cuadro de compra" onClose={onClose} ancho="min(1600px, 98vw)"><Cargando /></Modal>;
   const { venta, sugerencias, resumen_proveedores, totales, ordenes, gastos } = data;
   const anulada = venta.estado === "anulada";
   const porComprar = lineas.filter((l) => l.estado === "por_comprar");
@@ -123,7 +123,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const marcarProveedor = (prov) => setSel(new Set(porComprar.filter((l) => l.proveedor === prov).map((l) => l.indice)));
 
   return (
-    <Modal titulo={`// Cuadro de compra · ${venta.numero} · ${venta.cliente_nombre || "Sin cliente"}`} onClose={onClose} ancho={1250}
+    <Modal titulo={`// Cuadro de compra · ${venta.numero} · ${venta.cliente_nombre || "Sin cliente"}`} onClose={onClose} ancho="min(1600px, 98vw)"
       footer={<>
         <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
         <button className="btn btn-ghost" onClick={excelCuadro}>↓ Excel del cuadro</button>
