@@ -325,6 +325,8 @@ const styles = `
   .fila-periodo td { background: var(--surface); font-size: 14px; border-top: 3px solid var(--accent); padding-top: 10px; }
   .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
   .fila-grupo-margen td { background: var(--surface2); border-top: none; }
+  .fila-separador td { height: 10px; padding: 0 !important; background: transparent !important; border: none !important; }
+  .fila-grupo td { border-bottom: 1px solid var(--border2); }
   .fila-alerta td { background: rgba(240,190,40,0.16); }
   .link { background: none; border: none; color: var(--info); cursor: pointer; font-family: var(--mono); font-size: 11px; padding: 2px 4px; text-align: left; }
   .link:hover:not(:disabled) { text-decoration: underline; }

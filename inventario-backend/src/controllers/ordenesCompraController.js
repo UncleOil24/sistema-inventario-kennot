@@ -244,7 +244,12 @@ const registrarFactura = handler(async (req, res) => {
     const tipo = ["contado", "credito_empresa", "credito_proveedor"].includes(b.tipo_pago) ? b.tipo_pago : orden.tipo_pago;
     // Pasa a crédito proveedor: se quitan los pagos automáticos y vuelve a Por pagar
     if (tipo === "credito_proveedor" && orden.tipo_pago !== "credito_proveedor") await OrdenCompra.quitarPagosAutomaticos(orden, t);
+    const cambiaEmpresa = empresa !== orden.empresa;
     await orden.update({ documento, fecha_factura: fechaFactura, empresa, fecha_vencimiento: vence || orden.fecha_vencimiento, tipo_pago: tipo }, { transaction: t });
+    // Factura repartida entre ventas: es una sola factura, así que la empresa que compra cambia en todas sus compras
+    if (cambiaEmpresa && orden.factura_grupo) {
+      await OrdenCompra.update({ empresa }, { where: { factura_grupo: orden.factura_grupo, id: { [Op.ne]: orden.id }, estado: { [Op.ne]: "anulada" } }, transaction: t });
+    }
     return orden;
   });
   res.json({ ok: true, data: oc });
