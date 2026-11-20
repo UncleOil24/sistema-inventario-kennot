@@ -23,6 +23,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const [ocupado, setOcupado] = useState(false);
   const [subir, setSubir] = useState(false);
   const [buscar, setBuscar] = useState(null); // índice de la línea donde se busca precio
+  const [yaDe, setYaDe] = useState(null); // línea que ya se compró pero quedó conectada con otra
   const [elegir, setElegir] = useState(null); // { l } una línea · { ls } las marcadas
 
   const cargar = useCallback(async () => {
@@ -106,6 +107,13 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: n } }), n < l.cantidad ? `${n} de stock: faltan ${l.cantidad - n} por comprar` : "✓ Sale de stock");
   };
   const quitarStock = (l) => ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: 0 } }), "Ya no sale de stock");
+  // La línea quedó "por comprar" o "no vino" aunque se compró (la factura la conectó con otra línea): se elige
+  // el producto de la compra con que quedó registrado y la línea pasa a ese producto (queda comprada)
+  const yaComprado = (l) => setYaDe(l);
+  const conectarComprado = async (l, orden_id, item) => {
+    try { await api(`/ventas/${ventaId}/linea-comprada`, { method: "POST", body: { indice: l.indice, orden_id, item } }); notify(`✓ ${l.nombre}: conectada con lo comprado`); setYaDe(null); cargar(); }
+    catch (e) { notify(e.message, "danger"); }
+  };
   const comprarConOtro = (l) => { setSel(new Set([l.indice])); setTimeout(() => document.getElementById("orden-a")?.focus(), 50); };
   const descartar = async () => {
     if (!(await confirmar(`¿Descartar ${borradores.length} orden(es) en borrador (${borradores.map((o) => o.numero).join(", ")})?\nSus productos vuelven a "por comprar".`, { titulo: "Descartar borradores", boton: "Descartar", peligro: true }))) return;
@@ -217,6 +225,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                       {!anulada && ["por_comprar", "parcial"].includes(l.estado) && <div><button className="link mini" title="Se cubre con lo que hay en bodega (va en gastos generales: costo $0 para la venta)" onClick={() => okStock(l)}>OK stock</button></div>}
                       {l.no_vino && <div className="mini" style={{ color: "var(--danger)" }}>no vino en {l.no_vino.orden} ({l.no_vino.proveedor})
                         {!anulada && <div><button className="link mini" onClick={() => comprarConOtro(l)}>Comprar con otro proveedor</button></div>}</div>}
+                      {!anulada && ["por_comprar", "parcial"].includes(l.estado) && (ordenes || []).some((o) => o.estado !== "anulada") && <div><button className="link mini" title="Si ya se compró pero quedó conectado con otra línea (ej. la factura lo asoció a otro producto)" onClick={() => yaComprado(l)}>ya se compró…</button></div>}
                       {l.compras.map((c) => <div key={c.id + c.numero}><button className="link mini" onClick={() => irACompra?.(c.id)}>{c.numero} {c.proveedor}</button></div>)}
                     </td>
                   </tr>
@@ -266,6 +275,14 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
           if (e.l) asignar([{ indice: e.l.indice, proveedor: prov, costo: precio }], `✓ ${e.l.nombre}: ${prov}`);
           else asignar(e.ls.map((l) => ({ indice: l.indice, proveedor: prov })), `✓ ${e.ls.length} producto(s) asignados a ${prov}${avisoOmitidos(e.omitidos)}`);
         }} />}
+      {yaDe && <Modal titulo={`// Ya se compró · ${yaDe.nombre}`} onClose={() => setYaDe(null)} ancho={820}>
+        <div className="mini" style={{ marginBottom: 8 }}>Elige el producto de las compras de esta venta con que se compró «{yaDe.nombre}». La línea pasa a ese producto y queda comprada; la descripción del cliente no cambia y queda anotado "antes: …".</div>
+        <table className="table table-compacta"><thead><tr><th>Compra</th><th className="col-desc">Producto comprado</th><th>Cant.</th><th></th></tr></thead><tbody>
+          {(ordenes || []).filter((o) => o.estado !== "anulada").flatMap((o) => (o.items || []).map((it, n) => (
+            <tr key={`${o.id}:${n}`}><td className="mini">{o.numero} · {o.proveedor_nombre}</td><td>{it.nombre}</td><td className="mini">{it.cantidad}</td>
+              <td><button className="btn btn-ghost btn-sm" onClick={() => conectarComprado(yaDe, o.id, n)}>Es este</button></td></tr>)))}
+        </tbody></table>
+      </Modal>}
       {buscar != null && <BuscarPrecio ventaId={ventaId} indice={buscar} notify={notify} onClose={() => setBuscar(null)} onHecho={() => { setBuscar(null); cargar(); }} />}
       {subir && <SubirDocumentosVenta venta={venta} lineas={lineas} ordenes={ordenes} proveedores={data.proveedores} notify={notify} onClose={() => { setSubir(false); cargar(); }} />}
     </Modal>

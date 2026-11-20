@@ -22,6 +22,7 @@ router.get("/:id/cuadro-compra", operativo, c.getCuadroCompra);
 router.get("/:id/interna-simple", c.internaSimple);
 router.get("/:id/buscar-precio", operativo, c.buscarPrecio);
 router.post("/:id/precio-linea", operativo, c.precioLinea);
+router.post("/:id/linea-comprada", operativo, c.lineaComprada);
 router.post("/:id/cambiar-producto", permite("comercial", "operativo"), c.cambiarProducto);
 router.post("/:id/cambiar-proveedor", operativo, c.cambiarProveedorLinea);
 router.post("/:id/generar-ordenes", operativo, c.generarOrdenes);
