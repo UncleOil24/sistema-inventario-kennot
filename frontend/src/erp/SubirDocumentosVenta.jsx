@@ -112,7 +112,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
   }
 
   return (
-    <Modal titulo={`// Facturas y boletas · ${venta.numero}${venta.cliente_nombre ? ` · ${venta.cliente_nombre}` : ""}`} onClose={onClose} ancho={1250}
+    <Modal titulo={`// Facturas y boletas · ${venta.numero}${venta.cliente_nombre ? ` · ${venta.cliente_nombre}` : ""}`} onClose={onClose} ancho="min(1600px, 98vw)"
       footer={terminado ? <button className="btn btn-primary" onClick={onClose}>Listo</button> : d && d.estado === "leido" ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{pendientes} por revisar</span>
         <button className="btn btn-ghost" disabled={guardando} onClick={omitir}>Omitir este</button>
@@ -211,7 +211,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
               setDoc({ lineas: nl, enc: { ...d.enc, neto: m.neto, iva: d.enc.tipo_documento === "boleta" ? 0 : m.iva, total: d.enc.tipo_documento === "boleta" ? d.enc.total : m.total } }); }} />}
           </div>
           <div className="table-wrap">
-            <table className="table table-compacta">
+            <table className="table table-compacta tabla-documento">
               <thead><tr><th></th><th>En el documento</th><th>Cant.</th><th>Neto unit.</th><th className="col-desc">Producto nuestro</th><th>Línea de la venta</th></tr></thead>
               <tbody>
                 {d.lineas.map((l0) => { const vl = /^v\d+$/.test(l0.para || "") ? lineasVenta.find((x) => x.indice === Number(l0.para.slice(1))) : l0.accion === "existente" && l0.producto ? lineasVenta.find((x) => x.producto_id === l0.producto.id) : null; const l = { ...l0, venta_linea: vl ? { nombre: vl.nombre, cantidad: vl.cantidad } : null }; return (
