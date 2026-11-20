@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Modal, Cargando, confirmar, BotonesSolicitud } from "./ui";
-import { api, fmt, descargarPost, imprimirHTML, escaparHTML as h } from "./lib";
+import { api, fmt, descargarPost, imprimirHTML, escaparHTML as h, textoCompra, EMP_CORTA } from "./lib";
 
 // Agrupar compras de varias ventas (Operativo): se configura antes de imprimir o descargar.
 // - Ordenar por proveedor (juntando ventas) o por venta
@@ -8,7 +8,6 @@ import { api, fmt, descargarPost, imprimirHTML, escaparHTML as h } from "./lib";
 // - Elegir el proveedor de cada producto y crear las órdenes solo de los proveedores que se marquen
 // (una orden por venta y proveedor, para que cada compra siga cargada a su venta)
 const SIN = "SIN PROVEEDOR";
-const TXT = { por_comprar: "Por comprar", parcial: "Parcial", pedido: "Pedido" };
 
 export default function AgruparCompras({ notify, onClose, onCreadas }) {
   const [data, setData] = useState(null);
@@ -34,7 +33,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
     for (const v of data.ventas) {
       if (!ventasSel.has(v.id)) continue;
       for (const l of v.lineas) {
-        const base = { venta_id: v.id, venta: v.numero, cliente: v.cliente, indice: l.indice, producto_id: l.producto_id, codigo: l.codigo, nombre: l.nombre, unidad: l.unidad, opciones: l.opciones, no_vino: l.no_vino };
+        const base = { venta_id: v.id, venta: v.numero, cliente: v.cliente, empresa: v.empresa || "kenott", indice: l.indice, producto_id: l.producto_id, codigo: l.codigo, nombre: l.nombre, unidad: l.unidad, opciones: l.opciones, no_vino: l.no_vino };
         if (incluir !== "pedido" && l.falta > 0) {
           const p = prov[`${v.id}:${l.indice}`] || l.proveedor;
           const op = l.opciones.find((o) => o.proveedor === p);
@@ -49,17 +48,21 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
     return out;
   }, [data, ventasSel, incluir, prov]);
 
+  const variasEmpresas = new Set(filas.map((f) => f.empresa)).size > 1;
+  const avisoFacturas = (g) => g.mezcla ? `⚠ Kenott y Tactics en este proveedor: pedir 2 facturas (${g.mezcla.map((x) => `${EMP_CORTA[x.empresa]}: ${x.ventas.join(", ")}`).join(" · ")})` : "";
   const grupos = useMemo(() => {
     const m = new Map();
     for (const f of filas) {
-      const k = orden === "venta" ? `${f.venta}${f.cliente ? ` · ${f.cliente}` : ""}` : f.proveedor;
+      const k = orden === "venta" ? `${f.venta}${f.cliente ? ` · ${f.cliente}` : ""}${variasEmpresas ? ` · ${EMP_CORTA[f.empresa]}` : ""}` : f.proveedor;
       if (!m.has(k)) m.set(k, []);
       m.get(k).push(f);
     }
     const total = (ls) => ls.reduce((s, f) => s + Number(f.precio || 0) * Number(f.cantidad), 0);
-    return [...m.entries()].map(([k, ls]) => ({ k, ls, total: total(ls) }))
+    // Mismo proveedor con ventas de Kenott y de Tactics: hay que pedir una factura a cada empresa
+    const mezcla = (ls) => { const e = new Set(ls.map((f) => f.empresa)); return e.size > 1 ? ["kenott", "tactics"].map((x) => ({ empresa: x, ventas: [...new Set(ls.filter((f) => f.empresa === x).map((f) => f.venta))] })) : null; };
+    return [...m.entries()].map(([k, ls]) => ({ k, ls, total: total(ls), mezcla: orden === "venta" ? null : mezcla(ls) }))
       .sort((a, b) => (orden === "venta" ? a.k.localeCompare(b.k) : (a.k === SIN) - (b.k === SIN) || b.total - a.total));
-  }, [filas, orden]);
+  }, [filas, orden, variasEmpresas]);
 
   if (!data) return <Modal titulo="// Agrupar compras" onClose={onClose}><Cargando /></Modal>;
 
@@ -70,7 +73,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
     setProv((x) => ({ ...x, [f.clave]: p.trim().toUpperCase() }));
   };
   const paraArchivo = () => filas.map((f) => ({ venta: f.venta, cliente: f.cliente, producto_id: f.producto_id, codigo: f.codigo, nombre: f.nombre, unidad: f.unidad,
-    cantidad: f.cantidad, proveedor: f.proveedor, precio: f.precio, estado: f.estado, ordenes: f.ordenes }));
+    cantidad: f.cantidad, proveedor: f.proveedor, precio: f.precio, estado: f.estado, ordenes: f.ordenes, empresa: f.empresa }));
 
   const excel = () => {
     if (!filas.length) return notify("No hay productos con esta configuración", "danger");
@@ -89,16 +92,17 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
           const m = new Map();
           for (const f of g.ls) {
             const k = `${f.producto_id || f.nombre}|${f.estado === "pedido" ? "p" : "f"}`;
-            const x = m.get(k) || { ...f, cantidad: 0, detalle: [] };
-            x.cantidad += Number(f.cantidad); x.detalle.push(`${f.venta}: ${f.cantidad}`); m.set(k, x);
+            const x = m.get(k) || { ...f, cantidad: 0, detalle: [], ordenes: [] };
+            x.cantidad += Number(f.cantidad); x.detalle.push(`${f.venta}${g.mezcla ? ` ${EMP_CORTA[f.empresa]}` : ""}: ${f.cantidad}`);
+            x.ordenes = [...new Set([...x.ordenes, ...(f.ordenes || [])])]; m.set(k, x);
           }
           ls = [...m.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
         }
-        return `<div class="grupo"><h2><span>${h(g.k === SIN ? "Sin proveedor elegido" : g.k)}</span><span>${ls.length} prod. · ${fmt(g.total)}</span></h2>
-        <table><colgroup><col style="width:46px"><col style="width:18px"><col><col style="width:38px"><col style="width:66px"><col style="width:110px"><col style="width:68px"><col style="width:78px"><col style="width:88px"></colgroup><thead><tr><th>N°</th><th class="chk"></th><th>Producto</th><th class="num">Cant.</th><th class="cen">Unidad</th><th class="obs">${porVenta ? "Proveedor" : "De qué ventas"}</th><th class="num">Precio unit.</th><th class="num">Total</th><th class="obs">Estado</th></tr></thead><tbody>
+        return `<div class="grupo"><h2><span>${h(g.k === SIN ? "Sin proveedor elegido" : g.k)}</span><span>${ls.length} prod. · ${fmt(g.total)}</span></h2>${g.mezcla ? `<div class="aviso">${h(avisoFacturas(g))}</div>` : ""}
+        <table><colgroup><col style="width:46px"><col style="width:18px"><col><col style="width:38px"><col style="width:66px"><col style="width:110px"><col style="width:68px"><col style="width:78px"><col style="width:62px"></colgroup><thead><tr><th>N°</th><th class="chk"></th><th>Producto</th><th class="num">Cant.</th><th class="cen">Unidad</th><th class="obs">${porVenta ? "Proveedor" : "De qué ventas"}</th><th class="num">Precio unit.</th><th class="num">Total</th><th class="obs">Compra</th></tr></thead><tbody>
         ${ls.map((f) => `<tr><td>${h(f.codigo || "")}</td><td class="chk">☐</td><td>${h(f.nombre)}${f.no_vino ? `<div class="aviso">no vino en ${h(f.no_vino.orden)}</div>` : ""}</td><td class="num">${f.cantidad}</td><td class="cen">${h(f.unidad || "")}</td>
           <td class="obs">${h(porVenta ? f.proveedor : f.detalle.join(" · "))}</td><td class="num">${f.precio > 0 ? fmt(f.precio) : "sin precio"}</td><td class="num">${fmt(Number(f.precio || 0) * f.cantidad)}</td>
-          <td class="obs">${TXT[f.estado] || f.estado}${f.ordenes?.length ? `<div class="mini">${h(f.ordenes.join(", "))}</div>` : ""}</td></tr>`).join("")}
+          <td class="obs">${h(textoCompra(f.estado, f.ordenes))}</td></tr>`).join("")}
         </tbody></table></div>`;
       }).join("")}
       <div class="pie">Total: <strong>${fmt(grupos.reduce((s, g) => s + g.total, 0))}</strong> neto · ${filas.length} línea(s)</div>`;
@@ -163,12 +167,13 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
           <div className="panel-titulo" style={{ display: "flex", justifyContent: "space-between" }}>
             <span>{g.k === SIN ? "Sin proveedor elegido" : g.k}</span><span className="mini">{g.ls.length} línea(s) · {fmt(g.total)}</span>
           </div>
+          {g.mezcla && <div className="aviso" style={{ margin: "0 0 6px" }}>{avisoFacturas(g)}</div>}
           <table className="table table-compacta">
-            <thead><tr><th>Venta</th><th className="col-desc">Producto</th><th>Cant.</th><th>Comprar con</th><th>Precio unit.</th><th>Total</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Venta</th><th className="col-desc">Producto</th><th>Cant.</th><th>Comprar con</th><th>Precio unit.</th><th>Total</th><th>Compra</th></tr></thead>
             <tbody>
               {g.ls.map((f) => (
                 <tr key={f.clave}>
-                  <td className="mini">{f.venta}<div>{f.cliente}</div></td>
+                  <td className="mini">{f.venta}{g.mezcla && <strong> · {EMP_CORTA[f.empresa]}</strong>}<div>{f.cliente}</div></td>
                   <td>{f.nombre}<div className="mini">{f.codigo ? `N° ${f.codigo}` : ""}{f.no_vino ? <span style={{ color: "var(--danger)" }}> · no vino en {f.no_vino.orden} ({f.no_vino.proveedor})</span> : ""}</div></td>
                   <td className="mini">{f.cantidad} {f.unidad}</td>
                   <td>{f.editable ? (
@@ -180,7 +185,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
                   </td>
                   <td className="price-cell compra">{f.precio > 0 ? fmt(f.precio) : "sin precio"}</td>
                   <td className="price-cell compra">{fmt(Number(f.precio || 0) * f.cantidad)}</td>
-                  <td><span className={`estado estado-${f.estado === "pedido" ? "info" : "warn"}`}>{TXT[f.estado]}</span>{f.ordenes.length > 0 && <div className="mini">{f.ordenes.join(", ")}</div>}</td>
+                  <td className="mini">{textoCompra(f.estado, f.ordenes)}</td>
                 </tr>
               ))}
             </tbody>
