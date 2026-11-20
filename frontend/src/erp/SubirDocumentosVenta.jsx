@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave } from "./ui";
+import { PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, aplicarFactorPrecios, montosTrasFactor } from "./ui";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { TIPOS_PAGO } from "./lib";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
@@ -205,8 +205,8 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
           <div className="pago-form">
             {d.res.ya_registrada?.length > 0 && <span className="estado estado-danger">⚠ Ya registrado: {d.res.ya_registrada.map((o) => o.numero).join(", ")}</span>}
             {d.res.control.precios_incluyen_iva && <span className="estado estado-info">Precios con IVA: ya se dividieron por 1,19</span>}
-            {d.res.control.cuadra === true && <span className="estado estado-ok">✓ Las líneas cuadran con el total</span>}
-            {d.res.control.cuadra === false && <span className="estado estado-warn">⚠ Las líneas ({fmt(d.res.control.suma_lineas)}) no cuadran con el documento ({fmt(d.res.control.total_documento)})</span>}
+            {d.como !== "gasto" && <CuadreDocumento control={d.res.control} lineas={d.lineas} onAplicar={(f) => { const nl = aplicarFactorPrecios(d.lineas, f); const m = montosTrasFactor(nl, d.res.control);
+              setDoc({ lineas: nl, enc: { ...d.enc, neto: m.neto, iva: d.enc.tipo_documento === "boleta" ? 0 : m.iva, total: d.enc.tipo_documento === "boleta" ? d.enc.total : m.total } }); }} />}
           </div>
           <div className="table-wrap">
             <table className="table table-compacta">

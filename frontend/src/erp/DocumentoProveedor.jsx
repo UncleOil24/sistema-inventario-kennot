@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Modal, Estado, SelectorProducto } from "./ui";
+import { Modal, Estado, SelectorProducto, CuadreDocumento, aplicarFactorPrecios } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO } from "./lib";
 
 // Carga la cotización o factura de un proveedor (PDF o foto). Claude extrae las líneas y propone
@@ -133,9 +133,7 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
           <div className="pago-form">
             <label className="check"><input type="checkbox" checked={enc.origen === "web"} onChange={(e) => setEnc({ ...enc, origen: e.target.checked ? "web" : "proveedor" })} />Es tienda web</label>
             {res.control.precios_incluyen_iva && <span className="estado estado-info">Precios venían con IVA: ya se dividieron por 1,19</span>}
-            {res.control.cuadra === true && <span className="estado estado-ok">✓ La suma de las líneas cuadra con el total ({fmt(res.control.total_documento)})</span>}
-            {res.control.cuadra === false && <span className="estado estado-warn">⚠ La suma de las líneas ({fmt(res.control.suma_lineas)}) no cuadra con el total del documento ({fmt(res.control.total_documento)}): revisa</span>}
-            {res.control.cuadra === null && <span className="mini">El documento no muestra total para comprobar.</span>}
+            <CuadreDocumento control={res.control} lineas={lineas} onAplicar={(f) => setLineas(aplicarFactorPrecios(lineas, f))} />
           </div>
           {res.truncado && <div className="aviso">El documento es muy largo y la lectura pudo quedar incompleta.</div>}
           <div className="table-wrap">

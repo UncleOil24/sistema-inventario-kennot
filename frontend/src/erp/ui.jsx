@@ -557,3 +557,33 @@ export function EmpresaCompra({ valor, onChange, detectada = null, ventaEmpresa 
 export function AvisoCamposClave() {
   return <div className="aviso-clave">★ Los campos marcados quedan en la contabilidad (IVA y por pagar de cada empresa): revísalos con la factura en mano.</div>;
 }
+
+// Control de la suma de las líneas contra el total del documento (neto). Si no cuadra suele ser un descuento
+// (o recargo) a todo el documento: el botón lo reparte en el precio de cada línea, en proporción.
+export function CuadreDocumento({ control, lineas, onAplicar }) {
+  const ref = Number(control?.total_documento) || 0;
+  if (!ref) return <span className="mini">El documento no muestra total para comprobar.</span>;
+  // Si los precios venían con IVA, el total de referencia es con IVA y las líneas ya están netas
+  const suma = Math.round(lineas.reduce((s, l) => s + Number(l.cantidad || 0) * Number(l.precio_neto || 0), 0) * (control.precios_incluyen_iva ? 1.19 : 1));
+  const tol = Math.max(2, ref * 0.01);
+  if (Math.abs(suma - ref) <= tol) return <span className="estado estado-ok">✓ La suma de las líneas cuadra con el total del documento ({fmt(ref)})</span>;
+  const factor = ref / (suma || 1);
+  const pct = Math.round(Math.abs(1 - factor) * 1000) / 10;
+  return (
+    <span className="estado estado-warn" style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      ⚠ La suma de las líneas ({fmt(suma)}) no cuadra con el documento ({fmt(ref)}): diferencia {fmt(Math.abs(suma - ref))} ({pct}%).
+      {suma > 0 && pct <= 40 && <button className="btn btn-ghost btn-sm" type="button" onClick={() => onAplicar(factor)}
+        title="Si el documento trae un descuento (o recargo) para todo el total, se reparte en el precio de cada línea">
+        {factor < 1 ? `Aplicar descuento de ${pct}% a las líneas` : `Aplicar recargo de ${pct}% a las líneas`}</button>}
+      <span style={{ fontWeight: 400, textTransform: "none" }}>Si no es un descuento general, revisa la cantidad o el precio de alguna línea.</span>
+    </span>
+  );
+}
+// Reparte el factor en los precios netos (redondeados)
+export const aplicarFactorPrecios = (lineas, factor) => lineas.map((l) => ({ ...l, precio_neto: Math.round(Number(l.precio_neto || 0) * factor) }));
+// Montos del encabezado después de repartir: neto = suma de líneas
+export function montosTrasFactor(lineas, control) {
+  const neto = Math.round(lineas.reduce((s, l) => s + Number(l.cantidad || 0) * Number(l.precio_neto || 0), 0));
+  const iva = Math.round(neto * 0.19);
+  return { neto, iva, total: control?.precios_incluyen_iva && control.total_documento ? Math.round(control.total_documento) : neto + iva };
+}
