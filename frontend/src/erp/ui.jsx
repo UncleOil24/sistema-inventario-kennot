@@ -404,7 +404,7 @@ export function presentacionParaEnviar(l, reparto) {
   const f = factorDe(l);
   const cant = Number(l.cantidad) || 0; const precio = Number(l.precio_neto) || 0;
   const aprender = l.accion === "existente" && l.producto && (f !== 1 || l.para || l.aprendido) ? { codigo_proveedor: l.codigo_proveedor || null, descripcion: l.descripcion, factor: f } : undefined;
-  const para = /^[ov]\d+$/.test(l.para || "") ? { tipo: l.para[0] === "o" ? "orden" : "venta", indice: Number(l.para.slice(1)) } : undefined;
+  const para = /^[ovc]\d+$/.test(l.para || "") ? { tipo: { o: "orden", v: "venta", c: "complemento" }[l.para[0]], indice: Number(l.para.slice(1)) } : undefined;
   return {
     cantidad: cant * f, precio: f !== 1 ? precio / f : precio, aprender, para,
     presentacion: f !== 1 ? `${cant} × ${f} (${l.descripcion})` : undefined,
@@ -429,7 +429,7 @@ export function prepararLineas(lineas, items, productos) {
   });
 }
 
-export function PresentacionLinea({ l, items = [], productos, onChange }) {
+export function PresentacionLinea({ l, items = [], complementos = [], productos, onChange }) {
   const f = factorDe(l);
   const u = l.producto ? UNIDAD_BASE(l.producto.unidad) : "";
   const s = l.factor_sugerido;
@@ -447,11 +447,20 @@ export function PresentacionLinea({ l, items = [], productos, onChange }) {
         </div>
         <div style={{ marginTop: 3 }}>En los tres casos la compra queda para «{itPara.nombre}» de la venta.</div>
       </div>}
-      {items.length > 0 && <div style={{ display: "flex", gap: 4, alignItems: "center" }}>Es para:
-        <select className="select-linea" style={{ flex: 1, padding: "2px 4px" }} value={l.para || ""} onChange={(e) => onChange(elegirPara(l, items.find((x) => x.clave === e.target.value), productos))}>
+      {(items.length > 0 || complementos.length > 0) && <div style={{ display: "flex", gap: 4, alignItems: "center" }}>Es para:
+        <select className="select-linea" style={{ flex: 1, padding: "2px 4px" }} value={l.para || ""} onChange={(e) => {
+          const v = e.target.value;
+          // Complemento de una línea (ej. bisagras de la puerta): el producto queda como está y se agrega a la venta sin precio
+          if (v.startsWith("c")) onChange({ para: v, decidir: false });
+          else onChange(elegirPara(l, items.find((x) => x.clave === v), productos));
+        }}>
           <option value="">— como está —</option>
           {items.map((x) => <option key={x.clave} value={x.clave}>{x.etiqueta}: {x.nombre} · {x.cantidad} {x.unidad || ""}</option>)}
+          {complementos.length > 0 && <optgroup label="Complemento de (va con esa línea, se compra aparte)">
+            {complementos.map((x) => <option key={`c${x.k}`} value={`c${x.k}`}>complemento de: {x.nombre}</option>)}
+          </optgroup>}
         </select></div>}
+      {String(l.para || "").startsWith("c") && <div style={{ color: "var(--accent)" }}>Se agrega a la venta como componente de «{complementos.find((x) => `c${x.k}` === l.para)?.nombre}»: sin precio para el cliente, su costo es de la venta.</div>}
       {l.accion === "existente" && l.producto && <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
         1 de la factura = <input className="qty-input" style={{ width: 54 }} type="number" min="0.01" step="any" value={l.factor ?? 1} onChange={(e) => onChange({ factor: e.target.value })} /> {u || "un"}
         {f === 1 && s && <button className="link" onClick={() => onChange({ factor: s.factor })}>usar × {String(s.factor).replace(".", ",")} ({String(s.factor).replace(".", ",")} {s.unidad} según la descripción)</button>}

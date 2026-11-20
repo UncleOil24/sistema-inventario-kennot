@@ -229,7 +229,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => setLinea(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => setLinea(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
-                      <PresentacionLinea l={l} productos={productos} onChange={(c) => setLinea(l.i, c)}
+                      <PresentacionLinea l={l} productos={productos} complementos={d.res.complementos || []} onChange={(c) => setLinea(l.i, c)}
                         items={(d.res.venta_items || []).map((x) => ({ ...x, clave: `v${x.k}`, etiqueta: venta.numero }))} />
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
                         <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}

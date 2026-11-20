@@ -428,18 +428,26 @@ async function excelInterno(cot, params, precioVenta) {
   enc.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF444444" } }; });
   const COLOR = { similar: "FFFFF2CC", nuevo: "FFF8D7DA" };
   (cot.items || []).forEach((it, k) => {
+    const comps = it.componentes || [];
     const costo = Number(it.costo) || 0;
+    const costoTot = costo + comps.reduce((s2, c) => s2 + Number(c.costo || 0) * Number(c.por_unidad || 0), 0);
     const precio = Number(it.precio) || 0;
     const row = ws.addRow([
       k + 1, it.descripcion_cliente || it.nombre, { mismo: "Mismo", similar: "Similar", nuevo: "No está" }[it.caso || "mismo"],
       it.producto_id ? `${it.codigo ?? ""} ${it.nombre}`.trim() : "— (no está en catálogo)", it.unidad, Number(it.cantidad),
       costo || null, costo ? precioVenta(costo, "convenio", params) : null, costo ? precioVenta(costo, "particular", params) : null,
       it.proveedor || "", precio, Math.round(precio * Number(it.cantidad)),
-      precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null, it.grupo || "", it.nota_interna || "",
+      precio && costoTot ? Math.round(((precio - costoTot) / precio) * 1000) / 10 : null, it.grupo || "", [it.nota_interna, comps.length ? "margen con componentes" : ""].filter(Boolean).join(" · "),
     ]);
     [7, 8, 9, 11, 12].forEach((c) => { row.getCell(c).numFmt = '"$" #,##0'; });
     row.alignment = { vertical: "top", wrapText: true };
     if (COLOR[it.caso]) row.eachCell({ includeEmpty: true }, (c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR[it.caso] } }; });
+    // Componentes (no se imprimen al cliente): una fila debajo con su costo
+    for (const c of comps) {
+      const r = ws.addRow(["", `   ↳ componente: ${c.nombre}`, "Componente", `${c.codigo ?? ""} ${c.nombre}`.trim(), c.unidad, Math.round(Number(c.por_unidad) * Number(it.cantidad) * 1000) / 1000,
+        Number(c.costo) || null, null, null, c.proveedor || "", null, null, null, "", `${c.por_unidad} por ${it.unidad || "unidad"} · costo incluido en la línea`]);
+      r.getCell(7).numFmt = '"$" #,##0'; r.font = { italic: true, color: { argb: "FF555555" } };
+    }
   });
   const tot = ws.addRow(["", "TOTAL NETO", "", "", "", "", Math.round(Number(cot.costo_total) || 0), "", "", "", "", Math.round(Number(cot.subtotal) || 0),
     Number(cot.subtotal) ? Math.round(((Number(cot.subtotal) - Number(cot.costo_total || 0)) / Number(cot.subtotal)) * 1000) / 10 : null]);
@@ -457,10 +465,13 @@ const CASO_SIMPLE = { mismo: "Exacto", similar: "Similar", nuevo: "Sin catálogo
 function filasInternaSimple(items, opciones) {
   let tv = 0; let tc = 0; let sinCosto = 0;
   const filas = (items || []).map((it, k) => {
-    const costo = Math.round(Number(it.costo) || 0);
+    // Con componentes (cotización), el costo de la línea los incluye
+    const comps = it.componentes || [];
+    const costo = Math.round((Number(it.costo) || 0) + comps.reduce((s2, c) => s2 + Number(c.costo || 0) * Number(c.por_unidad || 0), 0));
     const precio = Math.round(Number(it.precio) || 0);
     const cant = Number(it.cantidad) || 0;
     const caso = it.caso || (it.producto_id ? "mismo" : "nuevo");
+    const esComp = !!it.complemento_de; // componente en la venta: sin precio, su costo es de la línea principal
     // Proveedores reales del catálogo hoy (incluye las cotizaciones subidas después de cotizar); sin los genéricos de la planilla
     const usado = String(it.proveedor || "").toUpperCase();
     const op = opciones[k] || { opciones: [] };
@@ -469,9 +480,10 @@ function filasInternaSimple(items, opciones) {
     const venta = Math.round(precio * cant); const compra = Math.round(costo * cant);
     tv += venta; if (costo) tc += compra; else sinCosto += 1;
     return {
-      n: k + 1, producto: it.descripcion_cliente || it.nombre, parecido: op.parecido, caso, caso_txt: CASO_SIMPLE[caso] || "", precio, costo: costo || null,
+      n: k + 1, producto: esComp ? `↳ ${it.descripcion_cliente || it.nombre} (complemento de: ${it.complemento_de})` : `${it.descripcion_cliente || it.nombre}${comps.length ? ` (+ ${comps.map((c) => `${c.nombre} ×${c.por_unidad}`).join(", ")})` : ""}`,
+      parecido: op.parecido, caso, caso_txt: esComp ? "Complemento" : CASO_SIMPLE[caso] || "", precio, costo: costo || null,
       proveedores, unidad: it.unidad || "", cantidad: cant, total_venta: venta, total_compra: costo ? compra : null,
-      utilidad: costo ? venta - compra : null, margen: precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null,
+      utilidad: costo && !esComp ? venta - compra : null, margen: precio && costo ? Math.round(((precio - costo) / precio) * 1000) / 10 : null,
     };
   });
   return { filas, totales: { venta: tv, compra: tc, utilidad: tv - tc, margen: tv ? Math.round(((tv - tc) / tv) * 1000) / 10 : null, sin_costo: sinCosto } };

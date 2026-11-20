@@ -184,7 +184,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                   <tr key={l.indice} className={l.estado === "stock" ? "fila-stock" : !(l.compra_unit > 0) ? "fila-alerta" : ""}>
                     <td><input type="checkbox" disabled={anulada} checked={sel.has(l.indice)} onChange={() => toggle(l.indice)} /></td>
                     <td>{l.nombre}<div className="mini">{l.codigo ? `N° ${l.codigo}` : ""}</div>
-                      {l.caso === "similar" && l.nombre_catalogo && l.nombre_catalogo !== l.nombre && <div className="mini" style={{ color: "var(--warn)" }} title="Los precios de las opciones son de este producto del catálogo: revisa que cumpla lo que pidió el cliente">precios de: {l.nombre_catalogo}</div>}</td>
+                      {l.caso === "similar" && l.nombre_catalogo && l.nombre_catalogo !== l.nombre && <div className="mini" style={{ color: "var(--warn)" }} title="Los precios de las opciones son de este producto del catálogo: revisa que cumpla lo que pidió el cliente">precios de: {l.nombre_catalogo}</div>}
+                      {l.complemento_de && <div className="mini" style={{ color: "var(--accent)" }}>↳ complemento de: {l.complemento_de}</div>}</td>
                     <td className="mini">{l.cantidad} {l.unidad}</td>
                     <td>
                       {real ? <span><strong>{real.proveedor}</strong> <span className="mini">· {fmt(real.precio)}</span></span> :
@@ -206,9 +207,10 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
                     <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
                     <td className="price-cell">{fmt(l.venta_unit)}</td>
+                    {l.complemento_de ? <td className="mini" title="Va con otra línea: no tiene precio propio, su costo es de la venta">complemento</td> :
                     <td className="mini" style={{ color: l.margen < 0 ? "var(--danger)" : undefined }}>{fmt(l.margen)} · {l.margen_pct}%
                       {l.compra_unit > 0 && l.compra_unit > l.venta_unit && <div><span className="estado estado-danger" title="El precio de compra es mayor que el de venta">⚠ pérdida</span><div style={{ color: "var(--danger)" }}>revisar unidad / presentación del costo</div></div>}
-                      {l.compra_unit > 0 && l.venta_unit > 0 && l.margen_pct >= 75 && <div style={{ color: "var(--warn)" }}>⚠ margen muy alto: revisar unidad / presentación</div>}</td>
+                      {l.compra_unit > 0 && l.venta_unit > 0 && l.margen_pct >= 75 && <div style={{ color: "var(--warn)" }}>⚠ margen muy alto: revisar unidad / presentación</div>}</td>}
                     <td>
                       <span className={`estado estado-${tono}`}>{txt}</span>
                       {l.stock > 0 && <div className="mini">{l.stock} de stock{l.stock < l.cantidad ? ` · faltan ${l.cantidad - l.stock}` : ""}{!anulada && <> · <button className="link mini" onClick={() => quitarStock(l)}>deshacer</button></>}</div>}
@@ -281,7 +283,7 @@ export function imprimirCuadroDatos(data, esAdmin) {
     <div class="sub">${[venta.orden_compra_cliente ? `OC ${h(venta.orden_compra_cliente)}` : "", venta.id_solicitud ? `ID ${h(venta.id_solicitud)}` : "", `impreso el ${new Date().toLocaleDateString("es-CL")}`].filter(Boolean).join(" · ")}</div>
     ${prov.map(([p, ls]) => `<div class="grupo"><h2><span>${h(p === "SIN PROVEEDOR" ? "Sin proveedor elegido" : p)}${contacto[p] ? ` <span class="mini">· ${h(contacto[p])}</span>` : ""}</span><span>${ls.length} prod. · ${fmt(ls.reduce((s2, l) => s2 + l.total_compra, 0))}</span></h2>
       <table><colgroup><col style="width:46px"><col style="width:18px"><col><col style="width:38px"><col style="width:66px"><col style="width:70px"><col style="width:80px"><col style="width:70px"></colgroup><thead><tr><th>N°</th><th class="chk"></th><th>Producto</th><th class="num">Cant.</th><th class="cen">Unidad</th><th class="num">Precio unit.</th><th class="num">Total</th><th class="obs">Compra</th></tr></thead><tbody>
-      ${ls.map((l) => `<tr${l.estado === "stock" ? ' style="text-decoration:line-through;color:#777"' : ""}><td>${h(l.codigo || "")}</td><td class="chk">${l.estado === "stock" ? "✓" : "☐"}</td><td>${h(l.nombre)}${l.stock > 0 && l.estado !== "stock" ? `<div class="mini">${l.stock} de stock · comprar ${l.cantidad - l.stock}</div>` : ""}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}</td><td class="num">${l.cantidad}</td><td class="cen">${h(l.unidad || "")}</td>
+      ${ls.map((l) => `<tr${l.estado === "stock" ? ' style="text-decoration:line-through;color:#777"' : ""}><td>${h(l.codigo || "")}</td><td class="chk">${l.estado === "stock" ? "✓" : "☐"}</td><td>${h(l.nombre)}${l.stock > 0 && l.estado !== "stock" ? `<div class="mini">${l.stock} de stock · comprar ${l.cantidad - l.stock}</div>` : ""}${l.no_vino ? `<div class="aviso">no vino en ${h(l.no_vino.orden)} (${h(l.no_vino.proveedor)})</div>` : ""}${l.complemento_de ? `<div class="mini">↳ complemento de: ${h(l.complemento_de)}</div>` : ""}</td><td class="num">${l.cantidad}</td><td class="cen">${h(l.unidad || "")}</td>
         <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td class="obs">${h(textoCompra(l.estado, l.compras.map((c) => c.numero)))}</td></tr>`).join("")}
       </tbody></table></div>`).join("")}
     <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;

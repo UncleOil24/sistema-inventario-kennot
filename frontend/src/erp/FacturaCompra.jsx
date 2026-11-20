@@ -182,7 +182,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
                         ? <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra} onChange={(p) => set(l.i, { producto: p, calce: "exacto" })} />
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
-                      <PresentacionLinea l={l} productos={productos} onChange={(c) => set(l.i, c)}
+                      <PresentacionLinea l={l} productos={productos} complementos={res.complementos || []} onChange={(c) => set(l.i, c)}
                         items={(res.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}`, etiqueta: res.orden?.numero || "Pedido" }))} />
                       <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} />
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (

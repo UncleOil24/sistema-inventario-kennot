@@ -418,7 +418,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
           <tbody>
             {venta.items.map((i, k) => (
               <tr key={k}>
-                <td>{i.descripcion_cliente || i.nombre}{i.cambio && <div className="mini" title={`Cambiado el ${i.cambio.fecha}`}>antes: {i.cambio.antes}</div>}</td>
+                <td>{i.complemento_de ? "↳ " : ""}{i.descripcion_cliente || i.nombre}{i.complemento_de && <div className="mini" style={{ color: "var(--accent)" }}>complemento de: {i.complemento_de} (sin precio, se compra aparte)</div>}{i.cambio && <div className="mini" title={`Cambiado el ${i.cambio.fecha}`}>antes: {i.cambio.antes}</div>}</td>
                 <td className="mini">{i.cantidad} {i.unidad}</td>
                 <td className="price-cell">{fmt(i.precio)}</td>
                 {verCompras && <td className="price-cell compra">{fmt(i.costo)}</td>}

@@ -38,7 +38,8 @@ const ficha = handler(async (req, res) => {
     DocumentoVenta.findAll({ where: { venta_id: v.id }, attributes: ["id", "tipo", "folio", "fecha", "monto", "nombre_archivo", "createdAt", "creado_por"], order: [["id", "ASC"]] }),
   ]);
   const emp = datosEmpresa(v.empresa, params);
-  const items = (v.items || []).map((i, k) => ({
+  // Los componentes (complementos sin precio, ej. bisagras de una puerta) no se facturan
+  const items = (v.items || []).filter((i) => !i.complemento_de).map((i, k) => ({
     n: k + 1, descripcion: i.descripcion_cliente || i.nombre, cantidad: Number(i.cantidad), unidad: i.unidad || "",
     precio_neto: Math.round(Number(i.precio)), total_neto: Math.round(Number(i.precio) * Number(i.cantidad)),
   }));
