@@ -390,20 +390,23 @@ const UNIDAD_BASE = (u) => { const t = String(u || "").toUpperCase(); return /^L
 const factorDe = (l) => (Number(l.factor) > 0 ? Number(l.factor) : 1);
 // Al elegir "Es para:" una línea del pedido o de la venta: ese producto, y el factor que dice la descripción si calza la unidad
 export function elegirPara(l, item, productos) {
-  if (!item) return { para: "" };
+  if (!item) return { para: "", decidir: false };
   const p = productos.find((x) => x.id === item.producto_id) || { id: item.producto_id, nombre: item.nombre, unidad: item.unidad };
   const s = l.factor_sugerido;
   const calza = s && (UNIDAD_BASE(p.unidad) === s.unidad || UNIDAD_BASE(item.unidad) === s.unidad);
   const factor = factorDe(l) === 1 && calza ? s.factor : factorDe(l);
-  return { para: item.clave, accion: "existente", producto: { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor }, calce: "exacto", factor };
+  // Si lo que trae el documento no es exactamente el producto con que se cotizó, se decide: el mismo o uno nuevo
+  const decidir = !(l.producto && l.producto.id === p.id && l.calce !== "parecido");
+  return { para: item.clave, accion: "existente", producto: { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor }, calce: "exacto", factor, decidir };
 }
 // Lo que se manda al registrar: cantidad y precio en unidad base, y lo que el sistema debe recordar
 export function presentacionParaEnviar(l, reparto) {
   const f = factorDe(l);
   const cant = Number(l.cantidad) || 0; const precio = Number(l.precio_neto) || 0;
   const aprender = l.accion === "existente" && l.producto && (f !== 1 || l.para || l.aprendido) ? { codigo_proveedor: l.codigo_proveedor || null, descripcion: l.descripcion, factor: f } : undefined;
+  const para = /^[ov]\d+$/.test(l.para || "") ? { tipo: l.para[0] === "o" ? "orden" : "venta", indice: Number(l.para.slice(1)) } : undefined;
   return {
-    cantidad: cant * f, precio: f !== 1 ? precio / f : precio, aprender,
+    cantidad: cant * f, precio: f !== 1 ? precio / f : precio, aprender, para,
     presentacion: f !== 1 ? `${cant} × ${f} (${l.descripcion})` : undefined,
     reparto: reparto && f !== 1 ? reparto.map((r) => ({ ...r, cantidad: r.cantidad * f })) : reparto,
   };
@@ -422,7 +425,7 @@ export function prepararLineas(lineas, items, productos) {
     if (!it) return l;
     usados.add(it.clave);
     const base = { ...l, accion: "existente", producto: prod, calce: prod?.id === l.producto?.id ? l.calce : "parecido" };
-    return Number(l.factor) > 1 ? { ...base, para: it.clave } : { ...base, ...elegirPara(base, it, productos), calce: base.calce };
+    return Number(l.factor) > 1 ? { ...base, para: it.clave, decidir: base.calce === "parecido" } : { ...base, ...elegirPara(base, it, productos), calce: base.calce };
   });
 }
 
@@ -431,8 +434,19 @@ export function PresentacionLinea({ l, items = [], productos, onChange }) {
   const u = l.producto ? UNIDAD_BASE(l.producto.unidad) : "";
   const s = l.factor_sugerido;
   const cant = Number(l.cantidad) || 0;
+  const itPara = items.find((x) => x.clave === l.para);
+  const pPara = itPara && (productos.find((x) => x.id === itPara.producto_id) || { id: itPara.producto_id, nombre: itPara.nombre });
   return (
     <div className="mini" style={{ marginTop: 4 }}>
+      {l.decidir && pPara && <div className="aviso" style={{ margin: "4px 0", padding: "6px 8px" }}>
+        <strong>¿Lo comprado es el mismo producto del catálogo con que se cotizó?</strong>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
+          <button className="btn btn-ghost btn-sm" style={{ textAlign: "left" }} onClick={() => onChange({ accion: "existente", producto: { id: pPara.id, codigo: pPara.codigo, nombre: pPara.nombre, unidad: pPara.unidad, precio_compra: Number(pPara.precio_compra) || 0, proveedor: pPara.proveedor }, decidir: false })}>Sí, el mismo: guardar el precio en N° {pPara.codigo} {pPara.nombre}</button>
+          <button className="btn btn-ghost btn-sm" style={{ textAlign: "left" }} onClick={() => onChange({ accion: "nuevo", nuevo: { ...(l.nuevo || {}), nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() }, decidir: false })}>No, crear producto nuevo: {String(l.descripcion).toUpperCase()}</button>
+          <button className="btn btn-ghost btn-sm" style={{ textAlign: "left" }} onClick={() => onChange({ accion: "existente", decidir: false })}>Es otro del catálogo (lo elijo arriba)</button>
+        </div>
+        <div style={{ marginTop: 3 }}>En los tres casos la compra queda para «{itPara.nombre}» de la venta.</div>
+      </div>}
       {items.length > 0 && <div style={{ display: "flex", gap: 4, alignItems: "center" }}>Es para:
         <select className="select-linea" style={{ flex: 1, padding: "2px 4px" }} value={l.para || ""} onChange={(e) => onChange(elegirPara(l, items.find((x) => x.clave === e.target.value), productos))}>
           <option value="">— como está —</option>

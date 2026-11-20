@@ -113,7 +113,8 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
       footer={terminado ? <button className="btn btn-primary" onClick={onClose}>Listo</button> : d && d.estado === "leido" ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{pendientes} por revisar</span>
         <button className="btn btn-ghost" disabled={guardando} onClick={omitir}>Omitir este</button>
-        <button className="btn btn-primary" disabled={guardando || (d.como === "materiales" && (!d.enc.proveedor || (!d.enc.documento && d.enc.tipo_documento !== "boleta")))} onClick={guardar}>
+        {d.como === "materiales" && d.lineas.some((l) => !l.omitir && l.decidir) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
+        <button className="btn btn-primary" disabled={guardando || (d.como === "materiales" && (!d.enc.proveedor || (!d.enc.documento && d.enc.tipo_documento !== "boleta") || d.lineas.some((l) => !l.omitir && l.decidir)))} onClick={guardar}>
           {guardando ? "Guardando..." : d.como === "gasto" ? "Guardar como gasto de la venta" : d.enc.orden_id ? "Guardar y recibir la compra" : "Guardar compra"}
         </button>
       </> : <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>}>
@@ -207,7 +208,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             <table className="table table-compacta">
               <thead><tr><th></th><th>En el documento</th><th>Cant.</th><th>Neto unit.</th><th className="col-desc">Producto nuestro</th><th>Línea de la venta</th></tr></thead>
               <tbody>
-                {d.lineas.map((l0) => { const vl = l0.accion === "existente" && l0.producto ? lineasVenta.find((x) => x.producto_id === l0.producto.id) : null; const l = { ...l0, venta_linea: vl ? { nombre: vl.nombre, cantidad: vl.cantidad } : null }; return (
+                {d.lineas.map((l0) => { const vl = /^v\d+$/.test(l0.para || "") ? lineasVenta.find((x) => x.indice === Number(l0.para.slice(1))) : l0.accion === "existente" && l0.producto ? lineasVenta.find((x) => x.producto_id === l0.producto.id) : null; const l = { ...l0, venta_linea: vl ? { nombre: vl.nombre, cantidad: vl.cantidad } : null }; return (
                   <tr key={l.i} className={l.omitir ? "fila-anulada" : l.alza ? "fila-alerta" : ""}>
                     <td><input type="checkbox" checked={!l.omitir} onChange={(e) => setLinea(l.i, { omitir: !e.target.checked })} /></td>
                     <td>{l.descripcion}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div></td>
