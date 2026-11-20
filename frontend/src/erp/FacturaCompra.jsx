@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, aplicarFactorPrecios, montosTrasFactor } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -147,8 +147,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
           </div>
           <div className="pago-form">
             {res.control.precios_incluyen_iva && <span className="estado estado-info">Precios venían con IVA: ya se dividieron por 1,19</span>}
-            {res.control.cuadra === true && <span className="estado estado-ok">✓ La suma de las líneas cuadra con el total de la factura</span>}
-            {res.control.cuadra === false && <span className="estado estado-warn">⚠ La suma de las líneas ({fmt(res.control.suma_lineas)}) no cuadra con la factura ({fmt(res.control.total_documento)}): revisa</span>}
+            <CuadreDocumento control={res.control} lineas={lineas} onAplicar={(f) => { const nl = aplicarFactorPrecios(lineas, f); setLineas(nl); setEnc({ ...enc, ...montosTrasFactor(nl, res.control) }); }} />
           </div>
           {res.ya_registrada?.length > 0 && <div className="aviso" style={{ color: "var(--danger)" }}>⚠ Este documento ya está registrado: {res.ya_registrada.map((o) => o.numero).join(", ")}. Revisa antes de guardarlo otra vez.</div>}
           {res.orden && res.faltan.length > 0 && <div className="aviso">En la compra {res.orden.numero} y no en la factura: {res.faltan.map((f) => `${f.nombre} (${f.cantidad})`).join(" · ")}</div>}
