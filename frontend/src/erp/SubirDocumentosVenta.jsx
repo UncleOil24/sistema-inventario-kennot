@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { PresentacionLinea, presentacionParaEnviar } from "./ui";
+import { PresentacionLinea, presentacionParaEnviar, prepararLineas } from "./ui";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar } from "./ui";
 import { TIPOS_PAGO } from "./lib";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, envaseEnFactura } from "./lib";
@@ -36,7 +36,9 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             orden_id: propia ? String(propia.id) : "", razon_social: e.razon_social, rut: e.rut,
           },
           gasto: { tipo: "flete", descripcion: "" },
-          lineas: r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })),
+          // Cada línea se conecta con su línea de la venta (aunque el documento la escriba distinto) y su presentación
+          lineas: prepararLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })),
+            (r.venta_items || []).map((x) => ({ ...x, clave: `v${x.k}` })), productos),
         };
       } catch (err) { lista[k] = { ...lista[k], estado: "error", error: err.message }; }
       setDocs([...lista]);
@@ -184,8 +186,9 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
             const o = ordenes.find((x) => String(x.id) === String(d.enc.orden_id));
             if (!o) return null;
             const enDoc = new Map();
-            for (const l of d.lineas) if (!l.omitir && l.accion === "existente" && l.producto) enDoc.set(l.producto.id, (enDoc.get(l.producto.id) || 0) + Number(l.cantidad || 0));
-            const noVino = o.items.filter((it) => it.producto_id && (enDoc.get(it.producto_id) || 0) < it.cantidad).map((it) => `${it.nombre} (${it.cantidad - Math.min(it.cantidad, enDoc.get(it.producto_id) || 0)} de ${it.cantidad})`);
+            for (const l of d.lineas) if (!l.omitir && l.accion === "existente" && l.producto) enDoc.set(l.producto.id, (enDoc.get(l.producto.id) || 0) + Number(l.cantidad || 0) * (Number(l.factor) > 0 ? Number(l.factor) : 1));
+            const casi = (x, n) => !Number.isInteger(Math.round(x * 1000) / 1000) && x >= n * 0.97; // presentación: 26,76 de 27 m²
+            const noVino = o.items.filter((it) => it.producto_id && (enDoc.get(it.producto_id) || 0) < it.cantidad && !casi(enDoc.get(it.producto_id) || 0, it.cantidad)).map((it) => `${it.descripcion_cliente || it.nombre} (${Math.round((it.cantidad - Math.min(it.cantidad, enDoc.get(it.producto_id) || 0)) * 100) / 100} de ${it.cantidad})`);
             const extra = d.lineas.filter((l) => !l.omitir && !(l.accion === "existente" && l.producto && o.items.some((it) => it.producto_id === l.producto.id))).length;
             return (noVino.length > 0 || extra > 0) && (
               <div className="aviso">

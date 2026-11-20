@@ -9,6 +9,7 @@ const normCod = (s) => String(s || "").replace(/[\[\]\s]/g, "").toUpperCase() ||
 function factorDeDescripcion(desc) {
   const t = normDesc(desc).replace(/,/g, ".");
   const pruebas = [
+    [/(\d+(?:\.\d+)?)\s*M2\b/, "M2"], // caja de piso 2,23 M2
     [/(\d+(?:\.\d+)?)\s*(?:LTS?|LITROS?|L)\b/, "LITRO"],
     [/(\d+(?:\.\d+)?)\s*(?:MTS?|METROS?|M)\b(?!\s*M)/, "METRO"],
     [/(\d+(?:\.\d+)?)\s*(?:KGS?|KILOS?)\b/, "KILO"],
