@@ -115,6 +115,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
             pasa los precios al catálogo con la fecha de la factura. Nada se guarda hasta que confirmes.
             {gasto && <> El gasto <strong>{gasto.descripcion || ""} {fmt(gasto.monto)}</strong> se reemplazará por la compra.</>}
           </div>
+<div className="aviso-clave" style={{ marginTop: 8 }}>⚠ Cada factura se sube <strong>una sola vez</strong> al sistema. Si sirve a varias ventas, se reparte al subirla (en "Para:" de cada línea) o después con "Repartir entre ventas" en la compra. Subirla de nuevo duplica el monto y el IVA.</div>
           <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
         </>
       ) : (
