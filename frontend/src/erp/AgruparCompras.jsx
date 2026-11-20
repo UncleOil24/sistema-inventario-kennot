@@ -126,7 +126,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
   };
 
   return (
-    <Modal titulo="// Agrupar compras de varias ventas" onClose={onClose} ancho={1250}
+    <Modal titulo="// Agrupar compras de varias ventas" onClose={onClose} ancho="min(1600px, 98vw)"
       footer={<>
         <button className="btn btn-ghost" onClick={imprimir}>🖨 Imprimir</button>
         <button className="btn btn-ghost" onClick={excel}>↓ Excel</button>
