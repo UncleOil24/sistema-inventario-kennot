@@ -415,17 +415,51 @@ export function presentacionParaEnviar(l, reparto) {
 // - Si el producto propuesto está en el pedido/venta, es ese (aunque el calce sea "parecido": es lo que compramos).
 // - Si no, se busca entre los candidatos uno que esté en el pedido/venta y aún no tenga línea.
 // - Si la descripción trae la presentación (5 LT, 2,23 M2…) y calza con la unidad, se pone el factor.
+// Palabras que identifican el producto (sin tildes, sin relleno): "MAD-GUARDAPOLVO RODON FINGER 3/4" → GUARDAPOLVO, RODON, FINGER, 3/4
+const RELLENO = new Set(["DE", "DEL", "CON", "PARA", "SIN", "LOS", "LAS", "UNA", "UND", "UNID", "UNIDAD", "MM", "MT", "MTS", "CM", "KG", "LT", "X"]);
+const palabrasDe = (t) => sinTildes(String(t || "")).toUpperCase().replace(/[^A-Z0-9/.,]+/g, " ").split(" ")
+  .filter((w) => w && !RELLENO.has(w) && (w.length >= 3 || /\d/.test(w)));
+// Qué tanto se parece la línea del documento a una línea del pedido o de la venta: palabras en común, y mucho más
+// si coincide la primera palabra de lo pedido (lo que es: GUARDAPOLVO no es JUNQUILLO aunque ambos sean "pino finger 3/4")
+function parecidoA(desc, nombre) {
+  const a = new Set(palabrasDe(desc));
+  const b = palabrasDe(nombre);
+  const comunes = b.filter((w) => a.has(w)).length;
+  const sustantivo = b.find((w) => !/\d/.test(w));
+  return { comunes, sustantivo: !!sustantivo && a.has(sustantivo) };
+}
+
 export function prepararLineas(lineas, items, productos) {
   const usados = new Set();
   const libre = (pid) => items.find((x) => x.producto_id === pid && !usados.has(x.clave));
-  return lineas.map((l) => {
-    let it = l.producto ? libre(l.producto.id) : null;
-    let prod = l.producto;
-    if (!it) for (const c of l.candidatos || []) { const x = libre(c.id); if (x) { it = x; prod = c; break; } }
-    if (!it) return l;
+  const conectar = (l, it, prod) => {
     usados.add(it.clave);
     const base = { ...l, accion: "existente", producto: prod, calce: prod?.id === l.producto?.id ? l.calce : "parecido" };
     return Number(l.factor) > 1 ? { ...base, para: it.clave, decidir: base.calce === "parecido" } : { ...base, ...elegirPara(base, it, productos), calce: base.calce };
+  };
+  // 1° lo exacto: la línea trae el mismo producto que está en el pedido o la venta
+  const salida = lineas.map((l) => {
+    if (!l.producto || l.calce === "parecido") return null;
+    const it = libre(l.producto.id);
+    return it ? conectar(l, it, l.producto) : null;
+  });
+  // 2° lo parecido: la línea del pedido o la venta que más se parece por su descripción (lo que pidió el cliente);
+  // un candidato del catálogo suma, pero lo que manda es que sea lo mismo (GUARDAPOLVO con GUARDAPOLVO)
+  return lineas.map((l, n) => {
+    if (salida[n]) return salida[n];
+    const cands = new Set([l.producto?.id, ...(l.candidatos || []).map((c) => c?.id)].filter(Boolean));
+    let mejor = null;
+    for (const it of items) {
+      if (usados.has(it.clave)) continue;
+      const pa = parecidoA(l.descripcion, it.nombre);
+      const enCands = cands.has(it.producto_id);
+      const puntos = pa.comunes + (pa.sustantivo ? 3 : 0) + (enCands ? 1 : 0);
+      const vale = pa.sustantivo || (enCands && pa.comunes >= 1);
+      if (vale && (!mejor || puntos > mejor.puntos)) mejor = { it, puntos };
+    }
+    if (!mejor) return l;
+    const prod = productos.find((x) => x.id === mejor.it.producto_id) || (l.candidatos || []).find((c) => c?.id === mejor.it.producto_id) || { id: mejor.it.producto_id, nombre: mejor.it.nombre, unidad: mejor.it.unidad };
+    return conectar(l, mejor.it, prod);
   });
 }
 
