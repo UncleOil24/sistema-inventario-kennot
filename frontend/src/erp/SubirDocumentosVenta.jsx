@@ -110,7 +110,7 @@ export default function SubirDocumentosVenta({ venta, lineas: lineasVenta = [], 
   }
 
   return (
-    <Modal titulo={`// Facturas y boletas · ${venta.numero}`} onClose={onClose} ancho={1250}
+    <Modal titulo={`// Facturas y boletas · ${venta.numero}${venta.cliente_nombre ? ` · ${venta.cliente_nombre}` : ""}`} onClose={onClose} ancho={1250}
       footer={terminado ? <button className="btn btn-primary" onClick={onClose}>Listo</button> : d && d.estado === "leido" ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{pendientes} por revisar</span>
         <button className="btn btn-ghost" disabled={guardando} onClick={omitir}>Omitir este</button>

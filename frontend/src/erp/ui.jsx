@@ -375,7 +375,7 @@ export function RepartoLinea({ l, onChange }) {
       {sencillo ? <>→ {cands[0].numero}{cands[0].cliente ? ` · ${cands[0].cliente}` : ""}</> : <>
         <span>Para:</span>
         {cands.map((c) => (
-          <label key={c.venta_id} title={c.cliente || ""}>{c.numero}{c.falta ? ` (falta ${c.falta})` : ""}
+          <label key={c.venta_id} title={c.cliente || ""}>{c.numero}{c.cliente ? ` ${String(c.cliente).replace(/^(I\.?\s*)?MUNICIPALIDAD DE /i, "Muni ").slice(0, 18)}` : ""}{c.falta ? ` (falta ${c.falta})` : ""}
             <input type="number" min="0" className="qty-input" style={{ width: 56 }} value={de(c.venta_id)} onChange={(e) => cambiar(c.venta_id, e.target.value)} /></label>
         ))}
         {sin > 0 && <span>· sin venta: {sin}</span>}

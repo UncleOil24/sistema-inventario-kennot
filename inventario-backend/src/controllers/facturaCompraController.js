@@ -131,6 +131,8 @@ const leer = handler(async (req, res) => {
     documento: { [Op.in]: [folioDoc, `BOL ${folioDoc}`] } }, attributes: ["id", "numero", "fecha_factura", "venta_id", "total"], raw: true }) : [];
   const sugeridas = !orden && donde ? await OrdenCompra.findAll({ where: donde, attributes: ["id", "numero", "fecha", "total", "venta_id", "proveedor_nombre"], order: [["id", "DESC"]], limit: 15, raw: true }) : [];
   const neto = lineas.reduce((s, l) => s + Math.round(l.precio_neto * l.cantidad), 0);
+  // Venta de esta compra (la de la venta desde donde se sube, o la de la orden) para mostrarla arriba
+  const ventaTitulo = venta || (orden?.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["id", "numero", "empresa", "cliente_nombre"] }) : null);
   res.json({
     ok: true,
     data: {
@@ -142,7 +144,7 @@ const leer = handler(async (req, res) => {
       control: r.control, truncado: r.truncado, lineas, faltan, sugeridas, ya_registrada: yaRegistrada,
       totales: { neto, iva: Math.round(neto * 0.19), total: neto + Math.round(neto * 0.19) },
       orden: orden ? { id: orden.id, numero: orden.numero, total: Number(orden.total), estado: orden.estado, documento: orden.documento } : null,
-      venta: venta ? { id: venta.id, numero: venta.numero, empresa: venta.empresa } : null,
+      venta: ventaTitulo ? { id: ventaTitulo.id, numero: ventaTitulo.numero, empresa: ventaTitulo.empresa, cliente: ventaTitulo.cliente_nombre || "" } : null,
       // Para asociar a mano una línea de la factura con una línea del pedido o de la venta ("Es para:")
       orden_items: orden ? orden.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
       venta_items: venta ? venta.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
