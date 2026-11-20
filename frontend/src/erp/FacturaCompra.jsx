@@ -95,7 +95,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
   }
 
   return (
-    <Modal titulo={`// Subir factura de compra${orden ? ` · ${orden.numero}` : ""}${res?.venta ? ` · para ${res.venta.numero}${res.venta.cliente ? ` · ${res.venta.cliente}` : ""}` : ""}`} onClose={onClose} ancho={1200}
+    <Modal titulo={`// Subir factura de compra${orden ? ` · ${orden.numero}` : ""}${res?.venta ? ` · para ${res.venta.numero}${res.venta.cliente ? ` · ${res.venta.cliente}` : ""}` : ""}`} onClose={onClose} ancho="min(1600px, 98vw)"
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{activas.length} de {lineas.length} líneas · neto {fmt(neto)}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -164,7 +164,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
           {res.orden && res.faltan.length > 0 && <div className="aviso">En la compra {res.orden.numero} y no en la factura: {res.faltan.map((f) => `${f.nombre} (${f.cantidad})`).join(" · ")}</div>}
           {res.truncado && <div className="aviso">La factura es muy larga y la lectura pudo quedar incompleta.</div>}
           <div className="table-wrap">
-            <table className="table table-compacta">
+            <table className="table table-compacta tabla-documento">
               <thead><tr><th></th><th>En la factura</th><th>Cant.</th><th>Neto unit.</th><th className="col-desc">Producto nuestro</th><th>Catálogo hoy</th>{res.orden && <th>vs compra</th>}</tr></thead>
               <tbody>
                 {lineas.map((l) => (

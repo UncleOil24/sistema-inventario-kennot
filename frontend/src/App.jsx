@@ -325,6 +325,10 @@ const styles = `
   .fila-periodo td { background: var(--surface); font-size: 14px; border-top: 3px solid var(--accent); padding-top: 10px; }
   .fila-grupo td { background: var(--surface2); font-size: 13px; color: var(--text); border-top: 2px solid var(--border2); }
   .fila-grupo-margen td { background: var(--surface2); border-top: none; }
+  .tabla-documento td, .tabla-documento th { padding: 5px 7px; font-size: 11.5px; }
+  .tabla-documento .btn-sm { font-size: 10px; padding: 3px 7px; letter-spacing: 0.02em; }
+  .tabla-documento .select-linea, .tabla-documento .qty-input { font-size: 11px; }
+  .tabla-documento .aviso { font-size: 11px; }
   .componente-linea { font-size: 11px; color: #555; display: flex; align-items: center; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
   .fila-separador td { height: 10px; padding: 0 !important; background: transparent !important; border: none !important; }
   .fila-grupo td { border-bottom: 1px solid var(--border2); }
