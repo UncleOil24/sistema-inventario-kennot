@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando } from "./ui";
+import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando, EmpresaCompra, AvisoCamposClave } from "./ui";
 import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago, imprimirHTML, escaparHTML as h } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
@@ -324,13 +324,14 @@ function FormOrden({ orden, proveedores, notify, onClose, onGuardada }) {
             <SelectorVenta valor={form.venta_id} onChange={(venta_id) => setForm({ ...form, venta_id })} />
           </div>
         )}
-        <div className="field">
-          <label>Empresa que compra</label>
+        <div className="field campo-clave">
+          <label>★ Empresa que compra</label>
           <select value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })}>
             <option value="">{form.venta_id ? "La de la venta" : "— Elegir —"}</option>
             <option value="kenott">Kenott</option>
             <option value="tactics">Tactics</option>
           </select>
+          <div className="mini">Debe ser la empresa a nombre de quien vendrá la factura: su IVA se descuenta ahí.</div>
         </div>
       </div>
       <ItemsEditor items={items} setItems={setItems} productos={productos} precioDe={(p) => p.precio_compra} etiquetaPrecio="Costo neto" />
@@ -469,18 +470,16 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
       {orden.estado !== "anulada" && puedeOperar && (
         <div className="panel" style={{ marginTop: 10 }}>
           <div className="panel-titulo">Factura del proveedor</div>
+          <AvisoCamposClave />
           <div className="fields-row">
-            <div className="field"><label>N° factura</label><input value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej: 88123" /></div>
-            <div className="field"><label>Fecha factura</label><input type="date" value={fact.fecha_factura} onChange={(e) => setFact({ ...fact, fecha_factura: e.target.value })} /></div>
+            <div className={`field campo-clave ${factura ? "" : "vacio"}`}><label>★ N° factura</label><input value={factura} onChange={(e) => setFactura(e.target.value)} placeholder="Ej: 88123" /></div>
+            <div className={`field campo-clave ${fact.fecha_factura ? "" : "vacio"}`}><label>★ Fecha factura</label><input type="date" value={fact.fecha_factura} onChange={(e) => setFact({ ...fact, fecha_factura: e.target.value })} /></div>
           </div>
           <div className="fields-row">
-            <div className="field"><label>Empresa que compra</label>
-              <select value={fact.empresa} onChange={(e) => setFact({ ...fact, empresa: e.target.value })}>
-                <option value="">— Elegir —</option><option value="kenott">Kenott</option><option value="tactics">Tactics</option>
-              </select></div>
+            <EmpresaCompra valor={fact.empresa} conDocumento={false} ventaEmpresa={orden.venta_empresa || null} onChange={(empresa) => setFact({ ...fact, empresa })} />
             <div className="field"><label>Vence el pago</label><input type="date" value={fact.fecha_vencimiento} onChange={(e) => setFact({ ...fact, fecha_vencimiento: e.target.value })} /></div>
           </div>
-          <div className="field"><label>Tipo de pago</label>
+          <div className="field campo-clave"><label>★ Tipo de pago</label>
             <select value={fact.tipo_pago} onChange={(e) => setFact({ ...fact, tipo_pago: e.target.value })}>
               {TIPOS_PAGO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
             </select>

@@ -524,3 +524,36 @@ export function BotonesSolicitud({ lineas, notify, sm = true, vacio = "Seleccion
         <button className="link mini" title="Cerrar" onClick={() => setAbierto(false)}>✕</button>
       </span>;
 }
+
+// Empresa que compra: a nombre de quién viene la factura. Su IVA se descuenta en esa empresa, así que se elige
+// con dos botones bien distintos y un aviso. "detectada" es lo que leyó el sistema en el documento (o null).
+const NOMBRE_EMPRESA = { kenott: "Kenott", tactics: "Tactics" };
+export function EmpresaCompra({ valor, onChange, detectada = null, ventaEmpresa = null, conDocumento = true }) {
+  let aviso;
+  if (detectada && valor === detectada) aviso = <span className="ok">✓ La factura viene a nombre de {NOMBRE_EMPRESA[detectada]}: su IVA queda en {NOMBRE_EMPRESA[detectada]}.</span>;
+  else if (detectada && valor && valor !== detectada) aviso = <span className="mal">⚠ La factura viene a nombre de {NOMBRE_EMPRESA[detectada]} y elegiste {NOMBRE_EMPRESA[valor]}: el IVA de las dos empresas quedaría descuadrado.</span>;
+  else if (!valor) aviso = <span className="mal">⚠ {conDocumento ? "No se ve en el documento a nombre de quién viene. " : ""}Revisa la factura y elige la empresa que compra.</span>;
+  else aviso = <span>{conDocumento ? "No se vio en el documento a nombre de quién viene: confirma que sea " : "Confirma que la factura venga a nombre de "}{NOMBRE_EMPRESA[valor]}.</span>;
+  return (
+    <div className={`field campo-clave empresa-compra ${valor ? "" : "vacio"}`}>
+      <label>★ Empresa que compra</label>
+      <div className="empresa-botones">
+        {["kenott", "tactics"].map((e) => (
+          <button key={e} type="button" className={`empresa-btn ${e} ${valor === e ? "activo" : ""}`} onClick={() => onChange(e)}>
+            {valor === e ? "● " : "○ "}{NOMBRE_EMPRESA[e]}{detectada === e ? " (en la factura)" : ""}
+          </button>
+        ))}
+      </div>
+      <div className="empresa-aviso">
+        {aviso}
+        {ventaEmpresa && valor && ventaEmpresa !== valor && <div>La venta es de {NOMBRE_EMPRESA[ventaEmpresa]}; esta compra queda en {NOMBRE_EMPRESA[valor]} (puede ser, solo revísalo).</div>}
+        <div>Independiente de quién facture la venta, el IVA de esta compra va a la empresa que figura en la factura.</div>
+      </div>
+    </div>
+  );
+}
+
+// Aviso de los datos que quedan en la contabilidad (IVA, por pagar): se llenan con la factura en mano
+export function AvisoCamposClave() {
+  return <div className="aviso-clave">★ Los campos marcados quedan en la contabilidad (IVA y por pagar de cada empresa): revísalos con la factura en mano.</div>;
+}

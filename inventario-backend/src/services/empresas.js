@@ -30,4 +30,19 @@ function datosEmpresa(clave, p) {
   };
 }
 
-module.exports = { EMPRESAS, validarEmpresa, datosEmpresa };
+// Qué empresa nuestra es la compradora de un documento (a nombre de quién viene la factura), por RUT o razón social.
+// null si no aparece o no es ninguna de las dos.
+const rutBase = (r) => String(r || "").toUpperCase().replace(/[^0-9K]/g, "").slice(0, -1);
+function empresaCompradora(rut, nombre, p) {
+  const r = rutBase(rut);
+  if (r) {
+    if (r === rutBase(p.empresa_rut)) return "kenott";
+    if (r === rutBase(p.tactics_rut)) return "tactics";
+  }
+  const n = String(nombre || "").toUpperCase();
+  if (/TACTICS?/.test(n)) return "tactics";
+  if (/KEN+OT+/.test(n)) return "kenott";
+  return null;
+}
+
+module.exports = { EMPRESAS, validarEmpresa, datosEmpresa, empresaCompradora };
