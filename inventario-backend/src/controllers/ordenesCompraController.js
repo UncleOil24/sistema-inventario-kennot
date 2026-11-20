@@ -63,7 +63,7 @@ const getOrdenes = handler(async (req, res) => {
     const cc = new Map(cots.map((c) => [c.id, Number(c.costo_total) || 0]));
     for (const x of ventas) x.costo_cotizado = cc.get(x.cotizacion_id) || Number(x.costo_total) || 0;
   }
-  for (const x of ventas) { delete x.costo_total; delete x.cotizacion_id; }
+  for (const x of ventas) { delete x.costo_total; if (!x.costo_cotizado) delete x.cotizacion_id; }
   const v = new Map(ventas.map((x) => [x.id, x]));
   res.json({ ok: true, data: data.map((o) => ({ ...o.toJSON(), venta: v.get(o.venta_id) || null })) });
 });

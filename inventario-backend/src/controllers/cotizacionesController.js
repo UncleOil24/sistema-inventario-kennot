@@ -592,7 +592,52 @@ const descargarPdf = async (req, res) => {
   }
 };
 
+
+// --- Revisar y corregir el costo cotizado (gerencia) ------------------------------------------------
+// Para comparar lo comprado con lo cotizado: muestra el costo de cada línea y marca las que no tienen sentido
+// (costo mayor que su precio de venta). Corregir solo cambia el costo interno de la cotización: no cambia
+// precios, totales ni el documento enviado al cliente.
+const lineasCosto = (cot) => (cot.items || []).map((i, k) => {
+  const cant = Number(i.cantidad) || 0, costo = Number(i.costo) || 0, precio = Number(i.precio_unitario ?? i.precio) || 0;
+  return { k, descripcion: i.descripcion_cliente || i.nombre || "", nombre: i.nombre || "", unidad: i.unidad || "", cantidad: cant,
+    costo, precio, total_costo: Math.round(costo * cant), total_venta: Math.round(precio * cant),
+    sospechosa: costo > 0 && precio > 0 && costo > precio * 1.5, corregido: i.costo_corregido || null };
+});
+const getCostos = handler(async (req, res) => {
+  const cot = await Cotizacion.findByPk(req.params.id);
+  if (!cot) throw new ErrorNegocio("Cotización no encontrada", 404);
+  const lineas = lineasCosto(cot);
+  res.json({ ok: true, data: { id: cot.id, numero: cot.numero, empresa: cot.empresa, cliente: cot.cliente, subtotal: Number(cot.subtotal), costo_total: Number(cot.costo_total),
+    suma_lineas: lineas.reduce((s, l) => s + l.total_costo, 0), lineas } });
+});
+// PUT { cambios: [{ k, costo }], motivo }
+const corregirCostos = handler(async (req, res) => {
+  const b = req.body || {};
+  const motivo = String(b.motivo || "").trim();
+  if (!motivo) throw new ErrorNegocio("Indica el motivo de la corrección");
+  const cambios = Array.isArray(b.cambios) ? b.cambios : [];
+  if (!cambios.length) throw new ErrorNegocio("No hay cambios");
+  const cot = await sequelize.transaction(async (t) => {
+    const c = await Cotizacion.findByPk(req.params.id, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!c) throw new ErrorNegocio("Cotización no encontrada", 404);
+    const items = (c.items || []).map((i) => ({ ...i }));
+    for (const x of cambios) {
+      const it = items[Number(x.k)];
+      const nuevo = Number(x.costo);
+      if (!it || !(nuevo >= 0)) continue;
+      if (Number(it.costo || 0) === nuevo) continue;
+      it.costo_corregido = { antes: Number(it.costo || 0), fecha: new Date().toISOString().slice(0, 10), usuario: firma(req), motivo };
+      it.costo = nuevo;
+    }
+    const costo_total = items.reduce((s, i) => s + Number(i.costo || 0) * Number(i.cantidad || 0), 0);
+    await c.update({ items, costo_total }, { transaction: t });
+    return c;
+  });
+  res.json({ ok: true, data: { costo_total: Number(cot.costo_total) } });
+});
+
 module.exports = {
+  getCostos, corregirCostos,
   postularCotizacion,
   descargarPedidoProveedor, leerProveedor, aplicarProveedor,
   registrarSeguimiento, cantidadPorSeguir, wherePorSeguir,
