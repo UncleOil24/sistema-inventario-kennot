@@ -94,7 +94,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
   }
 
   return (
-    <Modal titulo={`// Subir factura de compra${orden ? ` · ${orden.numero}` : ""}`} onClose={onClose} ancho={1200}
+    <Modal titulo={`// Subir factura de compra${orden ? ` · ${orden.numero}` : ""}${res?.venta ? ` · para ${res.venta.numero}${res.venta.cliente ? ` · ${res.venta.cliente}` : ""}` : ""}`} onClose={onClose} ancho={1200}
       footer={res ? <>
         <span className="mini" style={{ marginRight: "auto" }}>{activas.length} de {lineas.length} líneas · neto {fmt(neto)}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -119,6 +119,15 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
       ) : (
         <>
           <AvisoCamposClave />
+          {(() => {
+            // Productos que también necesitan otras ventas: se dice cuáles, para no confundir proyectos
+            const propia = res.venta?.id;
+            const otras = new Map();
+            for (const l of lineas) for (const c of l.ventas_pendientes || []) if (c.venta_id !== propia) otras.set(c.venta_id, `${c.numero}${c.cliente ? ` · ${c.cliente}` : ""}`);
+            return otras.size > 0 && <div className="aviso" style={{ margin: "0 0 8px" }}>
+              {res.venta ? <>Esta compra es de <strong>{res.venta.numero}{res.venta.cliente ? ` · ${res.venta.cliente}` : ""}</strong>. </> : null}
+              Algunos productos también los necesita{otras.size > 1 ? "n" : ""} <strong>{[...otras.values()].join(" / ")}</strong>: en cada línea, "Para:" dice cuánto va a cada venta.</div>;
+          })()}
           <div className="fields-row tres">
             <div className={`field campo-clave ${enc.proveedor ? "" : "vacio"}`}>
               <label>★ Proveedor {res.proveedor_existente ? "" : "(nuevo)"}</label>
