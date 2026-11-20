@@ -6,6 +6,8 @@ const c = require("../controllers/cotizacionesController");
 router.get("/", c.getCotizaciones);
 router.get("/por-seguir/cantidad", c.cantidadPorSeguir);
 router.get("/:id", c.getCotizacion);
+router.get("/:id/costos", soloAdmin, c.getCostos);
+router.put("/:id/costos", soloAdmin, c.corregirCostos);
 router.get("/:id/excel", c.descargarExcel);
 router.get("/:id/pdf", c.descargarPdf);
 router.get("/:id/interna", c.descargarInterna);

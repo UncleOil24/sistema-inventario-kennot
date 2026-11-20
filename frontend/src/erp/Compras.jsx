@@ -15,6 +15,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
   const [editando, setEditando] = useState(null); // null | "nueva" | orden
   const [detalle, setDetalle] = useState(null);
   const [cuadroDe, setCuadroDe] = useState(null); // venta cuyo cuadro de compra está abierto
+  const [costosDe, setCostosDe] = useState(null); // cotización cuyo costo cotizado se revisa (gerencia)
   const [documento, setDocumento] = useState(false);
   const [facturaNueva, setFacturaNueva] = useState(false);
   const [agrupar, setAgrupar] = useState(false);
@@ -104,7 +105,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
                   <PeriodoCompras key={p.clave} p={p} total={total} abierto={abierto} conTitulo={periodo !== "todo"}
                     onToggle={() => alternar(abiertos, setAbiertos, p.clave)}>
                     {abierto && p.grupos.map((g) => (
-                      <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} esAdmin={esAdmin} abrirCuadro={puedeOperar ? setCuadroDe : null} abierto={buscando || ventasAbiertas.has(`${p.clave}|${g.clave}`)}
+                      <GrupoCompras key={g.clave} g={g} verDetalle={verDetalle} esAdmin={esAdmin} revisarCostos={setCostosDe} abrirCuadro={puedeOperar ? setCuadroDe : null} abierto={buscando || ventasAbiertas.has(`${p.clave}|${g.clave}`)}
                         onToggle={() => alternar(ventasAbiertas, setVentasAbiertas, `${p.clave}|${g.clave}`)} />
                     ))}
                   </PeriodoCompras>
@@ -114,6 +115,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
         </table>
       </div>
 
+      {costosDe && <RevisarCostoCotizado cotizacionId={costosDe} notify={notify} onClose={(cambio) => { setCostosDe(null); if (cambio) cargar(); }} />}
       {cuadroDe && <CuadroCompra ventaId={cuadroDe} esAdmin={esAdmin} notify={notify} irACompra={(id) => { setCuadroDe(null); verDetalle(id); }} onClose={() => { setCuadroDe(null); cargar(); }} />}
       {agrupar && <AgruparCompras notify={notify} onClose={() => setAgrupar(false)} onCreadas={() => cargar()} />}
       {facturaNueva && <FacturaCompra notify={notify} proveedores={proveedores} onClose={() => setFacturaNueva(false)} onListo={(o) => { onPreciosCambio?.(); refrescar(o?.id); }} />}
@@ -195,27 +197,86 @@ function grupos(ordenes) {
 }
 
 // Gerencia: lo comprado (neto) contra el costo cotizado y la venta, para ver si se mantiene el margen
-function MargenCompra({ venta, vivas }) {
+function MargenCompra({ venta, vivas, revisar }) {
   const compra = vivas.reduce((s, o) => s + Number(o.subtotal || 0), 0);
   const cotizado = Number(venta.costo_cotizado) || 0;
   const neto = Number(venta.subtotal) || 0;
   if (!neto) return null;
   const dif = compra - cotizado;
   const mReal = Math.round(((neto - compra) / neto) * 1000) / 10;
-  const mCot = cotizado ? Math.round(((neto - cotizado) / neto) * 1000) / 10 : null;
-  const malo = cotizado && dif > 0;
+  // Un costo cotizado mayor que la venta no tiene sentido: hay una línea con el costo mal puesto en la cotización
+  const raro = cotizado > neto;
+  const mCot = cotizado && !raro ? Math.round(((neto - cotizado) / neto) * 1000) / 10 : null;
+  const malo = cotizado && !raro && dif > 0;
+  const link = revisar && <button className="link mini" style={{ marginLeft: 8 }} onClick={(e) => { e.stopPropagation(); revisar(); }}>{raro ? "revisar y corregir" : "ver costos cotizados"}</button>;
   return (
     <tr className="fila-grupo-margen">
       <td colSpan={7} className="mini" style={{ paddingTop: 0 }}>
         Compra neta <strong>{fmt(compra)}</strong>
-        {cotizado ? <> vs cotizado <strong>{fmt(cotizado)}</strong> <span style={{ color: malo ? "var(--danger)" : "var(--success, #2e7d32)", fontWeight: 600 }}>({dif > 0 ? "+" : dif < 0 ? "−" : ""}{fmt(Math.abs(dif))}{cotizado ? ` · ${dif > 0 ? "+" : ""}${Math.round((dif / cotizado) * 1000) / 10}%` : ""})</span></> : " · sin costo cotizado"}
-        {" · "}venta neta {fmt(neto)} · margen <strong style={{ color: mReal < (mCot ?? 0) ? "var(--danger)" : undefined }}>{mReal}%</strong>{mCot != null ? ` (cotizado ${mCot}%)` : ""}
+        {raro ? <span style={{ color: "var(--danger)", fontWeight: 600 }}> · ⚠ costo de la cotización por revisar ({fmt(cotizado)}, mayor que la venta)</span>
+          : cotizado ? <> vs cotizado <strong>{fmt(cotizado)}</strong> <span style={{ color: malo ? "var(--danger)" : "var(--success, #2e7d32)", fontWeight: 600 }}>({dif > 0 ? "+" : dif < 0 ? "−" : ""}{fmt(Math.abs(dif))} · {dif > 0 ? "+" : ""}{Math.round((dif / cotizado) * 1000) / 10}%)</span></> : " · sin costo cotizado"}
+        {" · "}venta neta {fmt(neto)} · margen <strong style={{ color: mCot != null && mReal < mCot ? "var(--danger)" : undefined }}>{mReal}%</strong>{mCot != null ? ` (cotizado ${mCot}%)` : ""}
+        {link}
       </td>
     </tr>
   );
 }
 
-function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle, abrirCuadro }) {
+// Gerencia: costo de cada línea de la cotización, para encontrar y corregir la que quedó mal (solo el costo interno)
+function RevisarCostoCotizado({ cotizacionId, notify, onClose }) {
+  const [d, setD] = useState(null);
+  const [nuevos, setNuevos] = useState({});
+  const [motivo, setMotivo] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => { api(`/cotizaciones/${cotizacionId}/costos`).then(setD).catch((e) => { notify(e.message, "danger"); onClose(false); }); }, [cotizacionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return <Modal titulo="// Costos cotizados" onClose={() => onClose(false)}><Cargando /></Modal>;
+  const lineas = [...d.lineas].sort((a, b) => b.sospechosa - a.sospechosa || b.total_costo - a.total_costo);
+  const costoDe = (l) => (nuevos[l.k] !== undefined && nuevos[l.k] !== "" ? Number(nuevos[l.k]) : l.costo);
+  const total = d.lineas.reduce((s, l) => s + costoDe(l) * l.cantidad, 0);
+  const cambios = d.lineas.filter((l) => nuevos[l.k] !== undefined && nuevos[l.k] !== "" && Number(nuevos[l.k]) !== l.costo).map((l) => ({ k: l.k, costo: Number(nuevos[l.k]) }));
+  const guardar = async () => {
+    setGuardando(true);
+    try { await api(`/cotizaciones/${cotizacionId}/costos`, { method: "PUT", body: { cambios, motivo } }); notify(`✓ Costo cotizado corregido (${cambios.length} línea(s))`); onClose(true); }
+    catch (e) { notify(e.message, "danger"); } finally { setGuardando(false); }
+  };
+  const sosp = d.lineas.filter((l) => l.sospechosa).length;
+  return (
+    <Modal titulo={`// Costos cotizados · ${d.empresa === "tactics" ? "Tactics" : "Kenott"} N${d.numero} · ${d.cliente || ""}`} onClose={() => onClose(false)} ancho={1050}
+      footer={<>
+        <span className="mini" style={{ marginRight: "auto" }}>Costo cotizado: {fmt(d.costo_total)} → <strong>{fmt(total)}</strong> · venta neta {fmt(d.subtotal)} · margen {d.subtotal ? Math.round(((d.subtotal - total) / d.subtotal) * 1000) / 10 : 0}%</span>
+        <button className="btn btn-ghost" onClick={() => onClose(false)}>Cerrar</button>
+        <button className="btn btn-primary" disabled={!cambios.length || !motivo.trim() || guardando} onClick={guardar}>{guardando ? "Guardando..." : `Guardar ${cambios.length || ""} corrección(es)`}</button>
+      </>}>
+      <div className="mini" style={{ marginBottom: 8 }}>
+        Solo cambia el <strong>costo interno</strong> con que se cotizó (para comparar con lo comprado). No cambia precios, totales ni el documento enviado al cliente.
+        {sosp > 0 ? <span style={{ color: "var(--danger)", fontWeight: 600 }}> ⚠ {sosp} línea(s) con costo mayor que su precio de venta: van primero.</span> : " Ordenadas por costo total, de mayor a menor."}
+      </div>
+      <div className="table-wrap">
+        <table className="table table-compacta">
+          <thead><tr><th className="col-desc">Producto cotizado</th><th>Cant.</th><th>Precio venta</th><th>Costo unit.</th><th>Costo total</th><th>Venta total</th></tr></thead>
+          <tbody>
+            {lineas.map((l) => (
+              <tr key={l.k} className={l.sospechosa ? "fila-alerta" : ""}>
+                <td>{l.descripcion}{l.nombre && l.nombre !== l.descripcion && <div className="mini">{l.nombre}</div>}
+                  {l.sospechosa && <div className="mini" style={{ color: "var(--danger)" }}>⚠ el costo es mayor que el precio de venta: revisa unidad o un cero de más</div>}
+                  {l.corregido && <div className="mini">corregido el {l.corregido.fecha} (antes {fmt(l.corregido.antes)}): {l.corregido.motivo}</div>}</td>
+                <td className="mini">{l.cantidad} {l.unidad}</td>
+                <td className="price-cell">{fmt(l.precio)}</td>
+                <td><input className="qty-input" style={{ width: 100 }} type="number" value={nuevos[l.k] ?? l.costo} onChange={(e) => setNuevos({ ...nuevos, [l.k]: e.target.value })} /></td>
+                <td className="price-cell compra">{fmt(Math.round(costoDe(l) * l.cantidad))}</td>
+                <td className="price-cell">{fmt(l.total_venta)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="field" style={{ marginTop: 8 }}><label>Motivo de la corrección</label>
+        <input value={motivo} placeholder="Ej: costo del piso estaba por caja, no por m²" onChange={(e) => setMotivo(e.target.value)} /></div>
+    </Modal>
+  );
+}
+
+function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle, abrirCuadro, revisarCostos }) {
   const vivas = g.ordenes.filter((o) => o.estado !== "anulada");
   const total = vivas.reduce((s, o) => s + Number(o.total), 0);
   const recibidas = vivas.filter((o) => o.estado === "recibida").length;
@@ -235,7 +296,7 @@ function GrupoCompras({ g, verDetalle, esAdmin, abierto, onToggle, abrirCuadro }
         <td colSpan={2} className="mini">{recibidas === vivas.length && vivas.length ? "Todo recibido" : `${vivas.length - recibidas} por recibir`}{esAdmin && saldo > 0 ? ` · por pagar ${fmt(saldo)}` : ""}
           {abrirCuadro && g.venta && g.venta.estado !== "anulada" && <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} title="Cuadro de compra de esta venta: elegir proveedores, crear órdenes, subir facturas" onClick={(e) => { e.stopPropagation(); abrirCuadro(g.venta.id); }}>Ejecutar acciones de compras</button>}</td>
       </tr>
-      {abierto && esAdmin && g.venta && vivas.length > 0 && <MargenCompra venta={g.venta} vivas={vivas} />}
+      {abierto && esAdmin && g.venta && vivas.length > 0 && <MargenCompra venta={g.venta} vivas={vivas} revisar={g.venta.cotizacion_id ? () => revisarCostos(g.venta.cotizacion_id) : null} />}
       {abierto && g.ordenes.map((o) => <FilaOrden key={o.id} o={o} verDetalle={verDetalle} sangria />)}
     </>
   );
