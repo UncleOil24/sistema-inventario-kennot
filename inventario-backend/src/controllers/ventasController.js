@@ -598,6 +598,16 @@ const pedidoExcel = handler(async (req, res) => {
 });
 
 const ESTADO_TXT = { por_comprar: "Por comprar", parcial: "Parcial", pedido: "Pedido", comprado: "Comprado" };
+// Columna "Compra": la orden a la que pertenece la línea (por comprar = vacío, la casilla ☐ ya lo dice)
+function textoCompra(estado, ordenes = []) {
+  const n = (ordenes || []).filter(Boolean).join(", ");
+  if (estado === "stock") return "stock";
+  if (estado === "comprado") return `✓ ${n}`.trim();
+  if (estado === "parcial") return `parcial${n ? ` · ${n}` : ""}`;
+  if (estado === "pedido") return n || "pedido";
+  return "";
+}
+const EMP_CORTA = { kenott: "Kenott", tactics: "Tactics" };
 const libro = () => { const ExcelJS = require("exceljs"); return new ExcelJS.Workbook(); };
 const encabezado = (ws, valores, anchos) => {
   ws.columns = anchos.map((width) => ({ width }));
@@ -623,14 +633,14 @@ const cuadroExcel = handler(async (req, res) => {
   ws.addRow([`Cuadro de compra ${venta.numero} · ${venta.cliente_nombre || ""}`]).font = { bold: true, size: 13 };
   ws.addRow([[venta.orden_compra_cliente ? `OC ${venta.orden_compra_cliente}` : null, venta.id_solicitud ? `ID ${venta.id_solicitud}` : null, new Date().toLocaleDateString("es-CL")].filter(Boolean).join(" · ")]);
   ws.addRow([]);
-  encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "Compra unit.", "Total", "Estado"], [8, 5, 55, 10, 10, 14, 14, 14]);
+  encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "Compra unit.", "Total", "Compra"], [8, 5, 55, 10, 10, 14, 14, 14]);
   const grupos = new Map();
   for (const l of d.lineas) { if (!grupos.has(l.proveedor)) grupos.set(l.proveedor, []); grupos.get(l.proveedor).push(l); }
   for (const [prov, ls] of [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const r = ws.addRow(["", "", prov]); r.font = { bold: true }; r.eachCell((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F5" } }; });
     const desde = r.number + 1;
     for (const l of ls) {
-      const x = ws.addRow([l.codigo || "", l.estado === "stock" ? "✓" : "☐", l.nombre + (l.no_vino ? ` (no vino en ${l.no_vino.orden})` : ""), l.unidad || "", l.cantidad, l.compra_unit, null, ESTADO_TXT[l.estado] || l.estado]);
+      const x = ws.addRow([l.codigo || "", l.estado === "stock" ? "✓" : "☐", l.nombre + (l.no_vino ? ` (no vino en ${l.no_vino.orden})` : ""), l.unidad || "", l.cantidad, l.compra_unit, null, textoCompra(l.estado, (l.compras || []).map((c) => c.numero))]);
       x.getCell(7).value = { formula: `E${x.number}*F${x.number}`, result: l.total_compra };
     }
     const sub = ws.addRow(["", "", `Subtotal ${prov}`, "", "", "", null]); sub.font = { bold: true };
@@ -825,7 +835,13 @@ const agruparExcel = handler(async (req, res) => {
   const lineas = Array.isArray(req.body?.lineas) ? req.body.lineas : [];
   if (!lineas.length) throw new ErrorNegocio("No hay productos para el Excel");
   const wb = libro();
-  const clave = (l) => (porVenta ? `${l.venta}${l.cliente ? ` · ${l.cliente}` : ""}` : l.proveedor || "SIN PROVEEDOR");
+  const variasEmpresas = new Set(lineas.map((l) => l.empresa || "kenott")).size > 1;
+  const clave = (l) => (porVenta ? `${l.venta}${l.cliente ? ` · ${l.cliente}` : ""}${variasEmpresas ? ` · ${EMP_CORTA[l.empresa] || "Kenott"}` : ""}` : l.proveedor || "SIN PROVEEDOR");
+  // Proveedor con ventas de las dos empresas: pedir una factura a cada una
+  const avisoFacturas = (ls) => {
+    if (porVenta || new Set(ls.map((l) => l.empresa || "kenott")).size < 2) return "";
+    return `⚠ Pedir 2 facturas · ${["kenott", "tactics"].map((e) => `${EMP_CORTA[e]}: ${[...new Set(ls.filter((l) => (l.empresa || "kenott") === e).map((l) => l.venta))].join(", ")}`).join(" · ")}`;
+  };
   const grupos = new Map();
   for (const l of lineas) { const k = clave(l); if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(l); }
   const orden = [...grupos.entries()].map(([k, ls]) => ({ k, ls, total: ls.reduce((s2, l) => s2 + Number(l.precio || 0) * Number(l.cantidad || 0), 0) }))
@@ -833,14 +849,15 @@ const agruparExcel = handler(async (req, res) => {
   const res0 = wb.addWorksheet("Resumen");
   res0.addRow([`Compras agrupadas por ${porVenta ? "venta" : "proveedor"} · ${new Date().toLocaleDateString("es-CL")}`]).font = { bold: true, size: 13 };
   res0.addRow([]);
-  encabezado(res0, [porVenta ? "Venta" : "Proveedor", "Productos", "Total neto", porVenta ? "Proveedores" : "Ventas"], [40, 12, 16, 60]);
-  for (const g of orden) res0.addRow([g.k, g.ls.length, g.total, [...new Set(g.ls.map((l) => (porVenta ? l.proveedor : l.venta)))].join(", ")]);
+  encabezado(res0, [porVenta ? "Venta" : "Proveedor", "Productos", "Total neto", porVenta ? "Proveedores" : "Ventas", "Aviso"], [40, 12, 16, 50, 50]);
+  for (const g of orden) res0.addRow([g.k, g.ls.length, g.total, [...new Set(g.ls.map((l) => (porVenta ? l.proveedor : l.venta)))].join(", "), avisoFacturas(g.ls)]);
   res0.addRow(["Total", lineas.length, orden.reduce((s2, g) => s2 + g.total, 0)]).font = { bold: true };
   res0.getColumn(3).numFmt = '"$"#,##0';
   for (const g of orden) {
     const ws = wb.addWorksheet(nombreHoja(wb, g.k));
     ws.addRow([g.k]).font = { bold: true, size: 13 };
-    ws.addRow([]);
+    const av = avisoFacturas(g.ls);
+    const r2 = ws.addRow([av]); if (av) r2.font = { bold: true, color: { argb: "FFB8382C" } };
     let filas = g.ls;
     if (!porVenta) {
       // Mismo producto en varias ventas: una fila con la cantidad sumada y el detalle por venta
@@ -848,20 +865,20 @@ const agruparExcel = handler(async (req, res) => {
       for (const l of g.ls) {
         const k = `${l.producto_id || ""}|${l.nombre}`;
         const x = m.get(k) || { ...l, cantidad: 0, detalle: [], estados: new Set(), ordenes: new Set() };
-        x.cantidad += Number(l.cantidad || 0); x.detalle.push(`${l.venta}: ${l.cantidad}`); x.estados.add(l.estado); (l.ordenes || []).forEach((o) => x.ordenes.add(o));
+        x.cantidad += Number(l.cantidad || 0); x.detalle.push(`${l.venta}${av ? ` ${EMP_CORTA[l.empresa] || "Kenott"}` : ""}: ${l.cantidad}`); x.estados.add(l.estado); (l.ordenes || []).forEach((o) => x.ordenes.add(o));
         m.set(k, x);
       }
       filas = [...m.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
-      encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "De qué ventas", "Precio unit.", "Total", "Estado"], [8, 5, 50, 10, 10, 30, 13, 14, 26]);
+      encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "De qué ventas", "Precio unit.", "Total", "Compra"], [8, 5, 50, 10, 10, 34, 13, 14, 16]);
       for (const l of filas) {
         const r = ws.addRow([l.codigo || "", "☐", l.nombre, l.unidad || "", l.cantidad, l.detalle.join(" · "), Number(l.precio) || null, null,
-          [...l.estados].map((e) => ESTADO_TXT[e] || e).join(", ") + (l.ordenes.size ? ` · ${[...l.ordenes].join(", ")}` : "")]);
+          textoCompra([...l.estados][0], [...l.ordenes])]);
         r.getCell(8).value = { formula: `E${r.number}*G${r.number}`, result: Number(l.precio || 0) * l.cantidad };
       }
     } else {
-      encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "Proveedor", "Precio unit.", "Total", "Estado"], [8, 5, 50, 10, 10, 22, 13, 14, 26]);
+      encabezado(ws, ["N°", "✓", "Producto", "Unidad", "Cantidad", "Proveedor", "Precio unit.", "Total", "Compra"], [8, 5, 50, 10, 10, 22, 13, 14, 16]);
       for (const l of [...filas].sort((a, b) => String(a.proveedor).localeCompare(String(b.proveedor)))) {
-        const r = ws.addRow([l.codigo || "", "☐", l.nombre, l.unidad || "", Number(l.cantidad), l.proveedor, Number(l.precio) || null, null, (ESTADO_TXT[l.estado] || l.estado) + ((l.ordenes || []).length ? ` · ${l.ordenes.join(", ")}` : "")]);
+        const r = ws.addRow([l.codigo || "", "☐", l.nombre, l.unidad || "", Number(l.cantidad), l.proveedor, Number(l.precio) || null, null, textoCompra(l.estado, l.ordenes)]);
         r.getCell(8).value = { formula: `E${r.number}*G${r.number}`, result: Number(l.precio || 0) * Number(l.cantidad) };
       }
     }

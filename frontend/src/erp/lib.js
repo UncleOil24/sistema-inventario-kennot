@@ -215,3 +215,16 @@ export const haceMeses = (iso) => {
 // ID de la cotización: Cotizacion_KENOTT_N100 (las de antes de partir en N°100: "Kenott N276 (anterior)")
 export const idCot = (c) => `Cotizacion_${String(c?.empresa || "kenott").toUpperCase()}_N${c?.numero}`;
 export const nombreCot = (c) => c?.id_cotizacion || (c?.anterior ? `${c.empresa === "tactics" ? "Tactics" : "Kenott"} N${c.numero} (anterior)` : idCot(c));
+
+// Columna "Compra" de las hojas: en vez de repetir el estado, la orden a la que pertenece cada línea.
+// Por comprar = vacío (la casilla ☐ ya lo dice); pedido = C-00xx; comprado = ✓ C-00xx; stock = stock.
+export function textoCompra(estado, ordenes = []) {
+  const n = (ordenes || []).filter(Boolean).join(", ");
+  if (estado === "stock") return "stock";
+  if (estado === "comprado") return `✓ ${n}`.trim();
+  if (estado === "parcial") return `parcial${n ? ` · ${n}` : ""}`;
+  if (estado === "pedido") return n || "pedido";
+  return "";
+}
+// Etiqueta corta de la empresa (para marcar cuando se juntan ventas de Kenott y Tactics)
+export const EMP_CORTA = { kenott: "Kenott", tactics: "Tactics" };
