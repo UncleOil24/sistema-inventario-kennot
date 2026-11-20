@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -36,7 +36,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
         neto: r.totales.neto, iva: r.totales.iva, total: r.control.precios_incluyen_iva && r.control.total_documento ? r.control.total_documento : r.totales.total,
         orden_id: orden?.id || "", empresa: orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut, tipo_pago: orden?.tipo_pago || "contado",
       });
-      setLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })));
+      const items = (r.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}` }));
+      setLineas(prepararLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })), items, productos));
     } catch (e) { notify(e.message, "danger"); }
     finally { setLeyendo(false); }
   };

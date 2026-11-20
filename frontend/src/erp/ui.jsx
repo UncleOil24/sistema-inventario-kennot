@@ -393,7 +393,8 @@ export function elegirPara(l, item, productos) {
   if (!item) return { para: "" };
   const p = productos.find((x) => x.id === item.producto_id) || { id: item.producto_id, nombre: item.nombre, unidad: item.unidad };
   const s = l.factor_sugerido;
-  const factor = factorDe(l) === 1 && s && UNIDAD_BASE(p.unidad) === s.unidad ? s.factor : factorDe(l);
+  const calza = s && (UNIDAD_BASE(p.unidad) === s.unidad || UNIDAD_BASE(item.unidad) === s.unidad);
+  const factor = factorDe(l) === 1 && calza ? s.factor : factorDe(l);
   return { para: item.clave, accion: "existente", producto: { id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, precio_compra: Number(p.precio_compra) || 0, proveedor: p.proveedor }, calce: "exacto", factor };
 }
 // Lo que se manda al registrar: cantidad y precio en unidad base, y lo que el sistema debe recordar
@@ -407,6 +408,24 @@ export function presentacionParaEnviar(l, reparto) {
     reparto: reparto && f !== 1 ? reparto.map((r) => ({ ...r, cantidad: r.cantidad * f })) : reparto,
   };
 }
+// Al leer el documento: cada línea se conecta con la línea del pedido o de la venta que le corresponde.
+// - Si el producto propuesto está en el pedido/venta, es ese (aunque el calce sea "parecido": es lo que compramos).
+// - Si no, se busca entre los candidatos uno que esté en el pedido/venta y aún no tenga línea.
+// - Si la descripción trae la presentación (5 LT, 2,23 M2…) y calza con la unidad, se pone el factor.
+export function prepararLineas(lineas, items, productos) {
+  const usados = new Set();
+  const libre = (pid) => items.find((x) => x.producto_id === pid && !usados.has(x.clave));
+  return lineas.map((l) => {
+    let it = l.producto ? libre(l.producto.id) : null;
+    let prod = l.producto;
+    if (!it) for (const c of l.candidatos || []) { const x = libre(c.id); if (x) { it = x; prod = c; break; } }
+    if (!it) return l;
+    usados.add(it.clave);
+    const base = { ...l, accion: "existente", producto: prod, calce: prod?.id === l.producto?.id ? l.calce : "parecido" };
+    return Number(l.factor) > 1 ? { ...base, para: it.clave } : { ...base, ...elegirPara(base, it, productos), calce: base.calce };
+  });
+}
+
 export function PresentacionLinea({ l, items = [], productos, onChange }) {
   const f = factorDe(l);
   const u = l.producto ? UNIDAD_BASE(l.producto.unidad) : "";
@@ -421,11 +440,12 @@ export function PresentacionLinea({ l, items = [], productos, onChange }) {
         </select></div>}
       {l.accion === "existente" && l.producto && <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
         1 de la factura = <input className="qty-input" style={{ width: 54 }} type="number" min="0.01" step="any" value={l.factor ?? 1} onChange={(e) => onChange({ factor: e.target.value })} /> {u || "un"}
-        {f === 1 && s && UNIDAD_BASE(l.producto.unidad) === s.unidad && <button className="link" onClick={() => onChange({ factor: s.factor })}>usar × {s.factor} (lo dice la descripción)</button>}
+        {f === 1 && s && <button className="link" onClick={() => onChange({ factor: s.factor })}>usar × {String(s.factor).replace(".", ",")} ({String(s.factor).replace(".", ",")} {s.unidad} según la descripción)</button>}
         {f !== 1 && <strong style={{ color: "var(--accent)" }}>{cant} × {f} = {cant * f} {u} · {fmt(Math.round((Number(l.precio_neto) || 0) / f))} por {u.toLowerCase() || "unidad"}</strong>}
         {l.aprendido && <span title="Lo recordó de una factura anterior de este proveedor">· aprendido</span>}
       </div>}
-      {(() => { const it = items.find((x) => x.clave === l.para) || (l.producto && items.find((x) => x.producto_id === l.producto.id)); if (!it) return null; const c = cant * f;
+      {(() => { const it = items.find((x) => x.clave === l.para) || (l.producto && items.find((x) => x.producto_id === l.producto.id)); if (!it) return null; const c = Math.round(cant * f * 1000) / 1000;
+        if (c < it.cantidad && !Number.isInteger(c) && c >= it.cantidad * 0.97) return <div style={{ color: "var(--success)" }}>✓ completa lo pedido ({String(c).replace(".", ",")} de {it.cantidad}, por la presentación)</div>;
         return c > it.cantidad ? <div style={{ color: "var(--warn)" }}>⚠ se compraron {c} {u.toLowerCase()}, se pidieron {it.cantidad}: lo que sobra es compra extra</div>
           : c < it.cantidad ? <div style={{ color: "var(--warn)" }}>faltan {it.cantidad - c}: siguen "por comprar"</div> : <div style={{ color: "var(--success)" }}>✓ completa lo pedido ({it.cantidad})</div>; })()}
     </div>

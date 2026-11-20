@@ -137,7 +137,9 @@ function estadoLineas(items, ordenes) {
     const p = pedido.get(i.producto_id) || 0;
     const usaR = Math.min(r, necesita); recibido.set(i.producto_id, r - usaR);
     const usaP = Math.min(p, necesita - usaR); pedido.set(i.producto_id, p - usaP);
-    const estado = usaR >= necesita && necesita > 0 ? "comprado" : usaR + usaP >= necesita && necesita > 0 ? "pedido" : usaR + usaP > 0 ? "parcial" : "por_comprar";
+    // Compra en presentaciones (12 cajas × 2,23 m² = 26,76 de 27 m²): si llega a 97% con decimales, está completa
+    const casi = (x) => !Number.isInteger(Math.round(x * 1000) / 1000) && x >= necesita * 0.97;
+    const estado = (usaR >= necesita || casi(usaR)) && necesita > 0 ? "comprado" : (usaR + usaP >= necesita || casi(usaR + usaP)) && necesita > 0 ? "pedido" : usaR + usaP > 0 ? "parcial" : "por_comprar";
     return { estado, recibido: usaR, pedido: usaP, stock, compras: docs.get(i.producto_id) || [] };
   });
 }

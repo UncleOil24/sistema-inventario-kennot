@@ -227,7 +227,8 @@ const registrarFactura = handler(async (req, res) => {
         if (!it.producto_id) continue;
         const hay = llego.get(it.producto_id) || 0;
         const usa = Math.min(hay, Number(it.cantidad)); llego.set(it.producto_id, hay - usa);
-        if (usa < Number(it.cantidad)) noVinieron.push({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) - usa, pedido: Number(it.cantidad) });
+        const casi = !Number.isInteger(Math.round(usa * 1000) / 1000) && usa >= Number(it.cantidad) * 0.97; // presentación (cajas de m²…)
+        if (usa < Number(it.cantidad) && !casi) noVinieron.push({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) - usa, pedido: Number(it.cantidad) });
       }
       resumen.no_vinieron = noVinieron;
       await orden.update({
