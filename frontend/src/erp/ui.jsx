@@ -406,7 +406,7 @@ export function presentacionParaEnviar(l, reparto) {
   const aprender = l.accion === "existente" && l.producto && (f !== 1 || l.para || l.aprendido) ? { codigo_proveedor: l.codigo_proveedor || null, descripcion: l.descripcion, factor: f } : undefined;
   const para = /^[ovc]\d+$/.test(l.para || "") ? { tipo: { o: "orden", v: "venta", c: "complemento" }[l.para[0]], indice: Number(l.para.slice(1)) } : undefined;
   return {
-    cantidad: cant * f, precio: f !== 1 ? precio / f : precio, aprender, para,
+    cantidad: Math.round(cant * f * 1000) / 1000, precio: f !== 1 ? precio / f : precio, aprender, para,
     presentacion: f !== 1 ? `${cant} × ${f} (${l.descripcion})` : undefined,
     reparto: reparto && f !== 1 ? reparto.map((r) => ({ ...r, cantidad: r.cantidad * f })) : reparto,
   };

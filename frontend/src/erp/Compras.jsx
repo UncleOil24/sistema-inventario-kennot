@@ -214,7 +214,7 @@ function MargenCompra({ venta, vivas, revisar }) {
       <td colSpan={7} className="mini" style={{ paddingTop: 0 }}>
         Compra neta <strong>{fmt(compra)}</strong>
         {raro ? <span style={{ color: "var(--danger)", fontWeight: 600 }}> · ⚠ costo de la cotización por revisar ({fmt(cotizado)}, mayor que la venta)</span>
-          : cotizado ? <> vs cotizado <strong>{fmt(cotizado)}</strong> <span style={{ color: malo ? "var(--danger)" : "var(--success, #2e7d32)", fontWeight: 600 }}>({dif > 0 ? "+" : dif < 0 ? "−" : ""}{fmt(Math.abs(dif))} · {dif > 0 ? "+" : ""}{Math.round((dif / cotizado) * 1000) / 10}%)</span></> : " · sin costo cotizado"}
+          : cotizado ? <> vs cotizado <strong>{fmt(cotizado)}</strong> <span style={{ color: malo ? "var(--danger)" : "var(--success, #2e7d32)", fontWeight: 600 }}>{dif > 0 ? `▲ ${fmt(dif)} más caro que lo cotizado (${Math.round((dif / cotizado) * 1000) / 10}%)` : dif < 0 ? `▼ ahorro ${fmt(-dif)} (${Math.round((-dif / cotizado) * 1000) / 10}% más barato)` : "igual a lo cotizado"}</span></> : " · sin costo cotizado"}
         {" · "}venta neta {fmt(neto)} · margen <strong style={{ color: mCot != null && mReal < mCot ? "var(--danger)" : undefined }}>{mReal}%</strong>{mCot != null ? ` (cotizado ${mCot}%)` : ""}
         {link}
       </td>
@@ -434,7 +434,7 @@ function RepartirCompra({ orden, notify, onClose, onListo }) {
         <div className="mini" style={{ marginBottom: 8 }}>Indica cuánto de cada producto va a cada venta. Se crea una compra por venta con el mismo documento ({orden.documento || "sin N°"}); el IVA se reparte en proporción y en Por pagar sigue siendo una sola factura.</div>
         <table className="table table-compacta"><tbody>
           {items.map((i) => (
-            <tr key={i.indice}><td>{i.descripcion_cliente || i.nombre}<div className="mini">{i.cantidad} {i.unidad} · {fmt(i.precio)} c/u</div>
+            <tr key={i.indice}><td>{i.descripcion_cliente || i.nombre}<div className="mini">{Math.round(Number(i.cantidad) * 1000) / 1000} {i.unidad} · {fmt(i.precio)} c/u</div>
               <RepartoLinea l={i} onChange={(r) => setItems((xs) => xs.map((x) => (x.indice === i.indice ? { ...x, reparto: r } : x)))} /></td></tr>
           ))}
         </tbody></table>
@@ -511,7 +511,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
             {orden.items.map((i, k) => (
               <tr key={k}>
                 <td>{i.descripcion_cliente || i.nombre}</td>
-                <td className="mini">{i.cantidad} {i.unidad}</td>
+                <td className="mini">{Math.round(Number(i.cantidad) * 1000) / 1000} {i.unidad}</td>
                 <td className="price-cell compra">{fmt(i.precio)}</td>
                 <td className="price-cell">{fmt(i.precio * i.cantidad)}</td>
               </tr>
