@@ -4,7 +4,7 @@ import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO } from
 
 // Carga la cotización o factura de un proveedor (PDF o foto). Claude extrae las líneas y propone
 // el producto del catálogo; compras revisa y aprueba, y el sistema recalcula precio vigente y opciones.
-export default function DocumentoProveedor({ notify, onClose, proveedores = [], categorias: cats = [] }) {
+export default function DocumentoProveedor({ notify, onClose, proveedores = [], categorias: cats = [], esGerencia = false }) {
   const productos = useProductos();
   const [categorias, setCategorias] = useState(cats);
   useEffect(() => { if (!cats.length) api("/productos/categorias").then(setCategorias).catch(() => {}); }, [cats.length]);
@@ -56,6 +56,7 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
           lineas: activas.map((l) => ({
             antes: l.anterior?.precio ?? null,
             producto_id: l.accion === "existente" ? l.producto.id : null,
+            renombrar: l.accion === "existente" && l.renombrar && l.renombrar.trim() && l.renombrar.trim() !== l.producto.nombre ? l.renombrar.trim() : null,
             nuevo: l.accion === "nuevo" ? l.nuevo : null,
             // Pack (ej. "pack x4"): el precio leído es del pack; se guarda por unidad
             precio: Number(l.pack) > 1 ? Math.round(Number(l.precio_neto) / Number(l.pack)) : Number(l.precio_neto),
@@ -162,8 +163,8 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
                           <SelectorProducto valor={l.producto} candidatos={l.candidatos} productos={productos} precioDe={(p) => p.precio_compra}
                             onChange={(p) => set(l.i, p && p.id !== l.producto?.id
                               // Otro producto: ya no es "ya cargado" (ese precio no está en el producto nuevo) y queda marcada para guardar
-                              ? { producto: p, calce: "exacto", nota: "Elegido a mano", ya_cargado: false, anterior: null, omitir: false }
-                              : { producto: p })} />
+                              ? { producto: p, calce: "exacto", nota: "Elegido a mano", ya_cargado: false, anterior: null, omitir: false, renombrar: undefined }
+                              : { producto: p, renombrar: undefined })} />
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} placeholder="Descripción estándar" />
@@ -177,6 +178,12 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
                         )}
                       </td>
                       <td className="mini">
+                        {esGerencia && l.accion === "existente" && l.producto && (l.renombrar === undefined
+                          ? <button className="link mini" title="Cambiar la descripción del producto del catálogo al guardar (ej. dejarla más general para juntar variantes)" onClick={() => set(l.i, { renombrar: l.producto.nombre })}>✎ editar descripción</button>
+                          : <div style={{ marginTop: 4 }}>
+                              <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.renombrar} onChange={(e) => set(l.i, { renombrar: e.target.value.toUpperCase() })} />
+                              <div className="mini">{l.renombrar.trim() && l.renombrar.trim() !== l.producto.nombre ? <>Al guardar, N° {l.producto.codigo} se llamará así en todo el catálogo.</> : "Sin cambios en la descripción."} <button className="link mini" onClick={() => set(l.i, { renombrar: undefined })}>cancelar</button></div>
+                            </div>)}
                         {l.accion === "existente" && l.producto ? (
                           Number(l.producto.precio_compra) > 0
                             ? <>{fmt(l.producto.precio_compra)} {l.producto.proveedor}{Number(l.precio_neto) < Number(l.producto.precio_compra) && <div style={{ color: "var(--success)" }}>más barato</div>}</>

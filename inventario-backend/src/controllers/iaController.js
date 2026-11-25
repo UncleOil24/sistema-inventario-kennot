@@ -298,6 +298,14 @@ const aprobarDocumento = handler(async (req, res) => {
       if (l.producto_id) {
         p = await Producto.findByPk(l.producto_id, { transaction: t, lock: t.LOCK.UPDATE });
         if (!p) throw new ErrorNegocio(`Producto ${l.producto_id} no existe`, 404);
+        // Gerencia puede corregir la descripción del producto del catálogo al conectarlo (ej. dejarla más general)
+        const nuevoNombre = l.renombrar ? require("../services/textos").limpiarTexto(String(l.renombrar)).trim().toUpperCase() : "";
+        if (nuevoNombre && nuevoNombre !== p.nombre) {
+          if (!require("../middlewares/auth").esGerencia(req)) throw new ErrorNegocio("Solo gerencia cambia la descripción de un producto del catálogo");
+          await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "nombre", antes: p.nombre, despues: nuevoNombre, motivo: `Desde documento ${proveedor} ${b.documento || ""}`.trim() }, t);
+          await p.update({ nombre: nuevoNombre }, { transaction: t });
+          out.renombrados = (out.renombrados || 0) + 1;
+        }
       } else if (l.nuevo?.nombre) {
         p = await Producto.create({
           codigo: siguienteCodigo++, nombre: String(l.nuevo.nombre).trim().toUpperCase(),
@@ -311,7 +319,7 @@ const aprobarDocumento = handler(async (req, res) => {
       const antes = Number(p.precio_compra) || 0;
       const pack = Number(l.pack) > 1 ? Math.round(Number(l.pack)) : null;
       await PrecioProveedor.create({
-        producto_id: p.id, proveedor: ficha.nombre, precio, fecha: b.fecha || new Date(), documento: b.documento || null,
+        producto_id: p.id, proveedor: ficha.nombre, precio, fecha: b.fecha || new Date(), documento: b.documento || "S/N (documento cargado)",
         descripcion_proveedor: l.descripcion_proveedor || null, marca: l.marca || null, unidad: l.unidad || null,
         cantidad: l.cantidad || null, calce: l.calce && l.calce !== "sin_producto" ? l.calce : null, origen, creado_por: firma(req),
         valido_hasta: /^\d{4}-\d{2}-\d{2}$/.test(b.valido_hasta || "") ? b.valido_hasta : null, pack,

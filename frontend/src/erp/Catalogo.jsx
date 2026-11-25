@@ -175,7 +175,7 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
       {editar && <EditarProducto producto={editar} esAdmin={esAdmin} esGerencia={esGerencia} categorias={categorias} proveedores={proveedores} notify={notify}
         onClose={() => setEditar(null)} onGuardado={() => { setEditar(null); refrescar(); }} />}
       {cargados && <DocumentosCargados notify={notify} onClose={() => setCargados(false)} />}
-      {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} onClose={() => { setDocumento(false); refrescar(); }} />}
+      {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} categorias={categorias} esGerencia={esGerencia} onClose={() => { setDocumento(false); refrescar(); }} />}
       {precios && <PreciosProducto producto={precios} puedeConfirmar={esGerencia} proveedores={proveedores} notify={notify}
         onClose={() => setPrecios(null)} onCambio={refrescar} />}
     </>

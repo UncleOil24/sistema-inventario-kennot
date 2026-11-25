@@ -536,7 +536,7 @@ const aplicarProveedor = handler(async (req, res) => {
         await registrar({ usuario: firma(req), tabla: "productos", registro_id: p.id, campo: "creado", despues: p.nombre, motivo: `Desde cotización ${idCotizacion(c)} (precio de ${ficha.nombre})` }, t);
       }
       await PrecioProveedor.create({
-        producto_id: p.id, proveedor: ficha.nombre, precio, fecha: b.fecha || new Date(), documento: b.documento || null,
+        producto_id: p.id, proveedor: ficha.nombre, precio, fecha: b.fecha || new Date(), documento: b.documento || "S/N (cotización proveedor)",
         descripcion_proveedor: l.descripcion_proveedor || null, marca: l.marca || null, unidad: it.unidad || null, cantidad: it.cantidad || null,
         origen, creado_por: firma(req),
       }, { transaction: t });
