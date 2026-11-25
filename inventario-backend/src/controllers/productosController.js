@@ -59,7 +59,6 @@ const getProductos = handler(async (req, res) => {
   const { busqueda, categoria, revision, sort = "categoria", dir = "ASC", limite } = req.query;
   const where = {};
   const y = [];
-  if (busqueda) y.push(...filtroPalabras(busqueda));
   if (categoria && categoria !== "Todas") where.categoria = categoria;
   if (revision === "inactivos") where.activo = false;
   else if (req.query.inactivos !== "1") where.activo = true;
@@ -74,7 +73,9 @@ const getProductos = handler(async (req, res) => {
   if (revision === "sin_confirmar") y.push({ confirmado: false, precio_compra: { [Op.gt]: 0 } });
   const params0 = await getParametros();
   if (revision === "antiguo") y.push({ precio_compra: { [Op.gt]: 0 }, fecha_precio: { [Op.lt]: limiteAntiguo(params0) } });
-  if (y.length) where[Op.and] = y;
+  const base = { ...where, ...(y.length ? { [Op.and]: [...y] } : {}) }; // sin la búsqueda (para la aproximada)
+  const conBusqueda = [...y, ...(busqueda ? filtroPalabras(busqueda) : [])];
+  if (conBusqueda.length) where[Op.and] = conBusqueda;
 
   const camposValidos = ["id", "codigo", "nombre", "categoria", "precio_compra", "proveedor", "fecha_precio"];
   const ordenBy = camposValidos.includes(sort) ? sort : "codigo";
@@ -88,8 +89,51 @@ const getProductos = handler(async (req, res) => {
     }),
   ]);
   const params = params0;
+  // Sin resultados exactos: búsqueda aproximada (tolera una letra de más, de menos o cambiada: "rachel" → RASCHEL)
+  if (!productos.length && busqueda && String(busqueda).trim().length >= 3) {
+    const todos = await Producto.findAll({ where: base, limit: 6000 });
+    const aprox = buscarAproximado(busqueda, todos);
+    return res.json({ ok: true, data: aprox.map((p) => ({ ...vista(req, params)(p), _aproximado: true })) });
+  }
   res.json({ ok: true, data: productos.map(vista(req, params)) });
 });
+
+// Distancia de edición (letras cambiadas, de más o de menos) con tope, para palabras cortas
+function distancia(a, b, tope) {
+  if (Math.abs(a.length - b.length) > tope) return tope + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let min = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (cur[j] < min) min = cur[j];
+    }
+    if (min > tope) return tope + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+// Cada palabra buscada debe parecerse a alguna palabra del producto (contenida, o con 1-2 letras de diferencia).
+// Primero los que calzan todas las palabras; si no hay, los que calzan más.
+function buscarAproximado(busqueda, productos) {
+  const norm = (t) => sinTildes(String(t || "")).toUpperCase();
+  const qs = norm(busqueda).split(/\s+/).filter(Boolean).slice(0, 6);
+  const calza = (q, w) => {
+    if (w.includes(q)) return true;
+    if (q.length < 4 || /\d/.test(q)) return false; // las medidas tienen que estar escritas igual
+    const tol = q.length >= 7 ? 2 : 1;
+    return distancia(q, w, tol) <= tol || distancia(q, w.slice(0, q.length), tol) <= tol;
+  };
+  const puntuados = productos.map((p) => {
+    const ws = norm(`${p.nombre} ${p.proveedor || ""}`).split(/[^A-Z0-9/.]+/).filter(Boolean);
+    const ok = qs.filter((q) => ws.some((w) => calza(q, w))).length;
+    return { p, ok };
+  }).filter((x) => x.ok > 0);
+  const todas = puntuados.filter((x) => x.ok === qs.length);
+  const lista = todas.length ? todas : puntuados.filter((x) => x.ok >= Math.max(1, qs.length - 1));
+  return lista.sort((a, b) => b.ok - a.ok || String(a.p.nombre).localeCompare(String(b.p.nombre))).slice(0, 60).map((x) => x.p);
+}
 
 // GET /api/productos/categorias
 const getCategorias = handler(async (req, res) => {
