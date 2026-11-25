@@ -401,8 +401,42 @@ const actualizarDatos = handler(async (req, res) => {
 const getCuadroCompra = handler(async (req, res) => {
   const venta = await Venta.findByPk(req.params.id);
   if (!venta) throw new ErrorNegocio("Venta no encontrada", 404);
-  res.json({ ok: true, data: await datosCuadro(venta) });
+  const datos = await datosCuadro(venta);
+  await sugerirEquivalentes(datos.lineas).catch((e) => console.error("sugerir equivalentes", e.message));
+  res.json({ ok: true, data: datos });
 });
+
+// Líneas por comprar sin precio propio confiable (sin precio, solo el cotizado, "por confirmar" o de otra medida):
+// se busca en el catálogo un producto con las mismas medidas y un precio con documento (cotización o factura),
+// para ofrecerlo en la línea (ej. el terminal 25 MM X 3/4" que quedó en otro producto).
+async function sugerirEquivalentes(lineas) {
+  const { conflictoMedidas, mismasMedidas } = require("../services/medidas");
+  const { conDocumento } = require("../services/precios");
+  const { buscarParecidos } = require("./productosController");
+  const CC = require("../services/cuadroCompra");
+  const dudosa = (o) => o.cotizado || ["parecido", "equivalente", "similar"].includes(o.calce);
+  const revisar = lineas.filter((l) => ["por_comprar", "parcial"].includes(l.estado) && !l.complemento_de && l.producto_id).filter((l) => {
+    // Marca las opciones con otra medida que lo pedido
+    for (const o of l.opciones) if (o.descripcion && conflictoMedidas(l.nombre, o.descripcion)) o.medida_distinta = true;
+    const reales = l.opciones.filter((o) => !dudosa(o) && !o.medida_distinta);
+    return !reales.length;
+  }).slice(0, 30);
+  if (!revisar.length) return;
+  const cand = new Map();
+  for (const l of revisar) {
+    const ps = (await buscarParecidos(l.nombre, l.producto_id, { minimo: 0.4, max: 8 })).filter((p) => mismasMedidas(l.nombre, p.nombre));
+    cand.set(l.indice, ps);
+  }
+  const ops = await CC.opcionesPorProducto([...new Set([...cand.values()].flat().map((p) => p.id))]);
+  for (const l of revisar) {
+    const sug = [];
+    for (const p of cand.get(l.indice) || []) {
+      const buenas = (ops.get(p.id) || []).filter((o) => conDocumento(o) && !["parecido", "equivalente", "similar"].includes(o.calce) && !(o.descripcion && conflictoMedidas(l.nombre, o.descripcion)));
+      if (buenas.length) sug.push({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, parecido: p.parecido, opcion: buenas[0] });
+    }
+    if (sug.length) l.equivalentes = sug.sort((a, b) => b.parecido - a.parecido || a.opcion.precio - b.opcion.precio).slice(0, 2);
+  }
+}
 
 // Datos del cuadro de compra de una venta (también para imprimir, el Excel y agrupar compras)
 async function datosCuadro(venta) {

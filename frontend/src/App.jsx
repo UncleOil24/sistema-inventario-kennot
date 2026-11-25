@@ -329,6 +329,7 @@ const styles = `
   .tabla-documento .btn-sm { font-size: 10px; padding: 3px 7px; letter-spacing: 0.02em; }
   .tabla-documento .select-linea, .tabla-documento .qty-input { font-size: 11px; }
   .tabla-documento .aviso { font-size: 11px; }
+  .sugerencia-equivalente { margin-top: 4px; padding: 3px 6px; border-left: 3px solid var(--accent); background: rgba(var(--accent-rgb),0.06); border-radius: 3px; line-height: 1.35; }
   .componente-linea { font-size: 11px; color: #555; display: flex; align-items: center; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
   .fila-separador td { height: 10px; padding: 0 !important; background: transparent !important; border: none !important; }
   .fila-grupo td { border-bottom: 1px solid var(--border2); }

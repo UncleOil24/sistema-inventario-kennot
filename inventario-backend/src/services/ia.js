@@ -260,6 +260,21 @@ async function calzarLineas(lineas, indice, { usuario, tipo, archivo } = {}) {
     if (mejor) Object.assign(l, { producto_id: mejor.id, calce: "parecido", nota: "Propuesto por similitud: revisar" });
     else Object.assign(l, { producto_id: null, calce: "sin_producto", nota: "No hay productos parecidos en el catálogo" });
   }
+  // Medidas: si el producto elegido tiene otra medida que la línea (20 MM vs 25 MM, 1/2" vs 3/4"), no se conecta.
+  // Se busca entre los candidatos uno con la misma medida; si no hay, la línea queda sin producto (para crear o elegir).
+  const { conflictoMedidas, mismasMedidas } = require("./medidas");
+  for (const l of resultado) {
+    if (!l.producto_id) continue;
+    const elegido = l.candidatos.find((p) => p.id === Number(l.producto_id));
+    if (!elegido) continue;
+    const c = conflictoMedidas(l.descripcion, elegido.nombre);
+    if (!c) continue;
+    const otro = l.candidatos.find((p) => p.id !== elegido.id && mismasMedidas(l.descripcion, p.nombre) && !conflictoMedidas(l.descripcion, p.nombre));
+    if (otro) Object.assign(l, { producto_id: otro.id, calce: "parecido", nota: `Medida corregida: ${c.a} (no ${c.b} de N° ${elegido.codigo ?? elegido.id})` });
+    else Object.assign(l, { producto_id: null, calce: "sin_producto", nota: `La medida no calza (${c.a} vs ${c.b} en N° ${elegido.codigo ?? elegido.id} ${elegido.nombre}): elige otro o crea el producto` });
+    // El candidato con otra medida no se propone primero
+    l.candidatos = [...l.candidatos.filter((p) => !conflictoMedidas(l.descripcion, p.nombre)), ...l.candidatos.filter((p) => conflictoMedidas(l.descripcion, p.nombre))];
+  }
   await auditar({ tipo: `calce_${tipo}`, archivo, usuario, modelo: MODELO(), entrada_tokens: uso.input_tokens, salida_tokens: uso.output_tokens, respuesta: respuestas });
   return resultado;
 }
