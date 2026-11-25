@@ -76,7 +76,9 @@ const getOrden = handler(async (req, res) => {
   const documentos = await require("../models/DocumentoCompra").findAll({ where: { orden_id: oc.id }, attributes: ["id", "tipo", "folio", "fecha", "monto", "nombre_archivo", "creado_por", "createdAt"], order: [["id", "ASC"]] });
   const grupo = oc.factura_grupo ? await sequelize.query(`SELECT o.id, o.numero, o.total::float AS total, o.monto_pagado::float AS pagado, v.numero AS venta_numero FROM ordenes_compra o LEFT JOIN ventas v ON v.id = o.venta_id
     WHERE o.factura_grupo = :g AND o.estado <> 'anulada' ORDER BY o.id`, { replacements: { g: oc.factura_grupo }, type: sequelize.QueryTypes.SELECT }) : [];
-  res.json({ ok: true, data: { ...oc.toJSON(), pagos, documentos, grupo } });
+  // Venta de la compra (para el nombre del archivo al imprimir)
+  const v = oc.venta_id ? await Venta.findByPk(oc.venta_id, { attributes: ["numero", "cliente_nombre"] }) : null;
+  res.json({ ok: true, data: { ...oc.toJSON(), pagos, documentos, grupo, venta_numero: v?.numero || null, venta_cliente: v?.cliente_nombre || null } });
 });
 
 // GET /api/ordenes-compra/:id/repartir   -> qué ventas necesitan cada producto de esta compra (para repartirla)

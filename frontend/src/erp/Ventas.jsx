@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, Etapa, EstadoFactura, confirmar, pedirTexto, imprimirSolicitud } from "./ui";
-import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO, imprimirPDF, imprimirHTML, escaparHTML as h } from "./lib";
+import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO, imprimirPDF, imprimirHTML, escaparHTML as h, nombreArchivo } from "./lib";
 import CuadroCompra, { imprimirCuadro } from "./CuadroCompra";
 import { cuerpoOrden } from "./Compras";
 import { AccionesVenta, PanelFacturas, HistorialVenta, conConfirmacion } from "./Recorrido";
@@ -241,12 +241,12 @@ function ImprimirVenta({ venta, esAdmin, verCompras, notify }) {
   const ordenes = async () => {
     const os = (await api(`/ordenes-compra?venta_id=${venta.id}`)).filter((o) => o.estado !== "anulada");
     if (!os.length) return notify("Esta venta aún no tiene órdenes de compra", "danger");
-    imprimirHTML(`Órdenes de compra ${venta.numero}`, os.map((o, k) => `<div${k ? ' style="page-break-before:always"' : ""}>${cuerpoOrden(o)}</div>`).join(""));
+    imprimirHTML(nombreArchivo("Ordenes de compra", venta.numero, venta.cliente_nombre, venta.orden_compra_cliente ? `OC ${venta.orden_compra_cliente}` : ""), os.map((o, k) => `<div${k ? ' style="page-break-before:always"' : ""}>${cuerpoOrden(o)}</div>`).join(""));
   };
   if (!abierto) return <button className="btn btn-ghost" title="Cotización, interna simple, cuadro de compra u órdenes de compra" onClick={() => setAbierto(true)}>🖨 Imprimir ▸</button>;
   return (
     <span className="grupo-botones">
-      {venta.cotizacion_id && <button className="btn btn-ghost btn-sm" onClick={() => hacer(() => imprimirPDF(`/cotizaciones/${venta.cotizacion_id}/pdf`))}>Cotización</button>}
+      {venta.cotizacion_id && <button className="btn btn-ghost btn-sm" onClick={() => hacer(() => imprimirPDF(`/cotizaciones/${venta.cotizacion_id}/pdf`, null, nombreArchivo("Cotizacion", venta.numero, venta.cliente_nombre)))}>Cotización</button>}
       {esAdmin && <button className="btn btn-ghost btn-sm" title="Cotizado, caso, venta, compra, 3 mejores proveedores y utilidad" onClick={() => hacer(() => imprimirInternaSimple(venta.id))}>Interna simple</button>}
       {verCompras && <button className="btn btn-ghost btn-sm" onClick={() => hacer(() => imprimirCuadro(venta.id, esAdmin))}>Cuadro de compra</button>}
       {verCompras && <button className="btn btn-ghost btn-sm" onClick={() => hacer(ordenes)}>Órdenes de compra</button>}
@@ -269,7 +269,7 @@ async function imprimirInternaSimple(ventaId) {
     </tbody></table>
     <div class="pie">Venta neta <strong>${fmt(t.venta)}</strong> · compra neta <strong>${fmt(t.compra)}</strong> · utilidad <strong>${fmt(t.utilidad)}</strong>${t.margen != null ? ` (${t.margen}%)` : ""}${t.sin_costo ? ` · ${t.sin_costo} línea(s) sin precio de compra no suman` : ""}</div>
     <div class="mini">En negrita, el proveedor de la línea. Caso: Exacto = mismo producto · Similar = equivalente · Sin catálogo = precio a mano. ≈ = el producto no tiene precios en el catálogo; se muestran los de un producto parecido.</div>`;
-  imprimirHTML(`Interna simple ${v.numero}`, cuerpo, { horizontal: true });
+  imprimirHTML(nombreArchivo("Interna simple", v.numero, v.cliente_nombre || v.cliente, v.orden_compra_cliente ? `OC ${v.orden_compra_cliente}` : ""), cuerpo, { horizontal: true });
 }
 
 // Cambiar el producto de una línea de la venta (el cliente cambió de opinión). La cotización queda como se envió.

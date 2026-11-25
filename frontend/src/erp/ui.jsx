@@ -1,7 +1,7 @@
 // Piezas compartidas por las vistas del ERP
 import { useState, useMemo, useEffect } from "react";
 import { conflictoMedidas } from "./medidas";
-import { fmt, fecha, hoyISO, sinTildes, descargarPost, api, imprimirHTML, escaparHTML } from "./lib";
+import { fmt, fecha, hoyISO, sinTildes, descargarPost, api, imprimirHTML, escaparHTML, nombreArchivo } from "./lib";
 
 export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
   return (
@@ -542,7 +542,7 @@ export async function imprimirSolicitud(lineas) {
     <div class="cab"><div style="flex:1"><h1>${h(d.titulo)}</h1><div class="sub">Fecha: ${h(d.fecha)}<br>${d.proyectos.length > 1 ? "Proyectos" : "Proyecto"}: ${h(d.proyectos.join(" · "))}</div></div><div style="width:48%">${fact}</div></div>
     ${d.secciones.map(tabla).join("")}
     ${!d.secciones.length ? "<div class=\"pie\">Todos los productos marcados ya tienen orden de compra.</div>" : ""}`;
-  imprimirHTML(d.titulo, cuerpo);
+  imprimirHTML(nombreArchivo(d.titulo, d.proyectos.join(" "), d.fecha), cuerpo);
 }
 
 // Solicitud de cotización a proveedores (lineas: [{ venta_id, indice, cantidad? }]).

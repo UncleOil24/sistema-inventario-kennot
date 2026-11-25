@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Cargando, Estado, confirmar, pedirTexto, BotonesSolicitud } from "./ui";
-import { api, fmt, descargar, imprimirHTML, escaparHTML as h, textoCompra } from "./lib";
+import { api, fmt, descargar, imprimirHTML, escaparHTML as h, textoCompra, nombreArchivo } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
 
 // Cuadro de compra de una venta (Operativo y gerencia): todos los materiales en una tabla, con quién comprar cada uno.
@@ -317,7 +317,7 @@ export function imprimirCuadroDatos(data, esAdmin) {
         <td class="num">${l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td><td class="num">${fmt(l.total_compra)}</td><td class="obs">${h(textoCompra(l.estado, l.compras.map((c) => c.numero)))}</td></tr>`).join("")}
       </tbody></table></div>`).join("")}
     <div class="pie">Total compra: <strong>${fmt(lineas.reduce((s2, l) => s2 + l.total_compra, 0))}</strong> neto · falta comprar ${fmt(totales.falta_comprar)}${esAdmin ? ` · venta ${fmt(totales.venta)} · utilidad ${fmt(totales.utilidad_actual)}` : ""}</div>`;
-  imprimirHTML(`Cuadro de compra ${venta.numero}`, cuerpo);
+  imprimirHTML(nombreArchivo("Cuadro de compra", venta.numero, venta.cliente_nombre, venta.orden_compra_cliente ? `OC ${venta.orden_compra_cliente}` : venta.id_solicitud), cuerpo);
 }
 // Desde la venta: trae el cuadro y lo imprime
 export async function imprimirCuadro(ventaId, esAdmin) {

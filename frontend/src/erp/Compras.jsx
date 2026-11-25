@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando, EmpresaCompra, AvisoCamposClave } from "./ui";
-import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago, imprimirHTML, escaparHTML as h } from "./lib";
+import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago, imprimirHTML, escaparHTML as h, nombreArchivo } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
 import AgruparCompras from "./AgruparCompras";
@@ -470,7 +470,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
     catch (e) { notify(e.message, "danger"); }
   };
 
-  const imprimir = () => imprimirHTML(`Orden de compra ${orden.numero}`, cuerpoOrden(orden));
+  const imprimir = () => imprimirHTML(nombreArchivo("Orden de compra", orden.numero, orden.proveedor_nombre, orden.venta?.numero || orden.venta_numero, orden.venta?.cliente_nombre || orden.venta_cliente), cuerpoOrden(orden));
   // Un solo botón: un borrador se descarta (gerencia lo elimina; si no, queda anulado); una compra enviada o recibida se anula
   const quitar = () => (orden.estado === "borrador" && esAdmin ? eliminar() : anular());
 
