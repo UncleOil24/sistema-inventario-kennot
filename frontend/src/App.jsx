@@ -330,6 +330,9 @@ const styles = `
   .tabla-documento .select-linea, .tabla-documento .qty-input { font-size: 11px; }
   .tabla-documento .aviso { font-size: 11px; }
   .sugerencia-equivalente { margin-top: 4px; padding: 3px 6px; border-left: 3px solid var(--accent); background: rgba(var(--accent-rgb),0.06); border-radius: 3px; line-height: 1.35; }
+  .simulador { margin-top: 10px; padding: 8px 10px; border: 1.5px solid rgba(var(--accent-rgb),0.5); border-radius: 8px; background: rgba(var(--accent-rgb),0.04); }
+  .simulador .chip-fuera { text-decoration: line-through; opacity: 0.55; }
+  .sim-resultado { margin-top: 8px; font-size: 12px; }
   .componente-linea { font-size: 11px; color: #555; display: flex; align-items: center; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
   .fila-separador td { height: 10px; padding: 0 !important; background: transparent !important; border: none !important; }
   .fila-grupo td { border-bottom: 1px solid var(--border2); }
