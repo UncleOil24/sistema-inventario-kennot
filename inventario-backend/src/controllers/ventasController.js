@@ -1252,7 +1252,7 @@ const buscarPrecio = handler(async (req, res) => {
   const { opcionesPorProducto } = require("../services/cuadroCompra");
   const { buscarParecidos } = require("./productosController");
   const q = String(req.query.q || "").trim() || linea.nombre;
-  const parecidos = await buscarParecidos(q, linea.producto_id, { minimo: req.query.q ? 0.5 : 0.4 });
+  const parecidos = await buscarParecidos(q, linea.producto_id, { minimo: req.query.q ? 0.4 : 0.3 });
   const ops = await opcionesPorProducto([linea.producto_id, ...parecidos.map((p) => p.id)]);
   res.json({ ok: true, data: {
     linea: { indice: Number(req.query.indice), nombre: linea.nombre, codigo: linea.codigo, unidad: linea.unidad, producto_id: linea.producto_id, proveedor: linea.proveedor, costo: Number(linea.costo) || 0 },

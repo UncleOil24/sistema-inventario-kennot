@@ -547,6 +547,8 @@ module.exports.buscarParecidos = async (q, excluirId, { minimo = 0.4, max = 15 }
   // Las medidas (palabras con números) pesan doble: 50 MM no es 60 MM
   const peso = (w) => (/\d/.test(w) ? 2 : 1);
   const total = A.reduce((s, w) => s + peso(w), 0);
-  return candidatos.map((p) => { const B = tokens(p.nombre); let c = 0; for (const w of A) if (B.has(w)) c += peso(w); return { ...p.toJSON(), parecido: Math.round((c / total) * 100) }; })
+  // Una palabra escrita con 1-2 letras distintas (SELENOIDE / SOLENOIDE) cuenta casi como igual; las medidas no
+  const casi = (w, B) => { if (/\d/.test(w) || w.length < 5) return false; const tol = w.length >= 7 ? 2 : 1; for (const b of B) if (!/\d/.test(b) && distancia(w, b, tol) <= tol) return true; return false; };
+  return candidatos.map((p) => { const B = tokens(p.nombre); let c = 0; for (const w of A) { if (B.has(w)) c += peso(w); else if (casi(w, B)) c += 0.8 * peso(w); } return { ...p.toJSON(), parecido: Math.round((c / total) * 100) }; })
     .filter((p) => p.parecido >= minimo * 100).sort((a, b) => b.parecido - a.parecido).slice(0, max * 3);
 };
