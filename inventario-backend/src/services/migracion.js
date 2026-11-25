@@ -59,6 +59,7 @@ async function migrar() {
   await ventasDescripcionClienteV1();
   await limpiarDescripcionesV1();
   await acidoMuriaticoLitroV1();
+  await preciosConDocumentoV1();
   await protegerTablas(q);
 }
 
@@ -282,6 +283,28 @@ async function acidoMuriaticoLitroV1() {
     console.log("N° 937 ácido muriático: precio CYC por litro ($520)");
   }
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_acido_937_v1', '${new Date().toISOString()}', NOW(), NOW())`);
+}
+
+// Regla del 25-nov-2026: manda el precio con cotización o factura; los sin documento quedan de referencia.
+// Una vez: se recalculan los productos que tienen precios de los dos tipos (los demás no cambian).
+async function preciosConDocumentoV1() {
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = 'migracion_precios_con_documento_v1'`);
+  if (hecho) return;
+  const [ids] = await sequelize.query(`SELECT producto_id FROM precios_proveedor WHERE NOT descartado GROUP BY producto_id
+    HAVING bool_or(coalesce(trim(documento), '') <> '' AND upper(trim(documento)) <> 'PLANILLA' AND upper(trim(documento)) NOT LIKE 'SISTEMA%')
+       AND bool_or(coalesce(trim(documento), '') = '' OR upper(trim(documento)) = 'PLANILLA' OR upper(trim(documento)) LIKE 'SISTEMA%')`);
+  const Producto = require("../models/Producto");
+  const { recalcular } = require("./precios");
+  let cambiados = 0;
+  for (const { producto_id } of ids) {
+    const p = await Producto.findByPk(producto_id);
+    if (!p) continue;
+    const antes = Number(p.precio_compra);
+    await recalcular(p, { usuario: "Sistema", motivo: "Manda el precio con cotización o factura (los sin documento quedan de referencia)" }).catch((e) => console.error("precio con documento", producto_id, e.message));
+    if (Number(p.precio_compra) !== antes) cambiados++;
+  }
+  console.log(`Precios con documento: ${ids.length} productos revisados, ${cambiados} cambiaron de precio vigente`);
+  await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_precios_con_documento_v1', :v, NOW(), NOW())`, { replacements: { v: `${new Date().toISOString()} · ${cambiados} de ${ids.length}` } });
 }
 
 async function catalogoPaso7() {

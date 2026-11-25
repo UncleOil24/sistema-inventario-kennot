@@ -119,7 +119,7 @@ export default function Compras({ notify, esAdmin, puedeOperar, proveedores, onP
       {cuadroDe && <CuadroCompra ventaId={cuadroDe} esAdmin={esAdmin} notify={notify} irACompra={(id) => { setCuadroDe(null); verDetalle(id); }} onClose={() => { setCuadroDe(null); cargar(); }} />}
       {agrupar && <AgruparCompras notify={notify} onClose={() => setAgrupar(false)} onCreadas={() => cargar()} />}
       {facturaNueva && <FacturaCompra notify={notify} proveedores={proveedores} onClose={() => setFacturaNueva(false)} onListo={(o) => { onPreciosCambio?.(); refrescar(o?.id); }} />}
-      {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} onClose={() => { setDocumento(false); onPreciosCambio?.(); }} />}
+      {documento && <DocumentoProveedor notify={notify} proveedores={proveedores} esGerencia={esAdmin} onClose={() => { setDocumento(false); onPreciosCambio?.(); }} />}
       {editando && (
         <FormOrden orden={editando === "nueva" ? null : editando} proveedores={proveedores} notify={notify}
           onClose={() => setEditando(null)}

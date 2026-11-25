@@ -46,6 +46,9 @@ const vigentesPorProveedor = (precios) => {
   return [...porProv.values()].sort((a, b) => Number(a.precio) - Number(b.precio) || String(b.fecha).localeCompare(String(a.fecha)));
 };
 
+// Precio con respaldo: tiene N° de cotización o factura (no "PLANILLA" ni "SISTEMA (precio manual)")
+const conDocumento = (p) => { const d = String(p.documento || "").trim(); return !!d && !/^PLANILLA$/i.test(d) && !/^SISTEMA\b/i.test(d); };
+
 const registrar = (datos, t) => RegistroCambio.create(datos, { transaction: t });
 
 // Recalcula precio vigente, opciones 2/3 y avisos de un producto.
@@ -58,7 +61,12 @@ const calcularPrecio = (producto, precios, excluidos = new Set()) => {
   const todos = vigentesPorProveedor(precios.filter((p) => !excluidos.has(normProv(p.proveedor))));
   // M8: precios de referencia (OC de cliente, factura sin proveedor) solo valen si no hay ninguna cotización real
   const reales = todos.filter((p) => !REFERENCIA.includes(p.origen));
-  const vigentes = reales.length ? reales : todos;
+  // Regla de gerencia (25-nov-2026): manda el precio con respaldo (cotización de proveedor o factura de compra).
+  // Los precios sin documento (planilla, carga manual) quedan como referencia: valen solo si no hay ninguno con documento,
+  // y siguen como opción 2/3 para consultar.
+  const conDoc = reales.filter(conDocumento);
+  const sinDoc = reales.filter((p) => !conDocumento(p));
+  const vigentes = conDoc.length ? [...conDoc, ...sinDoc] : reales.length ? reales : todos;
   if (vigentes.length === 0) return null; // sin historial: no se toca lo que tenga
 
   const avisos = [];
@@ -145,4 +153,4 @@ const origenDe = async (nombreProveedor, t) => {
 // Qué cuenta como aviso real en REVISAR (el resto del texto es solo el origen del precio, ej. "WEB SODIMAC")
 const SQL_AVISO = `(NOT confirmado AND precio_compra > 0 AND revisar ~* '(revis|verific|m[aá]s barat|m[aá]s car|antes \\$|pendiente)')`;
 
-module.exports = { vendedorML, GENERICOS_PROV, esGenerico, REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
+module.exports = { conDocumento, vendedorML, GENERICOS_PROV, esGenerico, REFERENCIA, SQL_AVISO, recalcular, calcularPrecio, precioNetoUnitario, vigentesPorProveedor, normProv, origenDe, registrar, IVA };
