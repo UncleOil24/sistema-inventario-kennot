@@ -168,7 +168,8 @@ export default function Catalogo({ esAdmin, esGerencia, notify, enCotizacion, on
         </table>
       </div>
       <div className="toolbar" style={{ marginTop: 10 }}>
-        <span className="mini">{productos.length.toLocaleString("es-CL")} productos{productos.length > mostrar ? ` · mostrando ${mostrar}` : ""}</span>
+        <span className="mini">{productos.length.toLocaleString("es-CL")} productos{productos.length > mostrar ? ` · mostrando ${mostrar}` : ""}
+          {productos[0]?._aproximado && <strong style={{ color: "var(--warn, #b5651d)" }}> · no hay exactos para "{busqueda}": se muestran los parecidos (revisa cómo está escrito)</strong>}</span>
         {productos.length > mostrar && <button className="btn btn-ghost btn-sm" onClick={() => setMostrar((m) => m + POR_PAGINA * 2)}>Ver más</button>}
       </div>
 
