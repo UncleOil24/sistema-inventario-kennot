@@ -51,10 +51,11 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
 
   // La sugerencia se aplica a lo marcado (o a todo lo por comprar si no hay nada marcado) y solo cambia
   // las líneas donde el proveedor es distinto; antes se muestra qué cambia
-  const aplicarSugerencia = async (modo, listaDada, tituloDado) => {
+  const aplicarSugerencia = async (modo, listaDada, tituloDado, todoLoPorComprar = false) => {
     const lista = listaDada || sugerencias[modo];
-    if (!lista.length) return notify("No hay precios para sugerir: carga cotizaciones de proveedores", "danger");
-    const destino = sel.size ? new Set(sinOrden(marcadas).map((l) => l.indice)) : null;
+    if (!lista.length) return notify(listaDada ? "Los productos ya están con esos proveedores: no hay nada que cambiar" : "No hay precios para sugerir: carga cotizaciones de proveedores", listaDada ? undefined : "danger");
+    // El simulador decide sobre todo lo que falta comprar (no solo lo marcado)
+    const destino = sel.size && !todoLoPorComprar ? new Set(sinOrden(marcadas).map((l) => l.indice)) : null;
     if (destino && !destino.size) return notify("Los productos marcados ya tienen orden de compra o están comprados", "danger");
     const porIndice = new Map(lineas.map((l) => [l.indice, l]));
     const cambios = lista.filter((a) => (!destino || destino.has(a.indice)) && porIndice.get(a.indice)?.proveedor !== a.proveedor);
@@ -170,7 +171,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                 ))}
               </div>
             )}
-            <SimuladorProveedores lineas={lineas} onAplicar={(lista, titulo) => aplicarSugerencia(null, lista, titulo)} />
+            <SimuladorProveedores lineas={lineas} onAplicar={(lista, titulo) => aplicarSugerencia(null, lista, titulo, true)} />
           </div>
         )}
 
@@ -468,22 +469,29 @@ function asignarCon(pendientes, permitidos) {
   for (const a of asign) { const x = porProv.get(a.proveedor) || { proveedor: a.proveedor, lineas: 0, total: 0 }; x.lineas++; x.total += a.total; porProv.set(a.proveedor, x); }
   return { asign, sinPrecio, total: asign.reduce((s, a) => s + a.total, 0), proveedores: [...porProv.values()].sort((a, b) => b.total - a.total) };
 }
-// Escenarios: desde lo más barato, se saca cada vez el proveedor que menos encarece (sin dejar productos sin precio)
+// Todos los proveedores con precio para algún producto pendiente
+const provDe = (pendientes) => new Set(pendientes.flatMap((l) => l.opciones.filter((o) => !o.medida_distinta && !NO_PROV.has(o.proveedor)).map((o) => o.proveedor)));
+// Escenarios: desde lo más barato, se saca cada vez el proveedor que menos encarece (sin dejar productos sin precio).
+// Sus productos pasan a los proveedores que siguen en la compra, así cada paso es un proveedor menos.
 function escenarios(pendientes) {
-  const base = asignarCon(pendientes, null);
+  const base = asignarCon(pendientes, provDe(pendientes));
   let quedan = new Set(base.proveedores.map((p) => p.proveedor));
-  const out = [{ n: quedan.size, total: base.total, sacado: null, quedan: new Set(quedan) }];
-  while (quedan.size > 1) {
+  const out = [];
+  let r = base;
+  for (;;) {
+    const usados = new Set(r.proveedores.map((p) => p.proveedor));
+    out.push({ n: usados.size, total: r.total, sacado: out.length ? out[out.length - 1].proximo : null, quedan: new Set(quedan) });
+    if (usados.size <= 1) break;
     let mejor = null;
-    for (const p of quedan) {
+    for (const p of usados) {
       const prueba = new Set(quedan); prueba.delete(p);
-      const r = asignarCon(pendientes, prueba);
-      if (r.sinPrecio.length > base.sinPrecio.length) continue; // dejaría productos sin precio
-      if (!mejor || r.total < mejor.total) mejor = { p, total: r.total, quedan: prueba };
+      const x = asignarCon(pendientes, prueba);
+      if (x.sinPrecio.length > base.sinPrecio.length) continue; // dejaría productos sin precio
+      if (!mejor || x.total < mejor.r.total) mejor = { p, r: x, quedan: prueba };
     }
     if (!mejor) break;
-    quedan = mejor.quedan;
-    out.push({ n: quedan.size, total: mejor.total, sacado: mejor.p, quedan: new Set(quedan) });
+    out[out.length - 1].proximo = mejor.p;
+    quedan = mejor.quedan; r = mejor.r;
   }
   return out;
 }
@@ -493,10 +501,12 @@ function SimuladorProveedores({ lineas, onAplicar }) {
   const [fuera, setFuera] = useState(new Set());
   const pendientes = useMemo(() => lineas.filter((l) => l.estado === "por_comprar" && !l.complemento_de).map((l) => ({ ...l, cant: Math.max(0, l.cantidad - (l.stock || 0)) })).filter((l) => l.cant > 0), [lineas]);
   const base = useMemo(() => asignarCon(pendientes, null), [pendientes]);
-  const todos = base.proveedores.map((p) => p.proveedor);
-  const sim = useMemo(() => asignarCon(pendientes, new Set(todos.filter((p) => !fuera.has(p)))), [pendientes, fuera]); // eslint-disable-line react-hooks/exhaustive-deps
+  const disponibles = useMemo(() => [...provDe(pendientes)], [pendientes]);
+  const sim = useMemo(() => asignarCon(pendientes, new Set(disponibles.filter((p) => !fuera.has(p)))), [pendientes, fuera, disponibles]);
+  // Chips: los proveedores que quedan elegidos en la simulación y los que se sacaron
+  const todos = [...sim.proveedores.map((p) => p.proveedor), ...[...fuera].filter((p) => !sim.proveedores.some((x) => x.proveedor === p))];
   const esc = useMemo(() => (abierto ? escenarios(pendientes) : []), [abierto, pendientes]);
-  if (!pendientes.length || base.proveedores.length < 2) return null;
+  if (!pendientes.length || disponibles.length < 2) return null;
   if (!abierto) return <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setAbierto(true)}>⚖ Simular con menos proveedores</button>;
   // Margen de la venta con lo ya comprado/pedido + lo simulado
   const ventaNeta = lineas.reduce((s, l) => s + Number(l.total_venta || 0), 0);
@@ -507,7 +517,7 @@ function SimuladorProveedores({ lineas, onAplicar }) {
   const toggle = (p) => setFuera((f) => { const n = new Set(f); n.has(p) ? n.delete(p) : n.add(p); return n; });
   // Costo de traspasar cada proveedor con pocos productos (1 a 3) a los demás que quedan
   const pocos = sim.proveedores.filter((p) => p.lineas <= 3).map((p) => {
-    const sin = new Set(todos.filter((x) => !fuera.has(x) && x !== p.proveedor));
+    const sin = new Set(disponibles.filter((x) => !fuera.has(x) && x !== p.proveedor));
     const r = asignarCon(pendientes, sin);
     return { ...p, extra: r.total - sim.total, deja: r.sinPrecio.length - sim.sinPrecio.length };
   });
@@ -542,10 +552,10 @@ function SimuladorProveedores({ lineas, onAplicar }) {
       {esc.length > 1 && <table className="table table-compacta" style={{ marginTop: 8, maxWidth: 760 }}>
         <thead><tr><th>Proveedores</th><th>Total neto</th><th>Más caro que lo más barato</th><th>Margen venta</th><th>Se saca</th><th></th></tr></thead>
         <tbody>{esc.map((e) => (
-          <tr key={e.n} className={sim.proveedores.length === e.n && todos.every((p) => fuera.has(p) !== e.quedan.has(p)) ? "fila-elegir" : ""}>
+          <tr key={e.n} className={disponibles.every((p) => fuera.has(p) !== e.quedan.has(p)) ? "fila-elegir" : ""}>
             <td>{e.n}</td><td>{fmt(e.total)}</td><td>{e.total - base.total > 0 ? `+${fmt(e.total - base.total)} (${Math.round(((e.total - base.total) / (base.total || 1)) * 1000) / 10}%)` : "—"}</td>
-            <td>{ventaNeta ? `${margen(e.total)}%` : "—"}</td><td className="mini">{e.sacado || "—"}</td>
-            <td><button className="link mini" onClick={() => setFuera(new Set(todos.filter((p) => !e.quedan.has(p))))}>ver</button></td>
+            <td>{ventaNeta ? `${margen(e.total)}%` : "—"}</td><td className="mini">{e.sacado ? `sin ${e.sacado}` : "—"}</td>
+            <td><button className="link mini" onClick={() => setFuera(new Set(disponibles.filter((p) => !e.quedan.has(p))))}>ver</button></td>
           </tr>))}</tbody>
       </table>}
       <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
