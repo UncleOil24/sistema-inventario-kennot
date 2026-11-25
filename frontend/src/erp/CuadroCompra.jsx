@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Modal, Cargando, Estado, confirmar, pedirTexto, BotonesSolicitud } from "./ui";
 import { api, fmt, descargar, imprimirHTML, escaparHTML as h, textoCompra, nombreArchivo } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
@@ -51,8 +51,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
 
   // La sugerencia se aplica a lo marcado (o a todo lo por comprar si no hay nada marcado) y solo cambia
   // las líneas donde el proveedor es distinto; antes se muestra qué cambia
-  const aplicarSugerencia = async (modo) => {
-    const lista = sugerencias[modo];
+  const aplicarSugerencia = async (modo, listaDada, tituloDado) => {
+    const lista = listaDada || sugerencias[modo];
     if (!lista.length) return notify("No hay precios para sugerir: carga cotizaciones de proveedores", "danger");
     const destino = sel.size ? new Set(sinOrden(marcadas).map((l) => l.indice)) : null;
     if (destino && !destino.size) return notify("Los productos marcados ya tienen orden de compra o están comprados", "danger");
@@ -60,7 +60,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
     const cambios = lista.filter((a) => (!destino || destino.has(a.indice)) && porIndice.get(a.indice)?.proveedor !== a.proveedor);
     if (!cambios.length) return notify("Los productos ya están con esos proveedores: no hay nada que cambiar");
     const detalle = cambios.slice(0, 15).map((a) => { const l = porIndice.get(a.indice); return `• ${l.nombre}: ${l.proveedor === "SIN PROVEEDOR" ? "—" : l.proveedor} → ${a.proveedor} (${fmt(a.precio)})`; }).join("\n");
-    if (!(await confirmar(`${destino ? `Sobre los ${destino.size} producto(s) marcados` : "Sobre todos los productos por comprar"}, cambian ${cambios.length}:\n${detalle}${cambios.length > 15 ? `\n… y ${cambios.length - 15} más` : ""}\n\nLos que no tienen precio de proveedor, los pedidos y los comprados no se tocan. Cambia el costo y el margen de la venta.`, { titulo: modo === "barato" ? "Más barato por producto" : "Menos proveedores", boton: "Aplicar" }))) return;
+    if (!(await confirmar(`${destino ? `Sobre los ${destino.size} producto(s) marcados` : "Sobre todos los productos por comprar"}, cambian ${cambios.length}:\n${detalle}${cambios.length > 15 ? `\n… y ${cambios.length - 15} más` : ""}\n\nLos que no tienen precio de proveedor, los pedidos y los comprados no se tocan. Cambia el costo y el margen de la venta.`, { titulo: tituloDado || (modo === "barato" ? "Más barato por producto" : "Menos proveedores"), boton: "Aplicar" }))) return;
     asignar(cambios.map((a) => ({ indice: a.indice, proveedor: a.proveedor, costo: a.precio })), `✓ ${cambios.length} producto(s) cambiados de proveedor`);
   };
   const cambiarLinea = async (l, valor) => {
@@ -170,6 +170,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                 ))}
               </div>
             )}
+            <SimuladorProveedores lineas={lineas} onAplicar={(lista, titulo) => aplicarSugerencia(null, lista, titulo)} />
           </div>
         )}
 
@@ -447,5 +448,110 @@ function ElegirProveedor({ proveedores, linea, lineas, onElegir, onClose }) {
           <input autoFocus value={precio} onChange={(e) => setPrecio(e.target.value)} onKeyDown={(e) => e.key === "Enter" && confirmarLinea()} placeholder={elegido === linea.proveedor && linea.compra_unit > 0 ? `vacío = mantener ${fmt(linea.compra_unit)}` : "vacío = queda sin precio"} /></div>
       </>}
     </Modal>
+  );
+}
+
+
+// --- Simular proveedores: cuánto cuesta comprar con menos proveedores -------------------------------------------
+// Cada producto por comprar va al más barato entre los proveedores que quedan. Se ve el total, la diferencia contra
+// lo más barato, el margen de la venta y los proveedores con pocos productos (para traspasarlos).
+const NO_PROV = new Set(["SIN PROVEEDOR"]);
+function asignarCon(pendientes, permitidos) {
+  const asign = []; const sinPrecio = [];
+  for (const l of pendientes) {
+    const op = l.opciones.filter((o) => !o.medida_distinta && !NO_PROV.has(o.proveedor) && (!permitidos || permitidos.has(o.proveedor)))
+      .sort((a, b) => a.precio - b.precio)[0];
+    if (op) asign.push({ indice: l.indice, proveedor: op.proveedor, precio: op.precio, total: op.precio * l.cant });
+    else sinPrecio.push(l);
+  }
+  const porProv = new Map();
+  for (const a of asign) { const x = porProv.get(a.proveedor) || { proveedor: a.proveedor, lineas: 0, total: 0 }; x.lineas++; x.total += a.total; porProv.set(a.proveedor, x); }
+  return { asign, sinPrecio, total: asign.reduce((s, a) => s + a.total, 0), proveedores: [...porProv.values()].sort((a, b) => b.total - a.total) };
+}
+// Escenarios: desde lo más barato, se saca cada vez el proveedor que menos encarece (sin dejar productos sin precio)
+function escenarios(pendientes) {
+  const base = asignarCon(pendientes, null);
+  let quedan = new Set(base.proveedores.map((p) => p.proveedor));
+  const out = [{ n: quedan.size, total: base.total, sacado: null, quedan: new Set(quedan) }];
+  while (quedan.size > 1) {
+    let mejor = null;
+    for (const p of quedan) {
+      const prueba = new Set(quedan); prueba.delete(p);
+      const r = asignarCon(pendientes, prueba);
+      if (r.sinPrecio.length > base.sinPrecio.length) continue; // dejaría productos sin precio
+      if (!mejor || r.total < mejor.total) mejor = { p, total: r.total, quedan: prueba };
+    }
+    if (!mejor) break;
+    quedan = mejor.quedan;
+    out.push({ n: quedan.size, total: mejor.total, sacado: mejor.p, quedan: new Set(quedan) });
+  }
+  return out;
+}
+
+function SimuladorProveedores({ lineas, onAplicar }) {
+  const [abierto, setAbierto] = useState(false);
+  const [fuera, setFuera] = useState(new Set());
+  const pendientes = useMemo(() => lineas.filter((l) => l.estado === "por_comprar" && !l.complemento_de).map((l) => ({ ...l, cant: Math.max(0, l.cantidad - (l.stock || 0)) })).filter((l) => l.cant > 0), [lineas]);
+  const base = useMemo(() => asignarCon(pendientes, null), [pendientes]);
+  const todos = base.proveedores.map((p) => p.proveedor);
+  const sim = useMemo(() => asignarCon(pendientes, new Set(todos.filter((p) => !fuera.has(p)))), [pendientes, fuera]); // eslint-disable-line react-hooks/exhaustive-deps
+  const esc = useMemo(() => (abierto ? escenarios(pendientes) : []), [abierto, pendientes]);
+  if (!pendientes.length || base.proveedores.length < 2) return null;
+  if (!abierto) return <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setAbierto(true)}>⚖ Simular con menos proveedores</button>;
+  // Margen de la venta con lo ya comprado/pedido + lo simulado
+  const ventaNeta = lineas.reduce((s, l) => s + Number(l.total_venta || 0), 0);
+  const fijo = lineas.filter((l) => !pendientes.some((p) => p.indice === l.indice)).reduce((s, l) => s + Number(l.total_compra || 0), 0);
+  const margen = (t) => (ventaNeta ? Math.round(((ventaNeta - fijo - t) / ventaNeta) * 1000) / 10 : 0);
+  const dif = sim.total - base.total;
+  const nuevosSinPrecio = sim.sinPrecio.filter((l) => !base.sinPrecio.some((b) => b.indice === l.indice));
+  const toggle = (p) => setFuera((f) => { const n = new Set(f); n.has(p) ? n.delete(p) : n.add(p); return n; });
+  // Costo de traspasar cada proveedor con pocos productos (1 a 3) a los demás que quedan
+  const pocos = sim.proveedores.filter((p) => p.lineas <= 3).map((p) => {
+    const sin = new Set(todos.filter((x) => !fuera.has(x) && x !== p.proveedor));
+    const r = asignarCon(pendientes, sin);
+    return { ...p, extra: r.total - sim.total, deja: r.sinPrecio.length - sim.sinPrecio.length };
+  });
+  const aplicar = () => {
+    const actual = new Map(lineas.map((l) => [l.indice, l.proveedor]));
+    const lista = sim.asign.filter((a) => actual.get(a.indice) !== a.proveedor).map((a) => ({ indice: a.indice, proveedor: a.proveedor, precio: a.precio }));
+    onAplicar(lista, `Comprar con ${sim.proveedores.length} proveedores`);
+  };
+  return (
+    <div className="simulador">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <strong>⚖ Simular proveedores</strong>
+        <span><button className="link mini" onClick={() => setFuera(new Set())}>todos</button> · <button className="link mini" onClick={() => setAbierto(false)}>cerrar</button></span>
+      </div>
+      <div className="mini">Toca un proveedor para sacarlo: sus productos pasan al más barato entre los que quedan. Solo lo que falta comprar ({pendientes.length} productos).</div>
+      <div className="chips" style={{ marginTop: 6 }}>
+        {todos.map((p) => { const x = sim.proveedores.find((y) => y.proveedor === p); return (
+          <button key={p} className={`chip ${fuera.has(p) ? "chip-fuera" : ""}`} onClick={() => toggle(p)} title={fuera.has(p) ? "Volver a incluirlo" : "Sacarlo"}>
+            {fuera.has(p) ? "✕ " : ""}{p}{x ? ` · ${x.lineas} prod. · ${fmt(x.total)}` : fuera.has(p) ? "" : " · 0 prod."}
+          </button>); })}
+      </div>
+      <div className="sim-resultado">
+        Con <strong>{sim.proveedores.length} proveedores</strong>: <strong>{fmt(sim.total)}</strong> neto · {fmt(Math.round(sim.total * 1.19))} c/IVA
+        {" · "}{dif > 0 ? <span style={{ color: "var(--danger)", fontWeight: 600 }}>▲ {fmt(dif)} más que lo más barato ({Math.round((dif / (base.total || 1)) * 1000) / 10}%)</span> : <span style={{ color: "var(--success)" }}>lo más barato</span>}
+        {ventaNeta > 0 && <> · margen de la venta <strong>{margen(sim.total)}%</strong> (más barato {margen(base.total)}%)</>}
+        {nuevosSinPrecio.length > 0 && <div style={{ color: "var(--danger)" }}>⚠ Quedan sin precio ({nuevosSinPrecio.length}): {nuevosSinPrecio.slice(0, 6).map((l) => l.nombre).join(" · ")}{nuevosSinPrecio.length > 6 ? " …" : ""} (solo los tenía un proveedor que sacaste)</div>}
+      </div>
+      {pocos.length > 0 && <div className="mini" style={{ marginTop: 6 }}>
+        <strong>Proveedores con pocos productos:</strong>{" "}
+        {pocos.map((p) => <span key={p.proveedor} style={{ marginRight: 10 }}>{p.proveedor} {p.lineas} prod. ({fmt(p.total)}) → {p.deja > 0 ? `${p.deja} quedaría(n) sin precio` : `traspasarlo cuesta ${p.extra > 0 ? `+${fmt(p.extra)}` : "lo mismo"}`} <button className="link mini" onClick={() => toggle(p.proveedor)}>sacar</button></span>)}
+      </div>}
+      {esc.length > 1 && <table className="table table-compacta" style={{ marginTop: 8, maxWidth: 760 }}>
+        <thead><tr><th>Proveedores</th><th>Total neto</th><th>Más caro que lo más barato</th><th>Margen venta</th><th>Se saca</th><th></th></tr></thead>
+        <tbody>{esc.map((e) => (
+          <tr key={e.n} className={sim.proveedores.length === e.n && todos.every((p) => fuera.has(p) !== e.quedan.has(p)) ? "fila-elegir" : ""}>
+            <td>{e.n}</td><td>{fmt(e.total)}</td><td>{e.total - base.total > 0 ? `+${fmt(e.total - base.total)} (${Math.round(((e.total - base.total) / (base.total || 1)) * 1000) / 10}%)` : "—"}</td>
+            <td>{ventaNeta ? `${margen(e.total)}%` : "—"}</td><td className="mini">{e.sacado || "—"}</td>
+            <td><button className="link mini" onClick={() => setFuera(new Set(todos.filter((p) => !e.quedan.has(p))))}>ver</button></td>
+          </tr>))}</tbody>
+      </table>}
+      <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+        <button className="btn btn-primary btn-sm" disabled={!fuera.size && !sim.asign.some((a) => lineas.find((l) => l.indice === a.indice)?.proveedor !== a.proveedor)} onClick={aplicar}>Aplicar esta selección</button>
+        <span className="mini">Antes de cambiar muestra la lista "producto: antes → después". Lo pedido, lo comprado y el stock no se tocan.</span>
+      </div>
+    </div>
   );
 }
