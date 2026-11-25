@@ -1,5 +1,6 @@
 // Piezas compartidas por las vistas del ERP
 import { useState, useMemo, useEffect } from "react";
+import { conflictoMedidas } from "./medidas";
 import { fmt, fecha, hoyISO, sinTildes, descargarPost, api, imprimirHTML, escaparHTML } from "./lib";
 
 export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
@@ -451,6 +452,7 @@ export function prepararLineas(lineas, items, productos) {
     let mejor = null;
     for (const it of items) {
       if (usados.has(it.clave)) continue;
+      if (conflictoMedidas(l.descripcion, it.nombre)) continue; // otra medida: no es lo que se pidió
       const pa = parecidoA(l.descripcion, it.nombre);
       const enCands = cands.has(it.producto_id);
       const puntos = pa.comunes + (pa.sustantivo ? 3 : 0) + (enCands ? 1 : 0);

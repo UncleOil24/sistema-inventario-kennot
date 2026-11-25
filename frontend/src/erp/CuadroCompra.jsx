@@ -109,6 +109,13 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const quitarStock = (l) => ejecutar(() => api(`/ventas/${ventaId}/stock`, { method: "POST", body: { indice: l.indice, cantidad: 0 } }), "Ya no sale de stock");
   // La línea quedó "por comprar" o "no vino" aunque se compró (la factura la conectó con otra línea): se elige
   // el producto de la compra con que quedó registrado y la línea pasa a ese producto (queda comprada)
+  // Precio con documento de un producto equivalente (misma medida): queda en la línea y también en el producto de la línea
+  const usarEquivalente = async (l, e) => {
+    try {
+      await api(`/ventas/${ventaId}/precio-linea`, { method: "POST", body: { indice: l.indice, proveedor: e.opcion.proveedor, precio: e.opcion.precio, desde_producto_id: e.producto_id, guardar: true } });
+      notify(`✓ ${l.nombre}: ${e.opcion.proveedor} ${fmt(e.opcion.precio)} (guardado también en N° ${l.codigo ?? l.producto_id})`); cargar();
+    } catch (err) { notify(err.message, "danger"); }
+  };
   const yaComprado = (l) => setYaDe(l);
   const conectarComprado = async (l, orden_id, item) => {
     try { await api(`/ventas/${ventaId}/linea-comprada`, { method: "POST", body: { indice: l.indice, orden_id, item } }); notify(`✓ ${l.nombre}: conectada con lo comprado`); setYaDe(null); cargar(); }
@@ -208,9 +215,15 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
                       {!real && !bloqueada && <button className="link mini" style={{ display: "block" }} title="Todos los precios de este producto y de productos parecidos del catálogo" onClick={() => setBuscar(l.indice)}>🔍 buscar precio</button>}
                       {!real && (() => { const o = l.opciones.find((x) => x.proveedor === l.proveedor); if (!o) return null; const v = vigencia(o); return <div className="mini">{o.fecha ? `precio del ${o.fecha.split("-").reverse().join("-")}` : "precio cotizado"}{l.opciones.length > 1 ? ` · ${l.opciones.length} opciones` : ""}
                         {v && <div style={{ color: "var(--danger)" }} title={`Cotización válida hasta ${o.valido_hasta}`}>⚠ cotización {v}: confirmar precio</div>}
-                        {porConfirmar(o) && <div style={{ color: "var(--warn)" }} title={o.descripcion || ""}>⚠ por confirmar: {o.descripcion || "producto parecido"}</div>}
+                        {o.medida_distinta ? <div style={{ color: "var(--danger)", fontWeight: 600 }} title="La descripción del proveedor trae otra medida que lo pedido">⚠ otra medida: {o.descripcion}</div>
+                          : porConfirmar(o) && <div style={{ color: "var(--warn)" }} title={o.descripcion || ""}>⚠ por confirmar: {o.descripcion || "producto parecido"}</div>}
                         {o.pack && <div><strong>{textoPack(l.cantidad - (l.stock || 0), o.pack)}</strong></div>}
                         {o.vendedor && <div>vendedor: {o.vendedor}</div>}</div>; })()}
+                      {!real && !bloqueada && (l.equivalentes || []).map((e) => (
+                        <div key={e.producto_id} className="mini sugerencia-equivalente" title={e.opcion.descripcion || ""}>
+                          💡 Con la misma medida, en N° {e.codigo} {e.nombre}: <strong>{e.opcion.proveedor} {fmt(e.opcion.precio)}</strong> · {String(e.opcion.fecha || "").split("-").reverse().join("-")}{e.opcion.documento ? ` · ${e.opcion.documento}` : ""}
+                          {" "}<button className="link mini" disabled={ocupado} onClick={() => usarEquivalente(l, e)}>Usar</button>
+                        </div>))}
                     </td>
                     <td className="price-cell compra">{real ? fmt(real.precio) : l.compra_unit > 0 ? fmt(l.compra_unit) : "sin precio"}</td>
                     <td className="price-cell compra">{fmt(real ? real.precio * (l.cantidad - (l.stock || 0)) : l.total_compra)}</td>
