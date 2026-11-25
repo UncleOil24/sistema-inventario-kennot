@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Modal, Estado, Totales, confirmar, modoPedido, motivoRechazo } from "./ui";
 import { conConfirmacion } from "./Recorrido";
-import { api, fmt, fecha, descargar, imprimirPDF, fichaMP, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo } from "./lib";
+import { api, fmt, fecha, descargar, imprimirPDF, fichaMP, cargarProductos, hoyISO, idCot, nombreCot, subirArchivo, nombreArchivo } from "./lib";
 
 // Pestañas: En ejecución (borrador) · Esperando proveedor · Enviadas (con sus resultados)
 const SUB_ENVIADAS = [["cotizacion", "Sin respuesta"], ["aceptada", "Aceptadas"], ["rechazada", "Rechazadas"], ["vencida", "Vencidas"], ["enviadas", "Todas"]];
@@ -176,7 +176,7 @@ function DetalleCotizacion({ cot, esAdmin, notify, onClose, acciones }) {
   return (
     <Modal titulo={`// ${nombreCot(cot)}`} onClose={onClose} ancho={820}
       footer={<>
-        {enviada && <button className="btn btn-ghost" onClick={() => imprimirPDF(`/cotizaciones/${cot.id}/pdf`).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
+        {enviada && <button className="btn btn-ghost" onClick={() => imprimirPDF(`/cotizaciones/${cot.id}/pdf`, null, nombreArchivo("Cotizacion", nombreCot(cot), cot.cliente_nombre || cot.cliente)).catch((e) => notify(e.message, "danger"))}>🖨 Imprimir</button>}
         {enviada && <button className="btn btn-ghost" onClick={acciones.pdf}>↓ PDF</button>}
         {enviada && <button className="btn btn-ghost" onClick={acciones.excel}>↓ Excel</button>}
         {esAdmin && <button className="btn btn-ghost" title="Cotizado, caso, venta, compra, 3 mejores proveedores y utilidad. No se envía al cliente" onClick={() => acciones.interna("simple")}>↓ Interna simple</button>}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Modal, Cargando, confirmar, BotonesSolicitud } from "./ui";
-import { api, fmt, descargarPost, imprimirHTML, escaparHTML as h, textoCompra, EMP_CORTA } from "./lib";
+import { api, fmt, descargarPost, imprimirHTML, escaparHTML as h, textoCompra, EMP_CORTA, nombreArchivo } from "./lib";
 
 // Agrupar compras de varias ventas (Operativo): se configura antes de imprimir o descargar.
 // - Ordenar por proveedor (juntando ventas) o por venta
@@ -106,7 +106,7 @@ export default function AgruparCompras({ notify, onClose, onCreadas }) {
         </tbody></table></div>`;
       }).join("")}
       <div class="pie">Total: <strong>${fmt(grupos.reduce((s, g) => s + g.total, 0))}</strong> neto · ${filas.length} línea(s)</div>`;
-    imprimirHTML("Compras agrupadas", cuerpo);
+    imprimirHTML(nombreArchivo(`Compras agrupadas por ${orden === "venta" ? "venta" : "proveedor"}`, [...new Set(filas.map((f) => f.venta))].join(" "), new Date().toLocaleDateString("es-CL")), cuerpo);
   };
 
 

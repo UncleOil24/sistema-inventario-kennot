@@ -103,10 +103,28 @@ export async function descargarPost(path, body, nombre) {
   a.click(); URL.revokeObjectURL(url);
 }
 
+// Nombre del archivo al "Guardar como PDF": el navegador usa el título de la página, así que mientras se imprime
+// la pestaña toma el nombre de la hoja (ej. "Cuadro de compra - V-0010 - I MUNICIPALIDAD DE MAULE - OC 4689-375-AG26")
+export const nombreArchivo = (...partes) => partes.flat().map((x) => String(x ?? "").trim()).filter(Boolean).join(" - ")
+  .replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
+function tituloMientrasImprime(titulo, ventana) {
+  if (!titulo) return;
+  const antes = document.title;
+  document.title = titulo;
+  let hecho = false;
+  const volver = () => { if (!hecho) { hecho = true; document.title = antes; } };
+  try { ventana?.addEventListener("afterprint", volver); } catch { /* PDF en otro origen */ }
+  window.addEventListener("afterprint", volver, { once: true });
+  setTimeout(volver, 3 * 60 * 1000);
+}
+
 // Imprime directo un PDF del sistema (sin descargarlo): se abre la ventana de impresión con el tamaño de hoja del PDF
-export async function imprimirPDF(path, body) {
+export async function imprimirPDF(path, body, titulo) {
   const res = await authFetch(`${API_URL}/api${path}`, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   if (!res.ok) { let msg = `Error ${res.status}`; try { msg = (await res.json()).error || msg; } catch { /* binario */ } throw new Error(msg); }
+  // Nombre al guardar: el indicado o el del archivo que entrega el sistema (ej. Cotizacion_KENOTT_N105)
+  const delArchivo = decodeURIComponent((res.headers.get("Content-Disposition") || "").match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i)?.[1] || "").replace(/\.pdf$/i, "");
+  tituloMientrasImprime(nombreArchivo(titulo || delArchivo));
   const url = URL.createObjectURL(new Blob([await res.blob()], { type: "application/pdf" }));
   const viejo = document.getElementById("marco-impresion"); if (viejo) viejo.remove();
   const f = document.createElement("iframe");
@@ -147,7 +165,7 @@ export function imprimirHTML(titulo, cuerpo, { horizontal = null } = {}) {
   d.close();
   // Hoja Carta ~ 1000 px de alto útil: solo se mantienen juntos los grupos que caben en media hoja
   d.querySelectorAll(".grupo").forEach((g) => { if (g.offsetHeight < 480) g.classList.add("corto"); });
-  setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); }, 300);
+  setTimeout(() => { tituloMientrasImprime(nombreArchivo(titulo), f.contentWindow); f.contentWindow.focus(); f.contentWindow.print(); }, 300);
 }
 
 // Parámetros (márgenes) para calcular precios de venta en pantalla

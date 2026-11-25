@@ -601,6 +601,7 @@ const descargarPdf = async (req, res) => {
     const emp = datosEmpresa(cot.empresa, await getParametros());
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${nombreArchivo(cot, "pdf")}"`);
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
     pdfCotizacion(cot.toJSON(), emp, res);
   } catch (error) {
     console.error(error);
