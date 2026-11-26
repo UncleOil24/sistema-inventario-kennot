@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Modal, Cargando, Estado, confirmar, pedirTexto, BotonesSolicitud } from "./ui";
+import { Modal, Cargando, Estado, confirmar, pedirTexto, BotonesSolicitud, GastoVenta } from "./ui";
 import { api, fmt, descargar, imprimirHTML, escaparHTML as h, textoCompra, nombreArchivo } from "./lib";
 import SubirDocumentosVenta from "./SubirDocumentosVenta";
 
@@ -24,6 +24,7 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
   const [subir, setSubir] = useState(false);
   const [buscar, setBuscar] = useState(null); // índice de la línea donde se busca precio
   const [yaDe, setYaDe] = useState(null); // línea que ya se compró pero quedó conectada con otra
+  const [nuevoGasto, setNuevoGasto] = useState(false);
   const [elegir, setElegir] = useState(null); // { l } una línea · { ls } las marcadas
 
   const cargar = useCallback(async () => {
@@ -251,6 +252,8 @@ export default function CuadroCompra({ ventaId, notify, onClose, irACompra, esAd
         </div>
         <div className="mini">★ = más barato. Las fechas son las del último precio de cada proveedor. Cambiar el proveedor cambia el costo y el margen de la venta.</div>
 
+        {!anulada && <div style={{ margin: "10px 0" }}><button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto (con o sin documento)" onClick={() => setNuevoGasto(true)}>+ Gasto de la venta</button></div>}
+        {nuevoGasto && <GastoVenta ventas={[venta]} notify={notify} onClose={() => setNuevoGasto(false)} onListo={() => { setNuevoGasto(false); cargar(); }} inicial={{ venta_id: venta.id, empresa: venta.empresa }} />}
         {(ordenes.length > 0 || gastos.length > 0) && (
           <div className="panel">
             <div className="panel-titulo">Compras y gastos de la venta</div>

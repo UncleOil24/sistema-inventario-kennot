@@ -309,8 +309,8 @@ const styles = `
   .bandeja-doc-acciones { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
   @media (max-width: 640px) {
     .bandeja-doc { flex-wrap: wrap; }
-    .bandeja-doc-acciones { flex-direction: row; width: 100%; }
-    .bandeja-doc-acciones .btn { flex: 1; min-height: 42px; }
+    .bandeja-doc-acciones { flex-direction: row; flex-wrap: wrap; width: 100%; }
+    .bandeja-doc-acciones .btn { flex: 1 1 40%; min-height: 42px; }
     .btn-grande-movil { width: 100%; }
   }
 
@@ -404,6 +404,14 @@ const styles = `
     .secciones-nav .nav-btn { white-space: nowrap; flex-shrink: 0; }
     .modal-overlay .modal { max-width: 100vw !important; }
     .modal-overlay { padding: 6px; }
+  }
+  @media (max-width: 640px) {
+    /* Tablas de documentos (subir factura, documentos de proveedor): cada línea como tarjeta */
+    .tabla-documento thead { display: none; }
+    .tabla-documento, .tabla-documento tbody, .tabla-documento tr, .tabla-documento td { display: block; width: 100%; box-sizing: border-box; }
+    .tabla-documento tr { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; padding: 6px; }
+    .tabla-documento td { border: none !important; padding: 4px 6px !important; }
+    .tabla-documento .select-linea { max-width: 100%; }
   }
   @media (max-width: 520px) {
     .header .depto-btn { font-size: 0; padding: 6px 10px; }

@@ -35,17 +35,20 @@ async function completar(doc, lectura) {
     if (compra) Object.assign(cambios, { estado: "duplicado", duplicado_de: `Ya registrado en ${compra.numero}` });
     else if (otro) Object.assign(cambios, { estado: "duplicado", duplicado_de: `Ya está en la bandeja (subido por ${otro.subido_por || "—"})` });
   }
-  // Compra sugerida: una orden sin recibir del mismo proveedor (primero de la venta indicada), la de total más parecido
-  if (proveedor && cambios.estado !== "duplicado") {
-    const ordenes = await OrdenCompra.findAll({ where: { proveedor_nombre: proveedor, estado: { [Op.notIn]: ["anulada", "recibida"] } }, attributes: ["id", "numero", "venta_id", "total", "subtotal"] });
-    const neto = Number(e.neto) || Number(lectura.control?.total_documento) || 0;
-    const orden = ordenes.sort((a, b) => (b.venta_id === doc.venta_id) - (a.venta_id === doc.venta_id) || Math.abs(Number(a.subtotal) - neto) - Math.abs(Number(b.subtotal) - neto))[0];
-    if (orden) {
-      const v = orden.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["numero", "cliente_nombre"] }) : null;
-      cambios.sugerencia = { orden_id: orden.id, orden_numero: orden.numero, venta_id: orden.venta_id, venta_numero: v?.numero || null, cliente: v?.cliente_nombre || null };
-    }
-  }
+  if (cambios.estado !== "duplicado") cambios.sugerencia = await sugerir(doc, proveedor, Number(e.neto) || Number(lectura.control?.total_documento) || 0);
   await doc.update(cambios);
+}
+
+// Compra sugerida: una orden sin recibir del mismo proveedor. Si se indicó la venta, SOLO entre las de esa venta
+// (si no hay, es una compra nueva de esa venta); sin venta, entre todas, la de total más parecido.
+async function sugerir(doc, proveedor, neto) {
+  if (!proveedor) return doc.venta_id ? { orden_id: null, venta_id: doc.venta_id } : null;
+  const where = { proveedor_nombre: proveedor, estado: { [Op.notIn]: ["anulada", "recibida"] }, ...(doc.venta_id ? { venta_id: doc.venta_id } : {}) };
+  const ordenes = await OrdenCompra.findAll({ where, attributes: ["id", "numero", "venta_id", "subtotal"] });
+  const orden = ordenes.sort((a, b) => Math.abs(Number(a.subtotal) - neto) - Math.abs(Number(b.subtotal) - neto))[0];
+  if (!orden) return doc.venta_id ? { orden_id: null, venta_id: doc.venta_id } : null;
+  const v = orden.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["numero", "cliente_nombre"] }) : null;
+  return { orden_id: orden.id, orden_numero: orden.numero, venta_id: orden.venta_id, venta_numero: v?.numero || null, cliente: v?.cliente_nombre || null };
 }
 
 // Lectura en segundo plano (fotos y PDF con IA), de a una para no saturar
@@ -102,9 +105,12 @@ const listar = handler(async (req, res) => {
   const ventas = ventaIds.length ? await Venta.findAll({ where: { id: ventaIds }, attributes: ["id", "numero", "cliente_nombre", "empresa"] }) : [];
   const ordenIds = [...new Set(docs.map((d) => d.orden_id).filter(Boolean))];
   const ordenes = ordenIds.length ? await OrdenCompra.findAll({ where: { id: ordenIds }, attributes: ["id", "numero"] }) : [];
+  // Compras abiertas de cada venta, para elegir a cuál pertenece el documento
+  const abiertas = ventaIds.length ? await OrdenCompra.findAll({ where: { venta_id: ventaIds, estado: { [Op.notIn]: ["anulada", "recibida"] } }, attributes: ["id", "numero", "venta_id", "proveedor_nombre", "total"], order: [["id", "DESC"]] }) : [];
   const conteo = await DocumentoBandeja.count({ group: ["estado"] });
   res.json({ ok: true, data: {
-    documentos: docs.map((d) => ({ ...d.toJSON(), venta: ventas.find((v) => v.id === d.venta_id) || null, orden_numero: ordenes.find((o) => o.id === d.orden_id)?.numero || null })),
+    documentos: docs.map((d) => ({ ...d.toJSON(), venta: ventas.find((v) => v.id === d.venta_id) || null, orden_numero: ordenes.find((o) => o.id === d.orden_id)?.numero || null,
+      compras_venta: abiertas.filter((o) => o.venta_id === d.venta_id).map((o) => ({ id: o.id, numero: o.numero, proveedor: o.proveedor_nombre, total: Number(o.total) })) })),
     conteo: Object.fromEntries(conteo.map((c) => [c.estado, Number(c.count)])),
   } });
 });
@@ -142,6 +148,20 @@ const actualizar = handler(async (req, res) => {
     if (d.estado === "procesado") throw new ErrorNegocio("Ya está procesado (tiene su compra registrada)");
     cambios.estado = b.estado;
     if (b.estado === "por_procesar") cambios.duplicado_de = null;
+  }
+  // Compra a la que pertenece, elegida a mano (null = compra nueva de la venta)
+  if ("orden_id" in b) {
+    const oid = Number(b.orden_id) || null;
+    if (oid) {
+      const o = await OrdenCompra.findByPk(oid, { attributes: ["id", "numero", "venta_id"] });
+      if (!o) throw new ErrorNegocio("Compra no encontrada");
+      const v = o.venta_id ? await Venta.findByPk(o.venta_id, { attributes: ["numero", "cliente_nombre"] }) : null;
+      cambios.sugerencia = { orden_id: o.id, orden_numero: o.numero, venta_id: o.venta_id, venta_numero: v?.numero || null, cliente: v?.cliente_nombre || null, elegida: true };
+      if (o.venta_id) cambios.venta_id = o.venta_id;
+    } else cambios.sugerencia = { orden_id: null, venta_id: cambios.venta_id ?? d.venta_id, elegida: true };
+  } else if ("venta_id" in cambios && cambios.venta_id !== d.venta_id) {
+    d.venta_id = cambios.venta_id;
+    cambios.sugerencia = await sugerir(d, d.proveedor, Number(d.total) ? Number(d.total) / 1.19 : 0);
   }
   await d.update(cambios);
   res.json({ ok: true, data: d });
