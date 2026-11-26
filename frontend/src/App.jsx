@@ -16,9 +16,9 @@ import Cobranza from "./erp/Cobranza";
 import PorPagar from "./erp/PorPagar";
 import Iva from "./erp/Iva";
 import Produccion from "./erp/Produccion";
-import { api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
+import { setRolSesion, api, getToken, setToken, invalidarProductos, lineaDesdeProducto } from "./erp/lib";
 import Login from "./erp/Login";
-import { Avisos } from "./erp/ui";
+import { Avisos, useDock, setSeccionDock } from "./erp/ui";
 import Usuarios from "./erp/Usuarios";
 import CambiarPassword from "./erp/CambiarPassword";
 import Bandeja from "./erp/Bandeja";
@@ -242,7 +242,7 @@ const styles = `
   .dato-sii .falta { color: var(--warn); font-size: 12px; }
   .facturas-pendientes { border: 2px solid var(--warn); background: rgba(184,116,15,.07); box-shadow: 0 2px 10px rgba(184,116,15,.12); }
   .facturas-pendientes .panel-titulo { color: var(--warn); }
-  .inicio-dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; align-items: start; }
+  .inicio-dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 14px; align-items: start; }
   .inicio-dos > .panel { margin: 0; }
   .aviso { background: rgba(232,163,61,0.08); border: 1px solid rgba(232,163,61,0.3); color: var(--warn); border-radius: 6px; padding: 10px 14px; font-family: var(--mono); font-size: 12px; margin-bottom: 1rem; }
   .items-editor { display: flex; flex-direction: column; gap: 10px; }
@@ -446,6 +446,48 @@ const styles = `
   .destino-linea .mini { flex-basis: 100%; }
   .aviso-fuera { font-size: 11px; color: #b42318; margin-top: 3px; }
   .reparto-factura { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 10px; margin: 8px 0; border-radius: 6px; background: #eef6f7; font-size: 12px; }
+  .complemento-elegido { margin-top: 4px; padding: 4px 8px; border-radius: 5px; background: #f3eefe; border-left: 3px solid #7c3aed; color: #5b21b6; font-weight: 600; font-size: 11px; }
+  .aviso-parecido { margin-top: 4px; font-size: 11px; color: #8a5a00; }
+  /* Ventanas minimizadas */
+  .modal-minimizar { background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text2); padding: 0 8px; margin-left: auto; }
+  .modal-minimizar + .modal-close { margin-left: 0; }
+  .dock-minimizadas { position: fixed; left: 12px; bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap; z-index: 1500; max-width: calc(100vw - 24px); }
+  .dock-item { display: flex; align-items: center; gap: 8px; max-width: 320px; padding: 8px 12px; border-radius: 8px; border: 1px solid #7c3aed; background: #fff; color: #2b3038; font-size: 12px; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.18); cursor: pointer; white-space: nowrap; }
+  .dock-tit { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .dock-volver { font-size: 10px; text-transform: uppercase; color: #7c3aed; letter-spacing: .05em; }
+  @media (max-width: 640px) { .dock-minimizadas { left: 8px; right: 8px; bottom: 8px; } .dock-item { flex: 1 1 100%; max-width: none; } }
+  /* Celular: las tablas pasan a tarjetas (cada columna es "etiqueta: valor"; las etiquetas las pone etiquetarTablas) */
+  @media (max-width: 640px) {
+    .main .table:not(.tabla-documento):not(.no-tarjetas) thead { display: none; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas), .main .table:not(.tabla-documento):not(.no-tarjetas) tbody { display: block; width: 100%; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) tr { display: block; border: 1px solid var(--border); border-radius: 10px; margin: 0 0 10px; padding: 6px 4px; background: var(--surface); }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) tr:hover td { background: none; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 5px 10px !important; border: none !important; text-align: right; min-height: 0; position: static !important; box-shadow: none !important; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td::before { content: attr(data-label); font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); text-align: left; flex: 0 0 auto; max-width: 45%; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td[data-label=""]::before { display: none; }
+    .table:not(.tabla-documento):not(.no-tarjetas) td[data-vacio="1"]:not([colspan]) { display: none !important; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td[data-label=""] { justify-content: flex-end; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td:first-child { font-weight: 600; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td > * { max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
+    .table:not(.tabla-documento):not(.no-tarjetas) td { overflow-wrap: anywhere; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td .actions, .main .table:not(.tabla-documento):not(.no-tarjetas) td > div[style*="nowrap"] { flex-wrap: wrap !important; justify-content: flex-end; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) td .btn-sm { padding: 7px 10px; font-size: 11px; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) .empty-row td, .main .table:not(.tabla-documento):not(.no-tarjetas) td[colspan] { display: block; text-align: center; }
+    .main .table-wrap:has(> .table:not(.tabla-documento):not(.no-tarjetas)) { background: none; border: none; overflow: visible; }
+    .main .table:not(.tabla-documento):not(.no-tarjetas) input, .main .table:not(.tabla-documento):not(.no-tarjetas) select { max-width: 100%; }
+    .modal .table:not(.tabla-documento):not(.no-tarjetas) { font-size: 12px; }
+    .modal { width: 100% !important; max-width: 100% !important; max-height: 100dvh; border-radius: 12px 12px 0 0; }
+    .modal-overlay { align-items: flex-end; padding: 0 !important; }
+    .modal-footer { flex-wrap: wrap; gap: 6px; }
+    .modal-footer .btn { flex: 1 1 auto; }
+  }
+  @media (max-width: 640px) {
+    .franja-edicion { position: static; padding: 8px 10px; font-size: 11.5px; }
+    .bandeja-subir .empresa-btns { flex-direction: column; } .bandeja-subir .empresa-btn { width: 100%; }
+    .main { padding-bottom: 70px; }
+    .btn { min-height: 36px; }
+    .chip { padding: 7px 12px; }
+  }
 `;
 
 // Raíz: decide entre pantalla de login y el sistema
@@ -503,6 +545,7 @@ const ROL_TEXTO = { admin: "administrador", gerencia: "gerencia", comercial: "co
 function App({ usuario: usuarioInicial, onLogout }) {
   const [usuario, setUsuario] = useState(usuarioInicial);
   const esGerencia = ["admin", "gerencia"].includes(usuario.rol);
+  setRolSesion(usuario.rol);
   const esAdmin = esGerencia; // "ve todo": márgenes, utilidades, configuración
   const veCostos = esGerencia || ["comercial", "operativo"].includes(usuario.rol);
   const puedeOperar = esGerencia || usuario.rol === "operativo";
@@ -607,6 +650,100 @@ function App({ usuario: usuarioInicial, onLogout }) {
 
   const seccionActiva = view === "cotizar" ? "cotizaciones" : view;
 
+  // En el celular las tablas se ven como tarjetas: cada celda lleva el nombre de su columna
+  useEffect(() => {
+    let pend = false;
+    const etiquetar = () => {
+      pend = false;
+      document.querySelectorAll("table.table:not(.tabla-documento):not(.no-tarjetas)").forEach((t) => {
+        const ths = t.tHead?.rows?.[0]?.cells;
+        if (!ths) return;
+        const nombres = [];
+        for (const th of ths) for (let k = 0; k < (th.colSpan || 1); k++) nombres.push((th.innerText || "").trim());
+        for (const tb of t.tBodies) for (const tr of tb.rows) {
+          let c = 0;
+          for (const td of tr.cells) {
+            const n = td.colSpan > 1 ? "" : nombres[c] || "";
+            if (td.getAttribute("data-label") !== n) td.setAttribute("data-label", n);
+            // Celdas vacías ("—") no se muestran en la tarjeta del celular
+            const vacio = !td.querySelector("input,select,button,a,textarea,img,svg") && /^[\s—-]*$/.test(td.textContent || "") ? "1" : "0";
+            if (td.getAttribute("data-vacio") !== vacio) td.setAttribute("data-vacio", vacio);
+            c += td.colSpan || 1;
+          }
+        }
+      });
+    };
+    const obs = new MutationObserver(() => { if (!pend) { pend = true; requestAnimationFrame(etiquetar); } });
+    obs.observe(document.body, { childList: true, subtree: true });
+    etiquetar();
+    return () => obs.disconnect();
+  }, []);
+
+  // Ventanas minimizadas: su sección queda abierta (oculta) para no perder lo que tenían; se vuelve con la barra de abajo
+  setSeccionDock({ depto: dep.id, view });
+  const minimizados = useDock();
+  const vivas = [...new Map(minimizados.filter((m) => m.seccion && m.seccion.view !== "inicio" && !(m.seccion.depto === dep.id && m.seccion.view === view))
+    .map((m) => [`${m.seccion.depto}|${m.seccion.view}`, m.seccion])).values()];
+  const restaurar = (m) => {
+    if (m.seccion) { if (m.seccion.depto !== dep.id) { setDepto(m.seccion.depto); try { localStorage.setItem("depto", m.seccion.depto); } catch { /* */ } } setView(m.seccion.view); }
+    m.restaurar();
+  };
+  // eslint-disable-next-line no-unused-vars
+  const renderSeccion = (v, d) => (
+    <>
+          {v === "inicio" && d.id === "comercial" && <InicioDepto depto="comercial" notify={showNotif} irA={irA} />}
+          {v === "inicio" && d.id === "operativo" && <InicioDepto depto="operativo" notify={showNotif} irA={irA} />}
+          {v === "inicio" && d.id === "finanzas" && <Dashboard notify={showNotif} irA={irA} esAdmin={esAdmin} depto="finanzas" />}
+          {v === "catalogo" && (
+            <Catalogo esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} enCotizacion={enCotizacion} onCotizar={puedeVender ? cotizarProducto : null} proveedores={proveedores} />
+          )}
+          {(v === "cotizar" || v === "cotizaciones") && (
+            <div className="chips subpestanas">
+              {puedeVender && <button className={`chip ${v === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>{borrador.id ? `✎ Editando N°${borrador.numero}` : borrador.items.length > 0 ? `✎ Cotización en preparación (${borrador.items.length})` : "＋ Nueva cotización"}</button>}
+              {[["borrador", "En ejecución"], ["espera_proveedor", "Esperando proveedor"], ["enviadas", "Enviadas"]].map(([t, txt]) => (
+                <button key={t} className={`chip ${v === "cotizaciones" && (filtroCot || "borrador") === t ? "activo" : ""}`} onClick={() => { setFiltroCot(t); setView("cotizaciones"); }}>{txt}</button>
+              ))}
+            </div>
+          )}
+          {v === "cotizar" && (
+            <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={veCostos} notify={showNotif}
+              irAClientes={() => setView("clientes")} onGuardada={(cot) => { setFiltroCot(cot?.estado === "cotizacion" ? "enviadas" : cot?.estado || "borrador"); setView("cotizaciones"); }} />
+          )}
+          {v === "cotizaciones" && (
+            <Cotizaciones key={filtroCot || "borrador"} tab={filtroCot || "borrador"} esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} verVenta={verVenta}
+              onEditar={(b) => { setBorrador(b); setView("cotizar"); }}
+              onVenta={(v) => verVenta(v.id)} />
+          )}
+          {v === "licitaciones" && (
+            <Licitaciones abrirCodigo={licAbrir} onAbierta={() => setLicAbrir(null)} esAdmin={puedeVender} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
+              onCotizar={(b) => { setBorrador(b); setView("cotizar"); }} />
+          )}
+          {v === "ventas" && (
+            <Ventas key={d.id} modo={d.id} notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} puedeVender={puedeVender} clientes={clientes}
+              abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />
+          )}
+          {v === "facturacion" && <Facturacion notify={showNotif} esAdmin={esGerencia} verVenta={verVenta} abrirId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />}
+          {v === "despachos" && <Despachos notify={showNotif} esAdmin={esGerencia} verVenta={verVenta} abrirId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />}
+          {v === "clientes" && <Clientes esAdmin={esGerencia} clientes={clientes} loading={loadingClientes} recargar={fetchClientes} notify={showNotif} />}
+          {v === "compras" && (
+            <Compras notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} proveedores={proveedores} onPreciosCambio={invalidarProductos}
+              abrirOrdenId={ordenAbrir} onAbierta={() => setOrdenAbrir(null)} />
+          )}
+          {v === "bandeja" && <Bandeja notify={showNotif} puedeOperar={puedeOperar} proveedores={proveedores} compartidos={compartidos} onCompartidosUsados={() => setCompartidos(null)} />}
+          {v === "proveedores" && (
+            <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
+          )}
+          {v === "produccion" && esGerencia && <Produccion notify={showNotif} irA={irA} />}
+          {v === "por-pagar" && esGerencia && <PorPagar notify={showNotif} />}
+          {v === "iva" && esGerencia && <Iva notify={showNotif} />}
+          {v === "cobranza" && esGerencia && <Cobranza notify={showNotif} verVenta={(id) => { setVentaAbrir(id); setView("ventas"); }} irA={irA} />}
+          {v === "gastos" && esGerencia && <Gastos notify={showNotif} />}
+          {v === "reportes" && esGerencia && <Reportes notify={showNotif} />}
+          {v === "config" && esGerencia && <Config notify={showNotif} />}
+          {v === "usuarios" && esGerencia && <Usuarios notify={showNotif} yo={usuario} />}
+    </>
+  );
+
   return (
     <>
       <div className="app">
@@ -653,56 +790,10 @@ function App({ usuario: usuarioInicial, onLogout }) {
         </nav>
 
         <main className="main">
-          {view === "inicio" && dep.id === "comercial" && <InicioDepto depto="comercial" notify={showNotif} irA={irA} />}
-          {view === "inicio" && dep.id === "operativo" && <InicioDepto depto="operativo" notify={showNotif} irA={irA} />}
-          {view === "inicio" && dep.id === "finanzas" && <Dashboard notify={showNotif} irA={irA} esAdmin={esAdmin} depto="finanzas" />}
-          {view === "catalogo" && (
-            <Catalogo esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} enCotizacion={enCotizacion} onCotizar={puedeVender ? cotizarProducto : null} proveedores={proveedores} />
-          )}
-          {(view === "cotizar" || view === "cotizaciones") && (
-            <div className="chips subpestanas">
-              {puedeVender && <button className={`chip ${view === "cotizar" ? "activo" : ""}`} onClick={() => setView("cotizar")}>{borrador.id ? `✎ Editando N°${borrador.numero}` : borrador.items.length > 0 ? `✎ Cotización en preparación (${borrador.items.length})` : "＋ Nueva cotización"}</button>}
-              {[["borrador", "En ejecución"], ["espera_proveedor", "Esperando proveedor"], ["enviadas", "Enviadas"]].map(([t, txt]) => (
-                <button key={t} className={`chip ${view === "cotizaciones" && (filtroCot || "borrador") === t ? "activo" : ""}`} onClick={() => { setFiltroCot(t); setView("cotizaciones"); }}>{txt}</button>
-              ))}
-            </div>
-          )}
-          {view === "cotizar" && (
-            <Cotizador borrador={borrador} setBorrador={setBorrador} clientes={clientes} esAdmin={veCostos} notify={showNotif}
-              irAClientes={() => setView("clientes")} onGuardada={(cot) => { setFiltroCot(cot?.estado === "cotizacion" ? "enviadas" : cot?.estado || "borrador"); setView("cotizaciones"); }} />
-          )}
-          {view === "cotizaciones" && (
-            <Cotizaciones key={filtroCot || "borrador"} tab={filtroCot || "borrador"} esAdmin={veCostos} esGerencia={esGerencia} notify={showNotif} verVenta={verVenta}
-              onEditar={(b) => { setBorrador(b); setView("cotizar"); }}
-              onVenta={(v) => verVenta(v.id)} />
-          )}
-          {view === "licitaciones" && (
-            <Licitaciones abrirCodigo={licAbrir} onAbierta={() => setLicAbrir(null)} esAdmin={puedeVender} notify={showNotif} clientes={clientes} recargarClientes={fetchClientes}
-              onCotizar={(b) => { setBorrador(b); setView("cotizar"); }} />
-          )}
-          {view === "ventas" && (
-            <Ventas key={dep.id} modo={dep.id} notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} puedeVender={puedeVender} clientes={clientes}
-              abrirVentaId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} irACompra={verOrden} />
-          )}
-          {view === "facturacion" && <Facturacion notify={showNotif} esAdmin={esGerencia} verVenta={verVenta} abrirId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />}
-          {view === "despachos" && <Despachos notify={showNotif} esAdmin={esGerencia} verVenta={verVenta} abrirId={ventaAbrir} onAbierta={() => setVentaAbrir(null)} />}
-          {view === "clientes" && <Clientes esAdmin={esGerencia} clientes={clientes} loading={loadingClientes} recargar={fetchClientes} notify={showNotif} />}
-          {view === "compras" && (
-            <Compras notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} proveedores={proveedores} onPreciosCambio={invalidarProductos}
-              abrirOrdenId={ordenAbrir} onAbierta={() => setOrdenAbrir(null)} />
-          )}
-          {view === "bandeja" && <Bandeja notify={showNotif} puedeOperar={puedeOperar} proveedores={proveedores} compartidos={compartidos} onCompartidosUsados={() => setCompartidos(null)} />}
-          {view === "proveedores" && (
-            <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
-          )}
-          {view === "produccion" && esGerencia && <Produccion notify={showNotif} irA={irA} />}
-          {view === "por-pagar" && esGerencia && <PorPagar notify={showNotif} />}
-          {view === "iva" && esGerencia && <Iva notify={showNotif} />}
-          {view === "cobranza" && esGerencia && <Cobranza notify={showNotif} verVenta={(id) => { setVentaAbrir(id); setView("ventas"); }} irA={irA} />}
-          {view === "gastos" && esGerencia && <Gastos notify={showNotif} />}
-          {view === "reportes" && esGerencia && <Reportes notify={showNotif} />}
-          {view === "config" && esGerencia && <Config notify={showNotif} />}
-          {view === "usuarios" && esGerencia && <Usuarios notify={showNotif} yo={usuario} />}
+          {[{ depto: dep.id, view }, ...vivas].map((sec) => {
+            const actual = sec.depto === dep.id && sec.view === view;
+            return <div key={`${sec.depto}|${sec.view}`} style={actual ? undefined : { display: "none" }}>{renderSeccion(sec.view, deptos.find((x) => x.id === sec.depto) || dep)}</div>;
+          })}
         </main>
       </div>
 
@@ -712,6 +803,11 @@ function App({ usuario: usuarioInicial, onLogout }) {
       )}
       {notif && <div className={`notif ${notif.type}`}>{notif.msg}</div>}
       <Avisos />
+      {minimizados.length > 0 && (
+        <div className="dock-minimizadas" role="region" aria-label="Ventanas minimizadas">
+          {minimizados.map((m) => <button key={m.id} className="dock-item" title="Volver a esta ventana" onClick={() => restaurar(m)}><span className="dock-tit">▢ {m.titulo}</span><span className="dock-volver">abrir</span></button>)}
+        </div>
+      )}
     </>
   );
 }

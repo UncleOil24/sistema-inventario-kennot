@@ -4,11 +4,12 @@ import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO } from
 
 // Carga la cotización o factura de un proveedor (PDF o foto). Claude extrae las líneas y propone
 // el producto del catálogo; compras revisa y aprueba, y el sistema recalcula precio vigente y opciones.
-export default function DocumentoProveedor({ notify, onClose, proveedores = [], categorias: cats = [] }) {
+// archivoInicial: documento que ya está subido (bandeja de documentos): se lee solo al abrir; onAprobado avisa al guardar
+export default function DocumentoProveedor({ notify, onClose, proveedores = [], categorias: cats = [], archivoInicial = null, onAprobado }) {
   const productos = useProductos();
   const [categorias, setCategorias] = useState(cats);
   useEffect(() => { if (!cats.length) api("/productos/categorias").then(setCategorias).catch(() => {}); }, [cats.length]);
-  const [archivo, setArchivo] = useState(null);
+  const [archivo, setArchivo] = useState(archivoInicial);
   const [leyendo, setLeyendo] = useState(false);
   const [res, setRes] = useState(null);
   const [enc, setEnc] = useState(null);
@@ -46,6 +47,8 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
   const set = (i, cambios) => setLineas((ls) => ls.map((l) => (l.i === i ? { ...l, ...cambios } : l)));
   const activas = lineas.filter((l) => !l.omitir && (l.accion === "nuevo" ? l.nuevo.nombre : l.producto));
 
+  useEffect(() => { if (archivoInicial) leer(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const aprobar = async () => {
     setGuardando(true);
     try {
@@ -68,6 +71,7 @@ export default function DocumentoProveedor({ notify, onClose, proveedores = [], 
       });
       invalidarProductos();
       setResultado(r);
+      onAprobado?.(r, enc);
       notify(`✓ ${r.precios} precios guardados${r.productos_nuevos ? ` · ${r.productos_nuevos} productos nuevos` : ""}`);
     } catch (e) { notify(e.message, "danger"); }
     finally { setGuardando(false); }

@@ -74,7 +74,7 @@ const subir = handler(async (req, res) => {
   const ventaId = Number(req.body?.venta_id) || null;
   const nota = String(req.body?.nota || "").trim().slice(0, 500) || null;
   // Respaldo de venta (cedible o guía firmada por el cliente): no se lee con IA, solo se guarda para asignarlo a la venta
-  const clase = req.body?.clase === "venta" ? "venta" : "compra";
+  const clase = ["venta", "cotizacion"].includes(req.body?.clase) ? req.body.clase : "compra";
   const out = [];
   for (const f of files) {
     const nombre = String(f.originalname || "documento").slice(0, 200);
@@ -91,7 +91,7 @@ const subir = handler(async (req, res) => {
         nombre_archivo: p.nombre, mime: p.lectura ? "application/xml" : f.mimetype || "application/octet-stream", tipo: p.lectura ? "xml" : tipoDe(f),
         tamano: p.buf.length, hash, datos: p.buf, venta_id: ventaId, nota, subido_por: usuario, leyendo: clase === "compra" && !p.lectura, clase,
       });
-      if (clase === "venta") { /* se registra a mano en la venta */ }
+      if (clase !== "compra") { /* respaldo de venta o cotización: se procesa a mano (la cotización con su propio lector) */ }
       else if (p.lectura) await completar(doc, p.lectura); else leerEnFondo(doc.id, usuario);
       out.push({ nombre: p.nombre, id: doc.id });
     }
@@ -151,6 +151,11 @@ const actualizar = handler(async (req, res) => {
     if (d.estado === "procesado") throw new ErrorNegocio("Ya está procesado (tiene su compra registrada)");
     cambios.estado = b.estado;
     if (b.estado === "por_procesar") cambios.duplicado_de = null;
+  }
+  // Cotización de proveedor procesada (sus precios ya se guardaron en el catálogo)
+  if (b.estado === "procesado" && d.clase === "cotizacion") {
+    Object.assign(cambios, { estado: "procesado", procesado_por: firma(req), procesado_en: new Date(), leyendo: false,
+      ...(b.folio ? { folio: String(b.folio).slice(0, 50) } : {}), ...(b.proveedor ? { proveedor: String(b.proveedor).slice(0, 150) } : {}) });
   }
   // Compra a la que pertenece, elegida a mano (null = compra nueva de la venta)
   if ("orden_id" in b) {
