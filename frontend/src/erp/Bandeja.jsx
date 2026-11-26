@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api, fmt, authFetch, API_URL } from "./lib";
 import { Cargando, confirmar, GastoVenta } from "./ui";
 import FacturaCompra from "./FacturaCompra";
+import DocumentoProveedor from "./DocumentoProveedor";
 import { RegistrarEnVenta, Recortador, comprimirImagen, esImagen } from "./Respaldo";
 
 // Bandeja de documentos: todo lo que se compra se sube aquí en el momento (desde el celular: foto, PDF o el XML
@@ -25,6 +26,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
   const [aVenta, setAVenta] = useState(null); // documento que se guarda como respaldo de una venta
   const [recortar, setRecortar] = useState(null); // índice del archivo que se encuadra
   const [todasVentas, setTodasVentas] = useState([]);
+  const [cotizacion, setCotizacion] = useState(null); // { doc, archivo } cotización de proveedor que se procesa
   const camara = useRef(null);
   const galeria = useRef(null);
 
@@ -94,6 +96,14 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
     cambiar(d, { estado: "descartado" }, "Documento descartado");
   };
   const releer = async (d) => { try { await api(`/bandeja/${d.id}/leer`, { method: "POST" }); cargar(); } catch (e) { notify(e.message, "danger"); } };
+  // Cotización: se abre con su archivo en el lector de documentos de proveedor (el mismo de Catálogo y Compras)
+  const abrirCotizacion = async (d) => {
+    try {
+      const r = await authFetch(`${API_URL}/api/bandeja/${d.id}/archivo`);
+      if (!r.ok) throw new Error("No se pudo abrir el documento");
+      setCotizacion({ doc: d, archivo: new File([await r.blob()], d.nombre_archivo, { type: d.mime }) });
+    } catch (e) { notify(e.message, "danger"); }
+  };
   const abrirProcesar = async (d) => {
     let orden = null;
     // Solo la compra elegida o sugerida dentro de la venta del documento (sin venta: se elige al procesar)
@@ -109,8 +119,11 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
         <div className="empresa-btns" style={{ marginBottom: 8 }} role="group" aria-label="Tipo de documento">
           <button type="button" className={`empresa-btn ${clase === "compra" ? "activo" : ""}`} onClick={() => setClase("compra")}>🧾 Compra o gasto<span className="mini">factura, boleta del proveedor</span></button>
           <button type="button" className={`empresa-btn ${clase === "venta" ? "activo" : ""}`} onClick={() => setClase("venta")}>✍ Respaldo de venta<span className="mini">cedible o guía firmada por el cliente</span></button>
+          <button type="button" className={`empresa-btn ${clase === "cotizacion" ? "activo" : ""}`} onClick={() => setClase("cotizacion")}>📋 Cotización de proveedor<span className="mini">precios para el catálogo</span></button>
         </div>
-        <div className="mini" style={{ marginBottom: 10 }}>{clase === "compra"
+        <div className="mini" style={{ marginBottom: 10 }}>{clase === "cotizacion"
+          ? "Foto o PDF de la cotización que te mandó el proveedor. Después se procesa con calma: se leen los productos y precios y se conectan con el catálogo (quedan como precio con documento)."
+          : clase === "compra"
           ? "Sube en el momento la factura, boleta o comprobante: una foto, un PDF o el XML de la factura electrónica (el XML se lee exacto). Después se procesa con calma desde aquí."
           : "Foto o PDF de la copia cedible o de la guía de despacho con la firma y timbre de recepción del cliente. Queda guardada en la venta como respaldo de que el cliente recibió."}</div>
         <div className="bandeja-botones">
@@ -147,6 +160,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
               <div className="bandeja-doc-tipo" aria-hidden="true">{ICONO[d.tipo] || "DOC"}</div>
               <div className="bandeja-doc-cuerpo">
                 {d.clase === "venta" && <div className="mini" style={{ color: "var(--accent)", fontWeight: 600 }}>✍ Respaldo de venta (cedible / guía firmada)</div>}
+                {d.clase === "cotizacion" && <div className="mini" style={{ color: "var(--info)", fontWeight: 600 }}>📋 Cotización de proveedor</div>}
                 {d.leyendo ? <div><span className="spinner"></span> Leyendo el documento…</div>
                   : d.proveedor || d.folio ? <div className="bandeja-doc-titulo">{d.proveedor || "Proveedor ?"}{d.folio ? ` · N° ${d.folio}` : ""}</div>
                   : <div className="bandeja-doc-titulo">{d.nombre_archivo}</div>}
@@ -161,7 +175,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
                     {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre}</option>)}
                   </select>}
                 </div>
-                {d.estado === "por_procesar" && d.clase !== "venta" && (d.venta_id ? (
+                {d.estado === "por_procesar" && d.clase === "compra" && (d.venta_id ? (
                   <div className="mini">Compra:
                     <select className="select-linea" style={{ marginLeft: 6, maxWidth: 260 }} aria-label="A qué compra de la venta pertenece" value={d.sugerencia?.orden_id || ""} onChange={(e) => cambiar(d, { orden_id: e.target.value || null })}>
                       <option value="">Compra nueva de la venta</option>
@@ -170,16 +184,17 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
                     {d.sugerencia?.orden_id && !d.sugerencia.elegida && <span style={{ color: "var(--accent)" }}> (sugerida)</span>}
                   </div>
                 ) : d.sugerencia?.orden_id ? <div className="mini" style={{ color: "var(--accent)" }}>Compra sugerida: {d.sugerencia.orden_numero}{d.sugerencia.venta_numero ? ` (${d.sugerencia.venta_numero}${d.sugerencia.cliente ? ` · ${d.sugerencia.cliente}` : ""})` : ""} · elige la venta para confirmarla</div> : null)}
-                {d.estado === "procesado" && <div className="mini" style={{ color: "var(--success)" }}>✓ Registrado{d.documento_venta_id ? ` como respaldo de ${d.venta?.numero || "la venta"}${d.folio ? ` (N° ${d.folio})` : ""}` : d.orden_numero ? ` en ${d.orden_numero}` : d.gasto_id ? " como gasto" : ""} · {d.procesado_por} · {fechaHora(d.procesado_en)}</div>}
+                {d.estado === "procesado" && <div className="mini" style={{ color: "var(--success)" }}>✓ {d.clase === "cotizacion" ? `Precios guardados en el catálogo${d.folio ? ` (${d.folio})` : ""}` : "Registrado"}{d.clase === "cotizacion" ? "" : d.documento_venta_id ? ` como respaldo de ${d.venta?.numero || "la venta"}${d.folio ? ` (N° ${d.folio})` : ""}` : d.orden_numero ? ` en ${d.orden_numero}` : d.gasto_id ? " como gasto" : ""} · {d.procesado_por} · {fechaHora(d.procesado_en)}</div>}
                 {d.nota && <div className="mini">Nota: {d.nota}</div>}
                 <div className="mini bandeja-doc-quien">Subido por {d.subido_por || "—"} · {fechaHora(d.createdAt)} · {d.nombre_archivo}</div>
               </div>
               <div className="bandeja-doc-acciones">
                 <button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button>
                 {d.estado === "por_procesar" && d.clase === "venta" && <button className="btn btn-primary btn-sm" onClick={() => setAVenta(d)}>Registrar en la venta</button>}
-                {puedeOperar && d.clase !== "venta" && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar compra</button>}
-                {d.clase !== "venta" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Es la cedible o la guía firmada de una venta, no una compra" onClick={() => setAVenta(d)}>Es respaldo de venta</button>}
-                {puedeOperar && d.clase !== "venta" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto" onClick={() => setGastoDe(d)}>Es un gasto</button>}
+                {puedeOperar && d.clase === "cotizacion" && d.estado === "por_procesar" && <button className="btn btn-primary btn-sm" onClick={() => abrirCotizacion(d)}>Procesar cotización</button>}
+                {puedeOperar && d.clase === "compra" && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar compra</button>}
+                {d.clase === "compra" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Es la cedible o la guía firmada de una venta, no una compra" onClick={() => setAVenta(d)}>Es respaldo de venta</button>}
+                {puedeOperar && d.clase === "compra" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto" onClick={() => setGastoDe(d)}>Es un gasto</button>}
                 {["por_procesar", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => descartar(d)}>Descartar</button>}
                 {["descartado", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => cambiar(d, { estado: "por_procesar" }, "Vuelve a Por procesar")}>Recuperar</button>}
               </div>
@@ -190,6 +205,9 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
 
       {gastoDe && <GastoVenta ventas={ventas} notify={notify} onClose={() => setGastoDe(null)} onListo={() => { setGastoDe(null); cargar(); }}
         inicial={{ bandeja_id: gastoDe.id, total: gastoDe.total, proveedor: gastoDe.proveedor, documento: gastoDe.folio, fecha: gastoDe.fecha_documento, empresa: gastoDe.empresa, venta_id: gastoDe.venta_id, descripcion: gastoDe.nota || "" }} />}
+      {cotizacion && <DocumentoProveedor notify={notify} proveedores={proveedores} archivoInicial={cotizacion.archivo}
+        onAprobado={(r, enc) => cambiar(cotizacion.doc, { estado: "procesado", folio: enc?.documento || "", proveedor: enc?.proveedor || "" })}
+        onClose={() => { setCotizacion(null); cargar(); }} />}
       {aVenta && <RegistrarEnVenta doc={aVenta} ventas={todasVentas} notify={notify} onClose={() => setAVenta(null)} onHecho={() => { setAVenta(null); cargar(); }} />}
       {recortar != null && archivos[recortar] && <Recortador archivo={archivos[recortar]} onClose={() => setRecortar(null)}
         onListo={(f) => { setArchivos((a) => a.map((x, j) => (j === recortar ? f : x))); setRecortar(null); }} />}

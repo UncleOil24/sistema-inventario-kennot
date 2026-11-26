@@ -321,7 +321,7 @@ function EditarProducto({ producto, esAdmin, esGerencia, categorias, proveedores
 
 const PRECIO_VACIO = { proveedor: "", precio: "", con_iva: false, total_linea: "", cantidad: "", fecha: "", documento: "", descripcion_proveedor: "", marca: "", calce: "exacto", origen: "", descuento_pct: "", descuento_desde: "" };
 
-function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notify, onClose, onCambio }) {
+export function PreciosProducto({ producto: inicial, puedeConfirmar, proveedores, notify, onClose, onCambio }) {
   const [producto, setProducto] = useState(inicial);
   const [hist, setHist] = useState(null);
   const [form, setForm] = useState({ ...PRECIO_VACIO, fecha: hoyISO() });

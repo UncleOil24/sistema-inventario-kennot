@@ -2,6 +2,11 @@ import { useState, useEffect } from "react";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+// Rol de quien usa el sistema (lo fija App al entrar), para mostrar opciones de gerencia en ventanas compartidas
+let rolSesion = null;
+export const setRolSesion = (r) => { rolSesion = r; };
+export const esGerenciaSesion = () => ["admin", "gerencia"].includes(rolSesion);
+
 export const fmt = (n) => `$${Math.round(Number(n) || 0).toLocaleString("es-CL")}`;
 export const fecha = (d) => (d ? new Date(String(d).length === 10 ? `${d}T12:00:00` : d).toLocaleDateString("es-CL") : "—");
 export const hoyISO = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD en hora local

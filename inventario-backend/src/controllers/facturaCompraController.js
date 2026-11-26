@@ -148,6 +148,9 @@ const leer = handler(async (req, res) => {
   const neto = lineas.reduce((s, l) => s + Math.round(l.precio_neto * l.cantidad), 0);
   // Venta de esta compra (la de la venta desde donde se sube, o la de la orden) para mostrarla arriba
   const ventaTitulo = venta || (orden?.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["id", "numero", "empresa", "cliente_nombre", "items"] }) : null);
+  // Otras compras de esa venta: para avisar si una línea de la venta ya está pedida en otra compra
+  const otrasCompras = ventaTitulo ? await OrdenCompra.findAll({ where: { venta_id: ventaTitulo.id, estado: { [Op.ne]: "anulada" }, ...(orden ? { id: { [Op.ne]: orden.id } } : {}) }, attributes: ["id", "numero", "estado", "items"] }) : [];
+  const enCompra = (pid) => otrasCompras.filter((o) => (o.items || []).some((it) => Number(it.producto_id) === Number(pid))).map((o) => ({ numero: o.numero, recibida: o.estado === "recibida" }));
   res.json({
     ok: true,
     data: {
@@ -162,7 +165,8 @@ const leer = handler(async (req, res) => {
       venta: ventaTitulo ? { id: ventaTitulo.id, numero: ventaTitulo.numero, empresa: ventaTitulo.empresa, cliente: ventaTitulo.cliente_nombre || "" } : null,
       // Para asociar a mano una línea de la factura con una línea del pedido o de la venta ("Es para:")
       orden_items: orden ? orden.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
-      venta_items: venta ? venta.items.map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) : [],
+      venta_items: ventaTitulo ? (ventaTitulo.items || []).map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.descripcion_cliente || it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad),
+        complemento: !!it.complemento_de, en_compra: it.producto_id ? enCompra(it.producto_id) : [] })).filter((x) => !x.complemento) : [],
       // Líneas de la venta de esta compra, para marcar un producto como "complemento de" una de ellas
       complementos: ventaTitulo ? (ventaTitulo.items || []).map((it, k) => ({ k, nombre: it.descripcion_cliente || it.nombre, complemento: !!it.complemento_de })).filter((x) => !x.complemento) : [],
     },
@@ -206,6 +210,14 @@ const registrarFactura = handler(async (req, res) => {
       if (l.producto_id) {
         p = await Producto.findByPk(l.producto_id, { transaction: t, lock: t.LOCK.UPDATE });
         if (!p) throw new ErrorNegocio(`Producto ${l.producto_id} no existe`, 404);
+        // Gerencia puede corregir la descripción del producto del catálogo desde la factura
+        const nuevoNombre = l.renombrar ? require("../services/textos").limpiarTexto(String(l.renombrar)).trim().toUpperCase() : "";
+        if (nuevoNombre && nuevoNombre !== p.nombre) {
+          if (!esGerencia(req)) throw new ErrorNegocio("Solo gerencia cambia la descripción de un producto del catálogo");
+          await registrar({ usuario, tabla: "productos", registro_id: p.id, campo: "nombre", antes: p.nombre, despues: nuevoNombre, motivo: `Desde ${doc} ${proveedor}` }, t);
+          await p.update({ nombre: nuevoNombre }, { transaction: t });
+          resumen.renombrados = (resumen.renombrados || 0) + 1;
+        }
       } else {
         p = await Producto.create({
           codigo: siguiente++, nombre: String(l.nuevo.nombre).trim().toUpperCase(),
@@ -364,6 +376,35 @@ const registrarFactura = handler(async (req, res) => {
       }, { transaction: t });
       await orden.update({ numero: numeroCompra(orden.id) }, { transaction: t });
     }
+    // Líneas de la venta elegidas directo ("Es para" una línea que no estaba en esta compra): si estaban pedidas en otra
+    // compra aún no recibida de la misma venta, se quitan de esa compra para no comprarlas dos veces
+    if (ventaPara) {
+      const quitar = new Map();
+      items.forEach(({ p, l }, k) => {
+        if (l.para?.tipo !== "venta") return;
+        const pid = Number(cubre[k]?.viejo || p.id);
+        quitar.set(pid, (quitar.get(pid) || 0) + Number(l.cantidad));
+      });
+      if (quitar.size) {
+        const abiertas = await OrdenCompra.findAll({ where: { venta_id: ventaPara.id, id: { [Op.ne]: orden.id }, estado: { [Op.notIn]: ["anulada", "recibida"] } }, transaction: t, lock: t.LOCK.UPDATE });
+        for (const o of abiertas) {
+          let cambio = false;
+          const its = (o.items || []).map((it) => {
+            const q = quitar.get(Number(it.producto_id)) || 0;
+            if (!q) return it;
+            const usa = Math.min(q, Number(it.cantidad)); quitar.set(Number(it.producto_id), q - usa); cambio = true;
+            return { ...it, cantidad: Number(it.cantidad) - usa };
+          }).filter((it) => Number(it.cantidad) > 0);
+          if (!cambio) continue;
+          const { calcularTotales } = require("../services/erp");
+          await o.update(its.length ? { items: its, ...calcularTotales(its) }
+            : { items: its, ...calcularTotales(its), estado: "anulada", notas: `${o.notas ? `${o.notas} · ` : ""}Sin productos: se compraron en ${orden.numero} (${doc})` }, { transaction: t });
+          await registrar({ usuario, tabla: "ordenes_compra", registro_id: o.id, campo: "items", despues: its.length ? `${its.length} líneas` : "anulada", motivo: `Productos comprados en ${orden.numero} (${doc} ${ficha.nombre})` }, t);
+          (resumen.compras_ajustadas = resumen.compras_ajustadas || []).push({ numero: o.numero, anulada: !its.length });
+        }
+      }
+    }
+
     // Las otras partes: una compra por venta (o sin venta), con el mismo documento
     const otras = [];
     if (partes.length > 1) {

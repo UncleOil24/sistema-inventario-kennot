@@ -1,14 +1,38 @@
 // Piezas compartidas por las vistas del ERP
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { conflictoMedidas } from "./medidas";
 import { fmt, fecha, hoyISO, sinTildes, descargarPost, api, imprimirHTML, escaparHTML, nombreArchivo } from "./lib";
 
-export function Modal({ titulo, onClose, children, footer, ancho = 480 }) {
+// Ventanas minimizadas (barra abajo): la ventana sigue abierta y oculta, con todo lo que tenía
+const dock = { items: [], subs: new Set() };
+const avisarDock = () => dock.subs.forEach((f) => f([...dock.items]));
+let seccionDock = null;
+export const setSeccionDock = (s) => { seccionDock = s; };
+export function useDock() {
+  const [items, setItems] = useState(dock.items);
+  useEffect(() => { dock.subs.add(setItems); setItems([...dock.items]); return () => { dock.subs.delete(setItems); }; }, []);
+  return items;
+}
+const textoTitulo = (t) => (typeof t === "string" ? t : Array.isArray(t) ? t.filter((x) => typeof x === "string").join("") : "Ventana").replace(/^\/\/\s*/, "").trim() || "Ventana";
+
+export function Modal({ titulo, onClose, children, footer, ancho = 480, minimizable }) {
+  const [min, setMin] = useState(false);
+  const id = useRef(Math.random());
+  // Las ventanas de trabajo (anchas) se pueden minimizar; los avisos chicos no
+  const puedeMin = minimizable ?? (typeof ancho === "string" || Number(ancho) >= 600);
+  const tit = textoTitulo(titulo);
+  useEffect(() => {
+    if (!min) return undefined;
+    dock.items = [...dock.items, { id: id.current, titulo: tit, seccion: seccionDock, restaurar: () => setMin(false) }];
+    avisarDock();
+    return () => { dock.items = dock.items.filter((x) => x.id !== id.current); avisarDock(); };
+  }, [min]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={onClose} style={min ? { display: "none" } : undefined}>
       <div className="modal" style={{ maxWidth: ancho }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">{titulo}</span>
+          {puedeMin && <button className="modal-minimizar" title="Minimizar: revisa otra área y vuelve con la barra de abajo" aria-label="Minimizar" onClick={() => setMin(true)}>–</button>}
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
         <div className="modal-body">{children}</div>
@@ -491,12 +515,17 @@ export function PresentacionLinea({ l, items = [], complementos = [], productos,
           else onChange(elegirPara(l, items.find((x) => x.clave === v), productos));
         }}>
           <option value="">— como está —</option>
-          {items.map((x) => <option key={x.clave} value={x.clave}>{x.etiqueta}: {x.nombre} · {x.cantidad} {x.unidad || ""}</option>)}
-          {complementos.length > 0 && <optgroup label="Complemento de (va con esa línea, se compra aparte)">
-            {complementos.map((x) => <option key={`c${x.k}`} value={`c${x.k}`}>complemento de: {x.nombre}</option>)}
+          {[...new Set(items.map((x) => x.grupo || ""))].map((g) => {
+            const op = items.filter((x) => (x.grupo || "") === g).map((x) => <option key={x.clave} value={x.clave}>{x.etiqueta}: {x.nombre} · {x.cantidad} {x.unidad || ""}{x.en_compra?.length ? ` (pedido en ${x.en_compra.map((c) => c.numero).join(", ")})` : ""}</option>);
+            return g ? <optgroup key={g} label={g}>{op}</optgroup> : op;
+          })}
+          {complementos.length > 0 && <optgroup label="━━ ★ COMPLEMENTO DE… (producto EXTRA que va con esa línea, sin precio al cliente) ━━">
+            {complementos.map((x) => <option key={`c${x.k}`} value={`c${x.k}`}>★ complemento de: {x.nombre}</option>)}
           </optgroup>}
         </select></div>}
-      {String(l.para || "").startsWith("c") && <div style={{ color: "var(--accent)" }}>Se agrega a la venta como componente de «{complementos.find((x) => `c${x.k}` === l.para)?.nombre}»: sin precio para el cliente, su costo es de la venta.</div>}
+      {(() => { const it = items.find((x) => x.clave === l.para); return it?.en_compra?.length ? <div className="aviso-fuera" style={{ color: "var(--warn)" }}>
+        Ya está pedida en {it.en_compra.map((c) => `${c.numero}${c.recibida ? " (ya recibida)" : ""}`).join(", ")}.{it.en_compra.some((c) => !c.recibida) ? " Al registrar, se quita de esa compra pendiente para no comprarla dos veces." : " Revisa que no se esté comprando dos veces."}</div> : null; })()}
+      {String(l.para || "").startsWith("c") && <div className="complemento-elegido">★ COMPLEMENTO de «{complementos.find((x) => `c${x.k}` === l.para)?.nombre}»: se agrega a la venta sin precio para el cliente; su costo es de la venta.</div>}
       {l.accion === "existente" && l.producto && <div style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
         1 de la factura = <input className="qty-input" style={{ width: 54 }} type="number" min="0.01" step="any" value={l.factor ?? 1} onChange={(e) => onChange({ factor: e.target.value })} /> {u || "un"}
         {f === 1 && s && <button className="link" onClick={() => onChange({ factor: s.factor })}>usar × {String(s.factor).replace(".", ",")} ({String(s.factor).replace(".", ",")} {s.unidad} según la descripción)</button>}

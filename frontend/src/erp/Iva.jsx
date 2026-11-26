@@ -36,7 +36,7 @@ export default function Iva({ notify }) {
         <span className="mini">Se paga a más tardar el día {d.dia_pago} del mes siguiente. Nunca se compensa entre empresas.</span>
       </div>
 
-      <div className="grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
+      <div className="grid-2" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 14, marginBottom: 14 }}>
         {["kenott", "tactics"].map((e) => {
           const m = d.empresas[e]?.actual;
           if (!m) return null;
