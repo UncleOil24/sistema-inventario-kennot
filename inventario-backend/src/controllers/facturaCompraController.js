@@ -169,6 +169,8 @@ const leer = handler(async (req, res) => {
   });
 });
 
+const TIPOS_GASTO = ["flete", "combustible", "comision", "general", "herramienta", "mano_obra", "financiero"];
+
 // POST /api/ordenes-compra/factura/registrar
 // { archivo_token, orden_id | null, venta_id, gasto_id, proveedor, documento, fecha, empresa, neto, iva, total,
 //   lineas: [{ producto_id | nuevo: { nombre, unidad, categoria }, descripcion, cantidad, precio, unidad, marca, calce }] }
@@ -180,8 +182,11 @@ const registrarFactura = handler(async (req, res) => {
   const folio = String(b.documento || "").trim() || (boleta ? "S/N" : "");
   if (!folio) throw new ErrorNegocio("Indica el N° de factura");
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") ? b.fecha : hoyISO();
-  const lineas = (b.lineas || []).filter((l) => (l.producto_id || l.nuevo?.nombre) && Number(l.precio) > 0 && Number(l.cantidad) > 0);
-  if (!lineas.length) throw new ErrorNegocio("No hay líneas con producto, cantidad y precio");
+  // Líneas que son gasto (herramienta, flete, consumo…): no van al catálogo; quedan como gasto con su parte del IVA (crédito)
+  const gastoLineas = (b.lineas || []).filter((l) => l.destino?.tipo === "gasto" && Number(l.precio) > 0 && Number(l.cantidad) > 0);
+  const lineas = (b.lineas || []).filter((l) => l.destino?.tipo !== "gasto" && (l.producto_id || l.nuevo?.nombre) && Number(l.precio) > 0 && Number(l.cantidad) > 0);
+  if (!lineas.length && !gastoLineas.length) throw new ErrorNegocio("No hay líneas con producto, cantidad y precio");
+  const ordenesPorVenta = b.ordenes_por_venta && typeof b.ordenes_por_venta === "object" ? b.ordenes_por_venta : {};
   if (b.gasto_id && !esGerencia(req)) throw new ErrorNegocio("Solo gerencia puede pasar un gasto a compra", 403);
   const usuario = firma(req);
   const doc = `${boleta ? "BOL." : "FACT."} ${folio}`;
@@ -220,12 +225,45 @@ const registrarFactura = handler(async (req, res) => {
       ...(l.presentacion ? { presentacion: String(l.presentacion).slice(0, 120) } : {}) }));
     const repartos = items.map(({ l }) => l.reparto);
     const netoLineas = itemsOrden.reduce((s, i) => s + i.precio * i.cantidad, 0);
-    let neto = Number(b.neto) > 0 ? Math.round(Number(b.neto)) : netoLineas;
+    const netoGastos = gastoLineas.reduce((s, l) => s + Number(l.precio) * Number(l.cantidad), 0);
+    let neto = Number(b.neto) > 0 ? Math.round(Number(b.neto)) : Math.round(netoLineas + netoGastos);
     let iva = Number(b.iva) >= 0 && b.iva !== "" && b.iva != null ? Math.round(Number(b.iva)) : Math.round(neto * 0.19);
-    const total = Number(b.total) > 0 ? Math.round(Number(b.total)) : neto + iva;
+    let total = Number(b.total) > 0 ? Math.round(Number(b.total)) : neto + iva;
     // Boleta: no da crédito de IVA, así que el costo de la compra es el total pagado
     if (boleta) { neto = total; iva = 0; }
     const vence = sumarDias(fecha, ficha.plazo_pago_dias || 0);
+
+    // Gastos de la misma factura: cada uno con su parte del neto, del IVA (crédito fiscal) y del total; el resto es la compra
+    const gastos = [];
+    const archivoFactura = b.archivo_token ? pendientes.get(b.archivo_token) : null;
+    if (gastoLineas.length) {
+      const base = netoLineas + netoGastos || 1;
+      const sinCompra = !items.length;
+      let restoN = neto, restoI = iva, restoT = total;
+      for (const [n, l] of gastoLineas.entries()) {
+        const ultimo = sinCompra && n === gastoLineas.length - 1; // si no hay compra, el último gasto se lleva el redondeo
+        const prop = (Number(l.precio) * Number(l.cantidad)) / base;
+        const gN = ultimo ? restoN : Math.round(neto * prop), gI = ultimo ? restoI : Math.round(iva * prop), gT = ultimo ? restoT : Math.round(total * prop);
+        restoN -= gN; restoI -= gI; restoT -= gT;
+        const d = l.destino || {};
+        const vG = Number(d.venta_id) ? await Venta.findByPk(Number(d.venta_id), { transaction: t, attributes: ["id", "numero", "empresa"] }) : null;
+        const g = await Gasto.create({
+          fecha, tipo: TIPOS_GASTO.includes(d.gasto_tipo) ? d.gasto_tipo : "general", monto: gT, iva: gI,
+          descripcion: [String(d.descripcion || l.descripcion || "").trim(), ficha.nombre].filter(Boolean).join(" · ").slice(0, 250),
+          venta_id: vG?.id || null, empresa: ["kenott", "tactics"].includes(b.empresa) ? b.empresa : vG?.empresa || null,
+          comprobante: `${boleta ? "BOL" : "FACT"} ${folio}`.slice(0, 100), creado_por: usuario,
+        }, { transaction: t });
+        if (archivoFactura) await DocumentoCompra.create({ gasto_id: g.id, folio, fecha, monto: total, nombre_archivo: archivoFactura.nombre, mime: archivoFactura.mime, datos: archivoFactura.buf, creado_por: usuario }, { transaction: t });
+        await registrar({ usuario, tabla: "gastos", registro_id: g.id, campo: "creado", despues: `${g.descripcion} ${pesos(gT)}`, motivo: `Desde ${doc} (línea de la factura)${vG ? ` · venta ${vG.numero}` : ""}` }, t);
+        gastos.push({ id: g.id, descripcion: g.descripcion, monto: gT, iva: gI, venta: vG?.numero || null });
+      }
+      resumen.gastos = gastos;
+      if (sinCompra) {
+        if (archivoFactura) pendientes.delete(b.archivo_token);
+        return { orden: null, gastos, resumen };
+      }
+      neto = restoN; iva = restoI; total = restoT;
+    }
 
     // Reparto entre ventas: una compra por venta (mismo N° de factura). La parte principal es la de la orden o la venta desde donde se sube.
     let orden;
@@ -233,6 +271,16 @@ const registrarFactura = handler(async (req, res) => {
     const ventaBase = Number(b.venta_id) || ordenPrevia?.venta_id || null;
     const partes = dividir(itemsOrden.map((it, k) => ({ ...it, reparto: repartos[k] })), { neto, iva, total, principal: ventaBase, ventaPorDefecto: ventaBase });
     const p0 = partes[0];
+    // Compra existente elegida para cada venta de destino ("otra venta → compra abierta")
+    const ordenElegida = async (vid) => {
+      const oid = Number(ordenesPorVenta[vid]);
+      if (!oid || !vid) return null;
+      const o = await OrdenCompra.findByPk(oid, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!o || Number(o.venta_id) !== Number(vid) || ["anulada", "recibida"].includes(o.estado)) throw new ErrorNegocio(`La compra elegida para la venta ya no está abierta (${o?.numero || oid})`);
+      return o;
+    };
+    // La compra desde donde se sube recibe su parte solo si le toca algo de la factura
+    const ordenP0 = ordenPrevia && Number(p0.venta_id || 0) === Number(ventaBase || 0) ? ordenPrevia : await ordenElegida(p0.venta_id);
     const ventaId = p0.venta_id;
     const venta = ventaId ? await Venta.findByPk(ventaId, { transaction: t, attributes: ["id", "empresa", "numero"] }) : null;
     const empresa = ["kenott", "tactics"].includes(b.empresa) ? b.empresa : venta?.empresa || null;
@@ -244,18 +292,22 @@ const registrarFactura = handler(async (req, res) => {
     const ventaPara = ventaBase ? await Venta.findByPk(ventaBase, { transaction: t, lock: t.LOCK.UPDATE }) : null;
     // "Complemento de" una línea de la venta (ej. bisagras de una puerta que no estaban cotizadas): se agrega a la venta
     // como componente sin precio de esa línea; su costo es de la venta y queda comprado
-    if (ventaPara && items.some(({ l }) => l.para?.tipo === "complemento")) {
-      const vItems = [...ventaPara.items];
+    // También puede ser complemento de una línea de OTRA venta (l.para.venta_id): se agrega a esa venta
+    const vidsComp = [...new Set(items.filter(({ l }) => l.para?.tipo === "complemento").map(({ l }) => Number(l.para.venta_id) || ventaPara?.id || 0))].filter(Boolean);
+    for (const vid of vidsComp) {
+      const vC = ventaPara && vid === ventaPara.id ? ventaPara : await Venta.findByPk(vid, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!vC) continue;
+      const vItems = [...vC.items];
       for (const { p, l } of items) {
-        if (l.para?.tipo !== "complemento") continue;
+        if (l.para?.tipo !== "complemento" || (Number(l.para.venta_id) || ventaPara?.id) !== vid) continue;
         const padre = vItems[Number(l.para.indice)];
         if (!padre) { l.para = null; continue; }
         vItems.push({ producto_id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad, cantidad: Number(l.cantidad), precio: 0,
           costo: Math.round(Number(l.precio)), proveedor: ficha.nombre, complemento_de: padre.descripcion_cliente || padre.nombre });
-        l.para = { tipo: "venta", indice: vItems.length - 1 };
+        l.para = vC === ventaPara ? { tipo: "venta", indice: vItems.length - 1 } : null;
       }
-      await ventaPara.update({ items: vItems, costo_total: require("../services/cuadroCompra").costoItems(vItems) }, { transaction: t });
-      ventaPara.items = vItems;
+      await vC.update({ items: vItems, costo_total: require("../services/cuadroCompra").costoItems(vItems) }, { transaction: t });
+      vC.items = vItems;
     }
     const cubre = items.map(({ p, l }) => {
       const pa = l.para || null;
@@ -279,9 +331,9 @@ const registrarFactura = handler(async (req, res) => {
         resumen.lineas_venta_cambiadas = [...tocadas].length;
       }
     }
-    if (b.orden_id) {
-      orden = ordenPrevia;
-      if (!orden) throw new ErrorNegocio("Compra no encontrada", 404);
+    if (b.orden_id && !ordenPrevia) throw new ErrorNegocio("Compra no encontrada", 404);
+    if (ordenP0) {
+      orden = ordenP0;
       if (orden.estado === "anulada") throw new ErrorNegocio("La compra está anulada");
       // Lo pedido que no vino en la factura (sin stock o vino menos): vuelve a "por comprar" en el cuadro de la venta
       const llego = new Map();
@@ -319,6 +371,18 @@ const registrarFactura = handler(async (req, res) => {
       await orden.update({ factura_grupo: grupo }, { transaction: t });
       for (const [n, pt] of partes.slice(1).entries()) {
         const v2 = pt.venta_id ? await Venta.findByPk(pt.venta_id, { transaction: t, attributes: ["id", "empresa", "numero"] }) : null;
+        const abierta = await ordenElegida(pt.venta_id);
+        if (abierta) {
+          // Compra abierta de esa venta: recibe lo que vino; lo pedido que no vino vuelve a "por comprar"
+          const llego = new Map(); pt.items.forEach((it) => llego.set(it.producto_id, (llego.get(it.producto_id) || 0) + Number(it.cantidad)));
+          const noVino = (abierta.items || []).filter((it) => it.producto_id && (llego.get(it.producto_id) || 0) < Number(it.cantidad) * 0.97)
+            .map((it) => ({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) - (llego.get(it.producto_id) || 0), pedido: Number(it.cantidad) }));
+          await abierta.update({ no_vinieron: noVino.length ? noVino : null, proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total,
+            documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha, empresa: empresa || abierta.empresa, estado: "recibida", fecha_recepcion: abierta.fecha_recepcion || new Date(),
+            fecha_vencimiento: abierta.fecha_vencimiento || vence, factura_grupo: grupo, tipo_pago: tipoPago }, { transaction: t });
+          otras.push(abierta);
+          continue;
+        }
         const o2 = await OrdenCompra.create({
           proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, venta_id: v2?.id || null, fecha,
           items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total, documento: boleta ? `BOL ${folio}` : folio, fecha_factura: fecha,
@@ -352,14 +416,14 @@ const registrarFactura = handler(async (req, res) => {
     }
 
     // PDF guardado en la compra
-    const archivo = b.archivo_token ? pendientes.get(b.archivo_token) : null;
+    const archivo = archivoFactura;
     if (archivo) {
       for (const o of [orden, ...otras]) await DocumentoCompra.create({ orden_id: o.id, folio, fecha, monto: total, nombre_archivo: archivo.nombre, mime: archivo.mime, datos: archivo.buf, creado_por: usuario }, { transaction: t });
       pendientes.delete(b.archivo_token);
     }
     return { orden, resumen };
   });
-  await marcarProcesado(b.bandeja_id, { orden_id: out.orden?.id || null }, req);
+  await marcarProcesado(b.bandeja_id, { orden_id: out.orden?.id || null, gasto_id: out.orden ? null : out.gastos?.[0]?.id || null }, req);
   res.json({ ok: true, data: { orden: out.orden, ...out.resumen } });
 });
 
@@ -379,7 +443,7 @@ const registrarGasto = handler(async (req, res) => {
   const boleta = b.tipo_documento === "boleta";
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") ? b.fecha : hoyISO();
   const venta = Number(b.venta_id) ? await Venta.findByPk(Number(b.venta_id), { attributes: ["id", "numero", "empresa"] }) : null;
-  const TIPOS = ["flete", "combustible", "comision", "general"];
+  const TIPOS = TIPOS_GASTO;
   const usuario = firma(req);
   const folio = String(b.documento || "").trim();
   const g = await sequelize.transaction(async (t) => {
