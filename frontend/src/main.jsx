@@ -11,3 +11,8 @@ createRoot(document.getElementById('root')).render(
     </ErrorPantalla>
   </StrictMode>,
 )
+
+// Instalable en el celular y receptor de archivos compartidos (WhatsApp, Archivos…)
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => { navigator.serviceWorker.register("/sw.js").catch(() => {}); });
+}

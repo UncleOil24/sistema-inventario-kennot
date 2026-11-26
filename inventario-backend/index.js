@@ -20,6 +20,7 @@ require("./src/models/RespaldoCatalogo");
 require("./src/models/DocumentoCargado");
 require("./src/models/EquivalenciaProveedor");
 require("./src/models/DocumentoCompra");
+require("./src/models/DocumentoBandeja");
 require("./src/models/Pago");
 require("./src/models/Usuario");
 require("./src/models/PrecioProveedor");
@@ -90,6 +91,7 @@ app.use("/api/respaldo", require("./src/routes/respaldo"));
 app.use("/api/gastos", gastosRoutes);
 app.use("/api/parametros", parametrosRoutes);
 app.use("/api/ia", iaRoutes);
+app.use("/api/bandeja", require("./src/routes/bandeja"));
 app.use("/api/mercado-publico", mercadoPublicoRoutes);
 app.use("/api/respaldo", respaldoRoutes);
 

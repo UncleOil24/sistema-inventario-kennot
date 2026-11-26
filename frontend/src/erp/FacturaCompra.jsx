@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, confirmar, aplicarFactorPrecios, montosTrasFactor } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
 // o se crea una compra nueva. Los precios entran al catálogo con la fecha de la factura y el PDF queda en la compra.
-// props: orden (compra existente, opcional), gasto (si viene de Gastos, opcional)
-export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, proveedores = [] }) {
+// props: orden (compra existente, opcional), gasto (si viene de Gastos, opcional),
+// bandeja (documento de la bandeja: ya está subido y leído; se lee solo al abrir)
+export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, onListo, proveedores = [] }) {
   const productos = useProductos();
   const [archivo, setArchivo] = useState(null);
   const [leyendo, setLeyendo] = useState(false);
@@ -16,11 +17,12 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
   const [resultado, setResultado] = useState(null);
 
   const leer = async () => {
-    if (!archivo) return;
+    if (!archivo && !bandeja) return;
     setLeyendo(true);
     try {
       let r;
-      if (orden) {
+      if (bandeja) r = await api("/ordenes-compra/factura/leer", { method: "POST", body: { bandeja_id: bandeja.id, orden_id: orden?.id || undefined } });
+      else if (orden) {
         const fd = new FormData();
         fd.append("archivo", archivo);
         fd.append("orden_id", orden.id);
@@ -42,6 +44,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
     finally { setLeyendo(false); }
   };
 
+  useEffect(() => { if (bandeja) leer(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (i, c) => setLineas((ls) => ls.map((l) => (l.i === i ? { ...l, ...c } : l)));
   const activas = lineas.filter((l) => !l.omitir && (l.accion === "nuevo" ? l.nuevo.nombre : l.producto));
   const neto = activas.reduce((s, l) => s + Math.round(Number(l.precio_neto) * Number(l.cantidad)), 0);
@@ -53,7 +56,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
       const r = await api("/ordenes-compra/factura/registrar", {
         method: "POST",
         body: {
-          ...enc, archivo_token: res.archivo_token, orden_id: enc.orden_id || null, gasto_id: gasto?.id || null,
+          ...enc, archivo_token: res.archivo_token, orden_id: enc.orden_id || null, gasto_id: gasto?.id || null, bandeja_id: res.bandeja_id || null,
           lineas: activas.map((l) => ({
             producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
             descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce,
@@ -106,7 +109,7 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
         </button>
       </> : <>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-primary" disabled={!archivo || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo la factura...</> : "Leer factura"}</button>
+        <button className="btn btn-primary" disabled={(!archivo && !bandeja) || leyendo} onClick={leer}>{leyendo ? <><span className="spinner"></span>Leyendo la factura...</> : "Leer factura"}</button>
       </>}>
       {!res ? (
         <>
@@ -116,7 +119,8 @@ export default function FacturaCompra({ orden, gasto, notify, onClose, onListo, 
             {gasto && <> El gasto <strong>{gasto.descripcion || ""} {fmt(gasto.monto)}</strong> se reemplazará por la compra.</>}
           </div>
 <div className="aviso-clave" style={{ marginTop: 8 }}>⚠ Cada factura se sube <strong>una sola vez</strong> al sistema. Si sirve a varias ventas, se reparte al subirla (en "Para:" de cada línea) o después con "Repartir entre ventas" en la compra. Subirla de nuevo duplica el monto y el IVA.</div>
-          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
+          {bandeja ? <div style={{ marginTop: 8 }}>Documento de la bandeja: <strong>{bandeja.nombre_archivo}</strong>{leyendo ? " · leyendo..." : ""}</div>
+            : <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.xml" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />}
         </>
       ) : (
         <>

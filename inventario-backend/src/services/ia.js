@@ -433,10 +433,22 @@ const HERR_PROVEEDOR = {
   },
 };
 
-async function leerDocumentoProveedor(file, indice, usuario) {
-  const r = await extraerDocumentoProveedor(file, usuario);
+// extraido: lectura ya hecha (bandeja de documentos) para no leer dos veces
+async function leerDocumentoProveedor(file, indice, usuario, extraido) {
+  const r = extraido || await extraerDocumento(file, usuario);
   const calzadas = await calzarLineas(r.lineas, indice, { usuario, tipo: "documento_proveedor", archivo: file.originalname });
   return { ...r, lineas: calzadas };
+}
+
+// XML de factura electrónica (DTE): se lee directo, exacto y sin IA; lo demás (PDF, foto) con Claude
+async function extraerDocumento(file, usuario) {
+  const dte = require("./dte");
+  if (dte.esXML(file)) {
+    const [uno] = dte.leerDTE(file.buffer);
+    if (!uno.datos.lineas.length) throw new ErrorNegocio("El XML no trae líneas de productos");
+    return uno.datos;
+  }
+  return extraerDocumentoProveedor(file, usuario);
 }
 
 // Solo la lectura del documento (encabezado, líneas con precio neto y control de totales), sin calzar
@@ -599,6 +611,7 @@ async function clasificarProcesos(procesos, resumenCatalogo, { usuario = "sistem
 }
 
 module.exports = {
+  extraerDocumento,
   clasificarProcesos,
   calzarLineas,
   iaConfigurada, setClienteIA, MODELO, leerListaCliente, leerCotizacionExterna, leerDocumentoProveedor, extraerDocumentoProveedor, leerDocumentoSII, crearIndice, candidatos, normalizar, contenidoArchivo,
