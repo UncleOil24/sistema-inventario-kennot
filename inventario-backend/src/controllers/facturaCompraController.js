@@ -390,7 +390,12 @@ const registrarGasto = handler(async (req, res) => {
       venta_id: venta?.id || null, empresa: ["kenott", "tactics"].includes(b.empresa) ? b.empresa : venta?.empresa || null,
       comprobante: folio ? `${boleta ? "BOL" : "FACT"} ${folio}`.slice(0, 100) : null, creado_por: usuario,
     }, { transaction: t });
-    const archivo = b.archivo_token ? pendientes.get(b.archivo_token) : null;
+    let archivo = b.archivo_token ? pendientes.get(b.archivo_token) : null;
+    // Gasto desde la bandeja de documentos: su archivo queda con el gasto
+    if (!archivo && Number(b.bandeja_id)) {
+      const doc = await require("../models/DocumentoBandeja").findByPk(Number(b.bandeja_id), { transaction: t });
+      if (doc) archivo = { nombre: doc.nombre_archivo, mime: doc.mime, buf: doc.datos };
+    }
     if (archivo) {
       await DocumentoCompra.create({ gasto_id: gasto.id, folio: folio || null, fecha, monto: total, nombre_archivo: archivo.nombre, mime: archivo.mime, datos: archivo.buf, creado_por: usuario }, { transaction: t });
       pendientes.delete(b.archivo_token);

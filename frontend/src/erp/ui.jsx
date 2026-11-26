@@ -632,3 +632,67 @@ export function montosTrasFactor(lineas, control) {
   const iva = Math.round(neto * 0.19);
   return { neto, iva, total: control?.precios_incluyen_iva && control.total_documento ? Math.round(control.total_documento) : neto + iva };
 }
+
+// Gasto de una venta o proyecto (combustible, flete, comisión u otro gasto general): con o sin documento.
+// Desde la bandeja (con su archivo) o desde el cuadro de compra.
+const TIPOS_GASTO = [["combustible", "Combustible / bencina"], ["flete", "Flete / transporte"], ["comision", "Comisión"], ["general", "Otro gasto del proyecto"]];
+export function GastoVenta({ inicial = {}, ventas = [], notify, onClose, onListo }) {
+  const [g, setG] = useState({
+    tipo: inicial.tipo || "combustible", descripcion: inicial.descripcion || "", total: inicial.total ? String(Math.round(inicial.total)) : "",
+    tipo_documento: inicial.tipo_documento || "factura", documento: inicial.documento || "", proveedor: inicial.proveedor || "",
+    fecha: inicial.fecha || hoyISO(), empresa: inicial.empresa || "", venta_id: inicial.venta_id ? String(inicial.venta_id) : "",
+  });
+  const [guardando, setGuardando] = useState(false);
+  const set = (c) => setG((x) => ({ ...x, ...c }));
+  const total = Math.round(Number(g.total) || 0);
+  const iva = g.tipo_documento === "factura" ? Math.round(total - total / 1.19) : 0;
+  const venta = ventas.find((v) => String(v.id) === g.venta_id);
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      await api("/ordenes-compra/factura/gasto", { method: "POST", body: {
+        tipo: g.tipo, descripcion: g.descripcion, total, iva, tipo_documento: g.tipo_documento === "boleta" ? "boleta" : "factura",
+        documento: g.tipo_documento === "ninguno" ? "" : g.documento, proveedor: g.proveedor, fecha: g.fecha,
+        empresa: g.empresa || venta?.empresa || "", venta_id: g.venta_id || null, bandeja_id: inicial.bandeja_id || null,
+      } });
+      notify(`✓ Gasto registrado${venta ? ` en ${venta.numero}` : ""}: ${fmt(total)}`);
+      onListo?.();
+    } catch (e) { notify(e.message, "danger"); } finally { setGuardando(false); }
+  };
+  return (
+    <Modal titulo="// Gasto del proyecto" onClose={onClose} ancho={620}
+      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-primary" disabled={!(total > 0) || guardando || (g.tipo_documento === "factura" && !g.empresa && !venta?.empresa)} onClick={guardar}>{guardando ? "Guardando..." : "Registrar gasto"}</button></>}>
+      <div className="mini" style={{ marginBottom: 10 }}>Lo que no es material (bencina, flete, comisión, otro gasto del proyecto): se suma a los gastos de la venta y su IVA (si es factura) al crédito de la empresa.</div>
+      <div className="fields-row">
+        <div className="field"><label htmlFor="gv-tipo">Tipo de gasto</label>
+          <select id="gv-tipo" value={g.tipo} onChange={(e) => set({ tipo: e.target.value })}>{TIPOS_GASTO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
+        <div className="field"><label htmlFor="gv-venta">Venta / proyecto</label>
+          <select id="gv-venta" value={g.venta_id} onChange={(e) => set({ venta_id: e.target.value })}>
+            <option value="">Gasto general (sin venta)</option>
+            {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre}</option>)}
+          </select></div>
+      </div>
+      <div className="field"><label htmlFor="gv-desc">Descripción</label>
+        <input id="gv-desc" value={g.descripcion} placeholder="Ej: bencina viaje a Curicó" onChange={(e) => set({ descripcion: e.target.value })} /></div>
+      <div className="fields-row">
+        <div className="field campo-clave"><label htmlFor="gv-total">★ Total pagado (con IVA)</label>
+          <input id="gv-total" type="number" inputMode="numeric" value={g.total} onChange={(e) => set({ total: e.target.value })} />
+          {iva > 0 && <div className="mini">IVA {fmt(iva)} · neto {fmt(total - iva)}</div>}</div>
+        <div className="field"><label htmlFor="gv-fecha">Fecha</label>
+          <input id="gv-fecha" type="date" value={g.fecha} onChange={(e) => set({ fecha: e.target.value })} /></div>
+      </div>
+      <div className="fields-row">
+        <div className="field"><label htmlFor="gv-doc">Documento</label>
+          <select id="gv-doc" value={g.tipo_documento} onChange={(e) => set({ tipo_documento: e.target.value })}>
+            <option value="factura">Factura</option><option value="boleta">Boleta (sin IVA)</option><option value="ninguno">Sin documento</option>
+          </select></div>
+        {g.tipo_documento !== "ninguno" && <div className="field"><label htmlFor="gv-num">N° documento</label>
+          <input id="gv-num" value={g.documento} onChange={(e) => set({ documento: e.target.value })} /></div>}
+        <div className="field"><label htmlFor="gv-prov">Proveedor / dónde</label>
+          <input id="gv-prov" value={g.proveedor} placeholder="Ej: COPEC" onChange={(e) => set({ proveedor: e.target.value })} /></div>
+      </div>
+      {g.tipo_documento === "factura" && <EmpresaCompra valor={g.empresa || venta?.empresa || ""} detectada={inicial.empresa || null} ventaEmpresa={venta?.empresa || null} conDocumento={!!inicial.bandeja_id} onChange={(empresa) => set({ empresa })} />}
+    </Modal>
+  );
+}

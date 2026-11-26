@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, fmt, authFetch, API_URL } from "./lib";
-import { Cargando, confirmar } from "./ui";
+import { Cargando, confirmar, GastoVenta } from "./ui";
 import FacturaCompra from "./FacturaCompra";
 
 // Bandeja de documentos: todo lo que se compra se sube aquí en el momento (desde el celular: foto, PDF o el XML
@@ -19,6 +19,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
   const [nota, setNota] = useState("");
   const [subiendo, setSubiendo] = useState(false);
   const [procesar, setProcesar] = useState(null); // { doc, orden }
+  const [gastoDe, setGastoDe] = useState(null); // documento que se registra como gasto
   const camara = useRef(null);
   const galeria = useRef(null);
 
@@ -80,7 +81,8 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
   const releer = async (d) => { try { await api(`/bandeja/${d.id}/leer`, { method: "POST" }); cargar(); } catch (e) { notify(e.message, "danger"); } };
   const abrirProcesar = async (d) => {
     let orden = null;
-    if (d.sugerencia?.orden_id) { try { orden = await api(`/ordenes-compra/${d.sugerencia.orden_id}`); } catch { /* sin orden */ } }
+    // Solo la compra elegida o sugerida dentro de la venta del documento (sin venta: se elige al procesar)
+    if (d.sugerencia?.orden_id && d.venta_id) { try { orden = await api(`/ordenes-compra/${d.sugerencia.orden_id}`); } catch { /* sin orden */ } }
     setProcesar({ doc: d, orden });
   };
 
@@ -137,14 +139,23 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
                     {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre}</option>)}
                   </select>}
                 </div>
-                {d.sugerencia && d.estado === "por_procesar" && <div className="mini" style={{ color: "var(--accent)" }}>Compra sugerida: {d.sugerencia.orden_numero}{d.sugerencia.venta_numero ? ` (${d.sugerencia.venta_numero}${d.sugerencia.cliente ? ` · ${d.sugerencia.cliente}` : ""})` : ""}</div>}
+                {d.estado === "por_procesar" && (d.venta_id ? (
+                  <div className="mini">Compra:
+                    <select className="select-linea" style={{ marginLeft: 6, maxWidth: 260 }} aria-label="A qué compra de la venta pertenece" value={d.sugerencia?.orden_id || ""} onChange={(e) => cambiar(d, { orden_id: e.target.value || null })}>
+                      <option value="">Compra nueva de la venta</option>
+                      {(d.compras_venta || []).map((o) => <option key={o.id} value={o.id}>{o.numero} · {o.proveedor} · {fmt(o.total)}</option>)}
+                    </select>
+                    {d.sugerencia?.orden_id && !d.sugerencia.elegida && <span style={{ color: "var(--accent)" }}> (sugerida)</span>}
+                  </div>
+                ) : d.sugerencia?.orden_id ? <div className="mini" style={{ color: "var(--accent)" }}>Compra sugerida: {d.sugerencia.orden_numero}{d.sugerencia.venta_numero ? ` (${d.sugerencia.venta_numero}${d.sugerencia.cliente ? ` · ${d.sugerencia.cliente}` : ""})` : ""} · elige la venta para confirmarla</div> : null)}
                 {d.estado === "procesado" && <div className="mini" style={{ color: "var(--success)" }}>✓ Registrado{d.orden_numero ? ` en ${d.orden_numero}` : d.gasto_id ? " como gasto" : ""} · {d.procesado_por} · {fechaHora(d.procesado_en)}</div>}
                 {d.nota && <div className="mini">Nota: {d.nota}</div>}
                 <div className="mini bandeja-doc-quien">Subido por {d.subido_por || "—"} · {fechaHora(d.createdAt)} · {d.nombre_archivo}</div>
               </div>
               <div className="bandeja-doc-acciones">
                 <button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button>
-                {puedeOperar && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar</button>}
+                {puedeOperar && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar compra</button>}
+                {puedeOperar && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto" onClick={() => setGastoDe(d)}>Es un gasto</button>}
                 {["por_procesar", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => descartar(d)}>Descartar</button>}
                 {["descartado", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => cambiar(d, { estado: "por_procesar" }, "Vuelve a Por procesar")}>Recuperar</button>}
               </div>
@@ -153,6 +164,8 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
         </div>
       )}
 
+      {gastoDe && <GastoVenta ventas={ventas} notify={notify} onClose={() => setGastoDe(null)} onListo={() => { setGastoDe(null); cargar(); }}
+        inicial={{ bandeja_id: gastoDe.id, total: gastoDe.total, proveedor: gastoDe.proveedor, documento: gastoDe.folio, fecha: gastoDe.fecha_documento, empresa: gastoDe.empresa, venta_id: gastoDe.venta_id, descripcion: gastoDe.nota || "" }} />}
       {procesar && <FacturaCompra bandeja={procesar.doc} orden={procesar.orden} notify={notify} proveedores={proveedores}
         onClose={() => { setProcesar(null); cargar(); }} onListo={() => { setProcesar(null); cargar(); }} />}
     </div>
