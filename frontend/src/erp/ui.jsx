@@ -635,7 +635,7 @@ export function montosTrasFactor(lineas, control) {
 
 // Gasto de una venta o proyecto (combustible, flete, comisión u otro gasto general): con o sin documento.
 // Desde la bandeja (con su archivo) o desde el cuadro de compra.
-const TIPOS_GASTO = [["combustible", "Combustible / bencina"], ["flete", "Flete / transporte"], ["comision", "Comisión"], ["general", "Otro gasto del proyecto"]];
+export const TIPOS_GASTO = [["combustible", "Combustible / bencina"], ["flete", "Flete / transporte"], ["herramienta", "Herramienta / insumo"], ["mano_obra", "Mano de obra / pionetas"], ["comision", "Comisión"], ["general", "Otro gasto del proyecto"]];
 export function GastoVenta({ inicial = {}, ventas = [], notify, onClose, onListo }) {
   const [g, setG] = useState({
     tipo: inicial.tipo || "combustible", descripcion: inicial.descripcion || "", total: inicial.total ? String(Math.round(inicial.total)) : "",
@@ -663,10 +663,10 @@ export function GastoVenta({ inicial = {}, ventas = [], notify, onClose, onListo
     <Modal titulo="// Gasto del proyecto" onClose={onClose} ancho={620}
       footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" disabled={!(total > 0) || guardando || (g.tipo_documento === "factura" && !g.empresa && !venta?.empresa)} onClick={guardar}>{guardando ? "Guardando..." : "Registrar gasto"}</button></>}>
-      <div className="mini" style={{ marginBottom: 10 }}>Lo que no es material (bencina, flete, comisión, otro gasto del proyecto): se suma a los gastos de la venta y su IVA (si es factura) al crédito de la empresa.</div>
+      <div className="mini" style={{ marginBottom: 10 }}>Lo que no es material (bencina, flete, pago a pionetas, comisión, otro gasto): se suma a los gastos de la venta y su IVA (si es factura) al crédito de la empresa. Pagos sin boleta (pionetas, ayudantes): elige "Sin documento", no recuperan IVA.</div>
       <div className="fields-row">
         <div className="field"><label htmlFor="gv-tipo">Tipo de gasto</label>
-          <select id="gv-tipo" value={g.tipo} onChange={(e) => set({ tipo: e.target.value })}>{TIPOS_GASTO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
+          <select id="gv-tipo" value={g.tipo} onChange={(e) => set({ tipo: e.target.value, ...(e.target.value === "mano_obra" && g.tipo_documento === "factura" ? { tipo_documento: "ninguno" } : {}) })}>{TIPOS_GASTO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></div>
         <div className="field"><label htmlFor="gv-venta">Venta / proyecto</label>
           <select id="gv-venta" value={g.venta_id} onChange={(e) => set({ venta_id: e.target.value })}>
             <option value="">Gasto general (sin venta)</option>

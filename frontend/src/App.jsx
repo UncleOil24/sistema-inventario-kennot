@@ -440,6 +440,12 @@ const styles = `
   .asa-t { left: calc(50% - 11px); top: -11px; cursor: ns-resize; } .asa-b { left: calc(50% - 11px); bottom: -11px; cursor: ns-resize; }
   .asa-l { top: calc(50% - 11px); left: -11px; cursor: ew-resize; } .asa-r { top: calc(50% - 11px); right: -11px; cursor: ew-resize; }
   .bandeja-archivos li .link { margin-left: 6px; }
+  /* Destino de cada línea de la factura */
+  .destino-linea { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; }
+  .destino-linea.activo { background: #f3eefe; border: 1px dashed #a78bfa; border-radius: 6px; padding: 4px 6px; }
+  .destino-linea .mini { flex-basis: 100%; }
+  .aviso-fuera { font-size: 11px; color: #b42318; margin-top: 3px; }
+  .reparto-factura { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 10px; margin: 8px 0; border-radius: 6px; background: #eef6f7; font-size: 12px; }
 `;
 
 // Raíz: decide entre pantalla de login y el sistema

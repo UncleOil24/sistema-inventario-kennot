@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, confirmar, aplicarFactorPrecios, montosTrasFactor } from "./ui";
+import { Modal, Estado, SelectorProducto, RepartoLinea, repartoParaEnviar, PresentacionLinea, presentacionParaEnviar, prepararLineas, EmpresaCompra, AvisoCamposClave, CuadreDocumento, confirmar, aplicarFactorPrecios, montosTrasFactor, TIPOS_GASTO } from "./ui";
 import { api, fmt, subirArchivo, useProductos, invalidarProductos, hoyISO, authFetch, API_URL, envaseEnFactura, TIPOS_PAGO } from "./lib";
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -15,6 +15,8 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
   const [lineas, setLineas] = useState([]);
   const [guardando, setGuardando] = useState(false);
   const [resultado, setResultado] = useState(null);
+  const [ventas, setVentas] = useState([]); // para mandar líneas a otra venta, como complemento o como gasto
+  useEffect(() => { api("/ventas").then((vs) => setVentas((vs || []).filter((v) => v.estado !== "anulada"))).catch(() => {}); }, []);
 
   const leer = async () => {
     if (!archivo && !bandeja) return;
@@ -46,7 +48,25 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
 
   useEffect(() => { if (bandeja) leer(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (i, c) => setLineas((ls) => ls.map((l) => (l.i === i ? { ...l, ...c } : l)));
-  const activas = lineas.filter((l) => !l.omitir && (l.accion === "nuevo" ? l.nuevo.nombre : l.producto));
+  const esGasto = (l) => l.destino?.tipo === "gasto";
+  const activas = lineas.filter((l) => !l.omitir && (esGasto(l) || (l.accion === "nuevo" ? l.nuevo.nombre : l.producto)));
+  const ventaActual = res?.venta?.id || null;
+  // Destino incompleto (falta elegir venta o línea): no se puede registrar
+  const destinoIncompleto = activas.some((l) => (l.destino?.tipo === "venta" && !l.destino.venta_id) || (l.destino?.tipo === "complemento" && (!l.destino.venta_id || l.destino.indice === "" || l.destino.indice == null)));
+  // Cómo queda repartida la factura (neto de las líneas)
+  const repartoFactura = (() => {
+    const m = new Map();
+    const sumar = (k, v) => m.set(k, (m.get(k) || 0) + v);
+    for (const l of activas) {
+      const v = Math.round(Number(l.precio_neto) * Number(l.cantidad)) || 0;
+      const d = l.destino || {};
+      const vn = (id) => ventas.find((x) => String(x.id) === String(id))?.numero || "otra venta";
+      if (d.tipo === "gasto") sumar(`Gasto ${d.venta_id ? vn(d.venta_id) : "general"}`, v);
+      else if (d.tipo === "venta" || d.tipo === "complemento") sumar(vn(d.venta_id), v);
+      else sumar(orden ? `Esta compra (${orden.numero})` : res?.venta ? `Esta compra (${res.venta.numero})` : "Esta compra", v);
+    }
+    return [...m.entries()];
+  })();
   const neto = activas.reduce((s, l) => s + Math.round(Number(l.precio_neto) * Number(l.cantidad)), 0);
 
   const registrar = async () => {
@@ -57,30 +77,40 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
         method: "POST",
         body: {
           ...enc, archivo_token: res.archivo_token, orden_id: enc.orden_id || null, gasto_id: gasto?.id || null, bandeja_id: res.bandeja_id || null,
-          lineas: activas.map((l) => ({
-            producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
-            descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce,
-            ...presentacionParaEnviar(l, repartoParaEnviar(l)), // bidón 5 L → litros, con su costo por litro
-          })),
+          ordenes_por_venta: Object.fromEntries(activas.filter((l) => l.destino?.tipo === "venta" && l.destino.orden_id).map((l) => [l.destino.venta_id, l.destino.orden_id])),
+          lineas: activas.map((l) => {
+            const d = l.destino || {};
+            if (d.tipo === "gasto") return { destino: { tipo: "gasto", gasto_tipo: d.gasto_tipo || "general", venta_id: d.venta_id || null, descripcion: d.descripcion || "" },
+              descripcion: l.descripcion, cantidad: Number(l.cantidad), precio: Number(l.precio_neto) };
+            const base = presentacionParaEnviar(l, repartoParaEnviar(l)); // bidón 5 L → litros, con su costo por litro
+            const otra = (d.tipo === "venta" || d.tipo === "complemento") && d.venta_id;
+            return {
+              producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
+              descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce, ...base,
+              ...(otra ? { reparto: [{ venta_id: Number(d.venta_id), cantidad: base.cantidad }],
+                para: d.tipo === "complemento" ? { tipo: "complemento", indice: Number(d.indice), venta_id: Number(d.venta_id) } : undefined } : {}),
+            };
+          }),
         },
       });
       invalidarProductos();
       setResultado(r);
-      notify(`✓ Factura registrada en ${r.orden.numero}`);
+      notify(r.orden ? `✓ Factura registrada en ${r.orden.numero}${r.gastos?.length ? ` + ${r.gastos.length} gasto(s)` : ""}` : `✓ Factura registrada como ${r.gastos?.length || 0} gasto(s)`);
     } catch (e) { notify(e.message, "danger"); }
     finally { setGuardando(false); }
   };
 
   if (resultado) {
     return (
-      <Modal titulo={`// Factura registrada · ${resultado.orden.numero}`} onClose={() => { onListo?.(resultado.orden); onClose(); }} ancho={760}
+      <Modal titulo={`// Factura registrada${resultado.orden ? ` · ${resultado.orden.numero}` : " como gasto"}`} onClose={() => { onListo?.(resultado.orden); onClose(); }} ancho={760}
         footer={<button className="btn btn-primary" onClick={() => { onListo?.(resultado.orden); onClose(); }}>Listo</button>}>
-        <div className="mini">
+        {resultado.gastos?.length > 0 && <div className="mini" style={{ marginBottom: 6 }}>Gastos: {resultado.gastos.map((g) => `${g.descripcion} ${fmt(g.monto)} (IVA crédito ${fmt(g.iva)})${g.venta ? ` → ${g.venta}` : " → gasto general"}`).join(" · ")}</div>}
+        {resultado.orden && <div className="mini">
           Compra <strong>{resultado.orden.numero}</strong> recibida con la factura {resultado.orden.documento} · {resultado.precios} precios al catálogo (fecha de la factura)
           {resultado.productos_nuevos ? ` · ${resultado.productos_nuevos} productos nuevos en POR CLASIFICAR` : ""}{gasto ? " · el gasto se reemplazó por esta compra" : ""}.
           {resultado.reparto?.length > 1 && <div>Repartida entre ventas: {resultado.reparto.map((p) => `${p.numero} ${fmt(p.total)}`).join(" · ")} (misma factura, se paga junta).</div>}
           {resultado.no_vinieron?.length > 0 && <div style={{ color: "var(--danger)" }}>No vino: {resultado.no_vinieron.map((x) => `${x.nombre} (${x.cantidad})`).join(", ")}. Vuelve a "por comprar" en el cuadro de su venta.</div>}
-        </div>
+        </div>}
         {resultado.alzas.length > 0 && (
           <div className="aviso" style={{ marginTop: 8 }}>
             <strong>Alza de precio (más de 10%):</strong> quedaron marcados en REVISAR y gerencia recibe el aviso.
@@ -103,8 +133,9 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
         <span className="mini" style={{ marginRight: "auto" }}>{activas.length} de {lineas.length} líneas · neto {fmt(neto)}</span>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         {!enc.empresa && <span className="mini" style={{ color: "var(--danger)" }}>Elige la empresa que compra</span>}
-        {activas.some((l) => l.decidir) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
-        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || !enc.empresa || guardando || activas.some((l) => l.decidir)} onClick={registrar}>
+        {destinoIncompleto && <span className="mini" style={{ color: "var(--warn)" }}>Falta elegir la venta o la línea de destino</span>}
+        {activas.some((l) => l.decidir && !esGasto(l)) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
+        <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || !enc.empresa || guardando || destinoIncompleto || activas.some((l) => l.decidir && !esGasto(l))} onClick={registrar}>
           {guardando ? "Guardando..." : enc.orden_id ? "Registrar factura y recibir compra" : "Crear compra con esta factura"}
         </button>
       </> : <>
@@ -174,10 +205,13 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
                 {lineas.map((l) => (
                   <tr key={l.i} className={l.omitir ? "fila-anulada" : l.alza || l.diferencia ? "fila-alerta" : ""}>
                     <td><input type="checkbox" checked={!l.omitir} onChange={(e) => set(l.i, { omitir: !e.target.checked })} title="Incluir" /></td>
-                    <td>{l.descripcion}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div></td>
+                    <td>{l.descripcion}
+                      {l.omitir && <div className="aviso-fuera">Queda fuera: su monto y su IVA no se registran. <button className="link" onClick={() => set(l.i, { omitir: false, destino: { tipo: "gasto", gasto_tipo: "general", venta_id: ventaActual } })}>Es un gasto (recupera IVA)</button></div>}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div></td>
                     <td><input className="qty-input" style={{ width: 60 }} type="number" value={l.cantidad} onChange={(e) => set(l.i, { cantidad: e.target.value })} /></td>
                     <td><input className="qty-input" style={{ width: 90 }} type="number" value={l.precio_neto} onChange={(e) => set(l.i, { precio_neto: e.target.value })} /></td>
                     <td>
+                      {!l.omitir && <DestinoLinea l={l} ventas={ventas} ventaActual={ventaActual} onChange={(destino) => set(l.i, { destino })} />}
+                      {!esGasto(l) && <>
                       <select className="select-linea" value={l.accion} onChange={(e) => set(l.i, { accion: e.target.value })} style={{ marginBottom: 4 }}>
                         <option value="existente">Producto del catálogo</option>
                         <option value="nuevo">Producto nuevo (POR CLASIFICAR)</option>
@@ -188,14 +222,15 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
                       {l.accion === "existente" && <Estado valor={l.calce} />}
                       <PresentacionLinea l={l} productos={productos} complementos={res.complementos || []} onChange={(c) => set(l.i, c)}
                         items={(res.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}`, etiqueta: res.orden?.numero || "Pedido" }))} />
-                      <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} />
+                      {!l.destino?.tipo || l.destino.tipo === "compra" ? <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} /> : null}
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
                         <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
                           <button className="link" onClick={() => set(l.i, { cantidad: e.cantidad, precio_neto: e.precio, envase_ok: true })}>Convertir</button>{" · "}
                           <button className="link" onClick={() => set(l.i, { envase_ok: true })}>Está bien así</button></div>) : null; })()}
+                      </>}
                     </td>
                     <td className="mini">
-                      {l.accion === "existente" && l.producto ? (Number(l.producto.precio_compra) > 0 ? <>{fmt(l.producto.precio_compra)} {l.producto.proveedor}
+                      {esGasto(l) ? "no va al catálogo" : l.accion === "existente" && l.producto ? (Number(l.producto.precio_compra) > 0 ? <>{fmt(l.producto.precio_compra)} {l.producto.proveedor}
                         {l.alza && <div style={{ color: "var(--danger)" }}>▲ alza {l.alza}%</div>}
                         {Number(l.precio_neto) < Number(l.producto.precio_compra) && <div style={{ color: "var(--success)" }}>más barato</div>}</> : <span style={{ color: "var(--success)" }}>sin precio: se llena</span>) : "—"}
                     </td>
@@ -205,9 +240,65 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
               </tbody>
             </table>
           </div>
+          {repartoFactura.length > 1 && <div className="reparto-factura">Así queda la factura (neto): {repartoFactura.map(([k, v]) => <span key={k}><b>{k}</b> {fmt(v)}</span>)}
+            <span className="mini">· el IVA se reparte en la misma proporción: todo queda como crédito fiscal, con el mismo N° de factura.</span></div>}
           <div className="mini">Los precios entran al catálogo con la fecha de la factura y las reglas de siempre (mismo proveedor: el más reciente; entre proveedores: el más barato; los confirmados se respetan).</div>
         </>
       )}
     </Modal>
+  );
+}
+
+// Destino de una línea de la factura: esta compra, otra venta (con una compra abierta suya o compra nueva),
+// complemento de una línea de otra venta, o gasto (con su parte del IVA como crédito fiscal)
+function DestinoLinea({ l, ventas, ventaActual, onChange }) {
+  const d = l.destino || { tipo: "compra" };
+  const [compras, setCompras] = useState({});
+  const otras = ventas.filter((v) => v.id !== ventaActual);
+  const vSel = ventas.find((v) => String(v.id) === String(d.venta_id));
+  useEffect(() => {
+    if (d.tipo !== "venta" || !d.venta_id || compras[d.venta_id]) return;
+    api(`/ordenes-compra?venta_id=${d.venta_id}`).then((os) => setCompras((c) => ({ ...c, [d.venta_id]: (os || []).filter((o) => !["anulada", "recibida"].includes(o.estado)) }))).catch(() => {});
+  }, [d.tipo, d.venta_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cambiarTipo = (tipo) => onChange(tipo === "compra" ? null
+    : tipo === "gasto" ? { tipo, gasto_tipo: "general", venta_id: ventaActual || "" }
+    : { tipo, venta_id: "", orden_id: "", indice: "" });
+  const corto = (v) => `${v.numero} · ${String(v.cliente_nombre || "").replace(/^(I\.?\s*)?MUNICIPALIDAD DE /i, "Muni ").slice(0, 28)}`;
+  return (
+    <div className={`destino-linea ${d.tipo !== "compra" ? "activo" : ""}`}>
+      <select className="select-linea" aria-label="Destino de la línea" value={d.tipo} onChange={(e) => cambiarTipo(e.target.value)}>
+        <option value="compra">→ Esta compra</option>
+        <option value="venta">→ Otra venta</option>
+        <option value="complemento">→ Complemento en otra venta</option>
+        <option value="gasto">→ Gasto (recupera IVA)</option>
+      </select>
+      {(d.tipo === "venta" || d.tipo === "complemento") && (
+        <select className="select-linea" aria-label="Venta de destino" value={d.venta_id || ""} onChange={(e) => onChange({ ...d, venta_id: e.target.value, orden_id: "", indice: "" })}>
+          <option value="">— elige la venta —</option>
+          {otras.map((v) => <option key={v.id} value={v.id}>{corto(v)}</option>)}
+        </select>)}
+      {d.tipo === "venta" && d.venta_id && (
+        <select className="select-linea" aria-label="Compra de esa venta" value={d.orden_id || ""} onChange={(e) => onChange({ ...d, orden_id: e.target.value })}>
+          <option value="">Compra nueva de {vSel?.numero} (misma factura)</option>
+          {(compras[d.venta_id] || []).map((o) => <option key={o.id} value={o.id}>{o.numero} · {o.proveedor_nombre} · {fmt(o.total)}</option>)}
+        </select>)}
+      {d.tipo === "complemento" && vSel && (
+        <select className="select-linea" aria-label="Línea de esa venta" value={d.indice ?? ""} onChange={(e) => onChange({ ...d, indice: e.target.value })}>
+          <option value="">— complemento de… —</option>
+          {(vSel.items || []).map((it, k) => it.complemento_de ? null : <option key={k} value={k}>{(it.descripcion_cliente || it.nombre || "").slice(0, 60)}</option>)}
+        </select>)}
+      {d.tipo === "gasto" && <>
+        <select className="select-linea" aria-label="Tipo de gasto" value={d.gasto_tipo} onChange={(e) => onChange({ ...d, gasto_tipo: e.target.value })}>
+          {TIPOS_GASTO.filter(([v]) => v !== "mano_obra").map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+        </select>
+        <select className="select-linea" aria-label="Venta del gasto" value={d.venta_id || ""} onChange={(e) => onChange({ ...d, venta_id: e.target.value })}>
+          {ventaActual && <option value={ventaActual}>De esta venta</option>}
+          <option value="">Gasto general (sin venta)</option>
+          {otras.map((v) => <option key={v.id} value={v.id}>{corto(v)}</option>)}
+        </select>
+        <div className="mini">No crea producto ni cambia precios; su IVA queda como crédito de la empresa de la factura.</div>
+      </>}
+      {d.tipo === "complemento" && <div className="mini">Se agrega a esa venta sin precio para el cliente; su costo es de esa venta.</div>}
+    </div>
   );
 }
