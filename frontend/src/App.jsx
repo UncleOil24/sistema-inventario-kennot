@@ -417,6 +417,29 @@ const styles = `
     .header .depto-btn { font-size: 0; padding: 6px 10px; }
     .header .depto-btn .depto-num { font-size: 13px; margin: 0; }
   }
+  /* Respaldo de ventas y recortador de fotos */
+  .empresa-btn.activo:not(.kenott):not(.tactics) { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .empresa-btn .mini { display: block; font-weight: 400; color: inherit; opacity: .8; }
+  .respaldo-venta { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: var(--surface, #fff); }
+  .respaldo-titulo { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .respaldo-checks { display: flex; gap: 6px; flex-wrap: wrap; }
+  .respaldo-check { font-size: 12px; padding: 3px 8px; border-radius: 12px; background: #eef1f2; color: #555; }
+  .respaldo-check.ok { background: #e3f4e8; color: #1e7b3c; }
+  .respaldo-check.falta { background: #fde4e4; color: #b42318; font-weight: 700; }
+  .respaldo-docs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip.chip-falta { border-color: #e5a0a0; color: #b42318; }
+  .chip.chip-falta.activo { background: #b42318; color: #fff; }
+  .recorte-zona { display: flex; justify-content: center; background: #222; border-radius: 6px; padding: 8px; }
+  .recorte-caja { position: relative; display: inline-block; touch-action: none; user-select: none; line-height: 0; }
+  .recorte-canvas { display: block; max-width: 100%; max-height: 60vh; }
+  .recorte-sombra { position: absolute; background: rgba(0,0,0,.55); pointer-events: none; }
+  .recorte-marco { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px #0006; cursor: move; touch-action: none; }
+  .recorte-asa { position: absolute; width: 22px; height: 22px; background: #fff; border: 2px solid var(--accent); border-radius: 50%; touch-action: none; }
+  .asa-tl { left: -11px; top: -11px; cursor: nwse-resize; } .asa-br { right: -11px; bottom: -11px; cursor: nwse-resize; }
+  .asa-tr { right: -11px; top: -11px; cursor: nesw-resize; } .asa-bl { left: -11px; bottom: -11px; cursor: nesw-resize; }
+  .asa-t { left: calc(50% - 11px); top: -11px; cursor: ns-resize; } .asa-b { left: calc(50% - 11px); bottom: -11px; cursor: ns-resize; }
+  .asa-l { top: calc(50% - 11px); left: -11px; cursor: ew-resize; } .asa-r { top: calc(50% - 11px); right: -11px; cursor: ew-resize; }
+  .bandeja-archivos li .link { margin-left: 6px; }
 `;
 
 // Raíz: decide entre pantalla de login y el sistema

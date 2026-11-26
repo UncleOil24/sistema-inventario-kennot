@@ -12,4 +12,5 @@ router.get("/:id/archivo", equipo, c.archivo);
 router.get("/:id/lectura", equipo, c.lectura);
 router.put("/:id", equipo, c.actualizar);
 router.post("/:id/leer", equipo, c.releer);
+router.post("/:id/a-venta", equipo, c.aVenta);
 module.exports = router;

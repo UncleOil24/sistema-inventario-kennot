@@ -27,6 +27,8 @@ const DocumentoBandeja = sequelize.define("DocumentoBandeja", {
   sugerencia: { type: DataTypes.JSONB, allowNull: true }, // { orden_id, orden_numero, venta_id, venta_numero, motivo }
   orden_id: { type: DataTypes.INTEGER, allowNull: true },
   gasto_id: { type: DataTypes.INTEGER, allowNull: true },
+  clase: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "compra" }, // compra (factura de proveedor) | venta (respaldo de una venta: cedible, guía recepcionada)
+  documento_venta_id: { type: DataTypes.INTEGER, allowNull: true },
   subido_por: { type: DataTypes.STRING(150), allowNull: true },
   procesado_por: { type: DataTypes.STRING(150), allowNull: true },
   procesado_en: { type: DataTypes.DATE, allowNull: true },

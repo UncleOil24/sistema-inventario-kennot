@@ -4,6 +4,7 @@ import { api, fmt, fecha, useProductos, precioSegun, TIPOS_GASTO, imprimirPDF, i
 import CuadroCompra, { imprimirCuadro } from "./CuadroCompra";
 import { cuerpoOrden } from "./Compras";
 import { AccionesVenta, PanelFacturas, HistorialVenta, conConfirmacion } from "./Recorrido";
+import { RespaldoVenta, BadgeRespaldo } from "./Respaldo";
 
 // Períodos para filtrar (fechas en hora local de Chile)
 const PERIODOS = [["todo", "Todas las fechas"], ["mes", "Este mes"], ["mes_pasado", "Mes pasado"], ["anio", "Este año"]];
@@ -35,6 +36,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
   const [periodo, setPeriodo] = useState("todo"); // todo | mes | mes_pasado | anio
   const [nueva, setNueva] = useState(false);
   const [detalle, setDetalle] = useState(null);
+  const [soloFaltan, setSoloFaltan] = useState(false); // ventas a las que les falta cedible o guía recepcionada
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -70,6 +72,8 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
   const porCobrar = activas.reduce((s, v) => s + Number(v.total) - Number(v.monto_pagado), 0);
   const cuenta = (...e) => activas.filter((v) => e.includes(v.etapa)).length;
   const filtros = FILTROS_ETAPA[modo] || FILTROS_ETAPA.comercial;
+  const conFaltantes = activas.filter((v) => v.respaldo?.faltan?.length).length;
+  const listadas = soloFaltan ? ventas.filter((v) => v.respaldo?.faltan?.length) : ventas;
 
   return (
     <>
@@ -105,6 +109,8 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
             <option value="pagada">Pagadas</option>
           </select>
         )}
+        {(conFaltantes > 0 || soloFaltan) && <button className={`chip chip-falta ${soloFaltan ? "activo" : ""}`} title="Ventas despachadas o facturadas sin la cedible o la guía firmada por el cliente"
+          onClick={() => setSoloFaltan(!soloFaltan)}>⚠ Faltan doc. cedibles / guías ({conFaltantes})</button>}
         {puedeVender && modo === "comercial" && <button className="btn btn-primary" onClick={() => setNueva(true)}>+ Nueva venta</button>}
       </div>
       {modo === "operativo" && <div className="mini" style={{ marginTop: -8, marginBottom: 10 }}>Abre una venta para aceptarla, ver qué comprar (Cuadro de compra) y, cuando llegue todo, confirmarla para que Comercial facture.</div>}
@@ -114,8 +120,8 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
           <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th>OC / ID</th><th>Etapa</th>{modo !== "operativo" && <th>Factura</th>}<th>Total</th>{modo === "finanzas" && <th>Saldo</th>}{modo === "finanzas" && <th>Vence</th>}{modo === "finanzas" && <th>Pago</th>}{modo === "operativo" && <th>Compras</th>}<th></th></tr></thead>
           <tbody>
             {loading ? <tr className="empty-row"><td colSpan={11}><span className="spinner"></span>Cargando...</td></tr>
-              : ventas.length === 0 ? <tr className="empty-row"><td colSpan={11}>// sin ventas en este filtro</td></tr>
-              : ventas.map((v) => {
+              : listadas.length === 0 ? <tr className="empty-row"><td colSpan={11}>// sin ventas en este filtro</td></tr>
+              : listadas.map((v) => {
                 const saldo = Number(v.total) - Number(v.monto_pagado);
                 const vencida = v.estado !== "anulada" && saldo > 0 && v.fecha_vencimiento && v.fecha_vencimiento < new Date().toLocaleDateString("sv-SE");
                 return (
@@ -124,7 +130,7 @@ export default function Ventas({ notify, esAdmin, puedeOperar, puedeVender, modo
                     <td className="mini">{fecha(v.fecha)}</td>
                     <td>{v.cliente_nombre || <span className="mini">Sin cliente</span>}</td>
                     <td className="mini">{v.orden_compra_cliente || (v.oc_pendiente ? <span className="estado estado-warn">OC pendiente</span> : "—")}{v.id_solicitud && <div className="id-solicitud">ID {v.id_solicitud}</div>}</td>
-                    <td>{v.estado === "anulada" ? <Estado valor="anulada" /> : <Etapa valor={v.etapa} />}</td>
+                    <td>{v.estado === "anulada" ? <Estado valor="anulada" /> : <Etapa valor={v.etapa} />}{v.estado !== "anulada" && <div style={{ marginTop: 3 }}><BadgeRespaldo respaldo={v.respaldo} /></div>}</td>
                     {modo !== "operativo" && <td className="mini"><EstadoFactura valor={v.estado_factura} />{v.documento && <div>{v.documento}</div>}</td>}
                     <td className="price-cell">{fmt(v.total)}</td>
                     {modo === "finanzas" && <td className="price-cell" style={{ color: saldo > 0.5 ? "var(--text)" : "var(--text3)" }}>{fmt(saldo)}</td>}
@@ -411,6 +417,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         </div>
       )}
       <HistorialVenta venta={venta} />
+      <RespaldoVenta venta={venta} puede={puedeOperar || puedeVender || esAdmin} notify={notify} onCambio={onCambio} />
       {(modo !== "operativo" || venta.facturas?.length > 0) && <PanelFacturas venta={venta} puedeVender={editaDatos || (puedeVender && modo === "finanzas" && esAdmin)} notify={notify} onCambio={onCambio} />}
       <div className="table-wrap">
         <table className="table table-compacta">

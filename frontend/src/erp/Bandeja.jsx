@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api, fmt, authFetch, API_URL } from "./lib";
 import { Cargando, confirmar, GastoVenta } from "./ui";
 import FacturaCompra from "./FacturaCompra";
+import { RegistrarEnVenta, Recortador, comprimirImagen, esImagen } from "./Respaldo";
 
 // Bandeja de documentos: todo lo que se compra se sube aquí en el momento (desde el celular: foto, PDF o el XML
 // de la factura electrónica) y después se procesa con calma: se registra la compra con su venta.
@@ -20,6 +21,10 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
   const [subiendo, setSubiendo] = useState(false);
   const [procesar, setProcesar] = useState(null); // { doc, orden }
   const [gastoDe, setGastoDe] = useState(null); // documento que se registra como gasto
+  const [clase, setClase] = useState("compra"); // compra | venta (cedible o guía firmada por el cliente)
+  const [aVenta, setAVenta] = useState(null); // documento que se guarda como respaldo de una venta
+  const [recortar, setRecortar] = useState(null); // índice del archivo que se encuadra
+  const [todasVentas, setTodasVentas] = useState([]);
   const camara = useRef(null);
   const galeria = useRef(null);
 
@@ -34,13 +39,22 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
     return () => clearTimeout(t);
   }, [datos, cargar]);
   useEffect(() => {
-    api("/ventas").then((vs) => setVentas((Array.isArray(vs) ? vs : vs.ventas || []).filter((v) => v.estado !== "anulada" && v.etapa !== "entregada"))).catch(() => {});
+    api("/ventas").then((vs) => {
+      const activas = (Array.isArray(vs) ? vs : vs.ventas || []).filter((v) => v.estado !== "anulada");
+      setTodasVentas(activas);
+      setVentas(activas.filter((v) => v.etapa !== "entregada"));
+    }).catch(() => {});
   }, []);
   // Archivos compartidos desde otra app del celular (WhatsApp, Archivos…)
-  useEffect(() => { if (compartidos?.length) { setArchivos(compartidos); onCompartidosUsados?.(); } }, [compartidos]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (compartidos?.length) { agregar(compartidos); onCompartidosUsados?.(); } }, [compartidos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Se copia la lista antes de limpiar el input (si no, queda vacía)
-  const agregar = (lista) => { const nuevos = Array.from(lista || []); setArchivos((a) => [...a, ...nuevos]); };
+  // Las fotos pesadas del celular se achican al tiro (se ven igual, pesan ~10 veces menos)
+  const agregar = async (lista) => {
+    const nuevos = Array.from(lista || []);
+    const listos = await Promise.all(nuevos.map((f) => comprimirImagen(f)));
+    setArchivos((a) => [...a, ...listos]);
+  };
   const subir = async () => {
     if (!archivos.length) return;
     setSubiendo(true);
@@ -48,6 +62,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
       const fd = new FormData();
       archivos.forEach((f) => fd.append("archivos", f, f.name));
       if (ventaId) fd.append("venta_id", ventaId);
+      fd.append("clase", clase);
       if (nota.trim()) fd.append("nota", nota.trim());
       const r = await authFetch(`${API_URL}/api/bandeja`, { method: "POST", body: fd });
       const d = await r.json();
@@ -90,8 +105,14 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
   return (
     <div className="bandeja">
       <div className="panel bandeja-subir">
-        <div className="panel-titulo">Subir documentos de compra</div>
-        <div className="mini" style={{ marginBottom: 10 }}>Sube en el momento la factura, boleta o comprobante: una foto, un PDF o el XML de la factura electrónica (el XML se lee exacto). Después se procesa con calma desde aquí.</div>
+        <div className="panel-titulo">Subir documentos</div>
+        <div className="empresa-btns" style={{ marginBottom: 8 }} role="group" aria-label="Tipo de documento">
+          <button type="button" className={`empresa-btn ${clase === "compra" ? "activo" : ""}`} onClick={() => setClase("compra")}>🧾 Compra o gasto<span className="mini">factura, boleta del proveedor</span></button>
+          <button type="button" className={`empresa-btn ${clase === "venta" ? "activo" : ""}`} onClick={() => setClase("venta")}>✍ Respaldo de venta<span className="mini">cedible o guía firmada por el cliente</span></button>
+        </div>
+        <div className="mini" style={{ marginBottom: 10 }}>{clase === "compra"
+          ? "Sube en el momento la factura, boleta o comprobante: una foto, un PDF o el XML de la factura electrónica (el XML se lee exacto). Después se procesa con calma desde aquí."
+          : "Foto o PDF de la copia cedible o de la guía de despacho con la firma y timbre de recepción del cliente. Queda guardada en la venta como respaldo de que el cliente recibió."}</div>
         <div className="bandeja-botones">
           <button className="btn btn-primary btn-grande-movil" type="button" onClick={() => camara.current?.click()}>📷 Sacar foto</button>
           <button className="btn btn-ghost btn-grande-movil" type="button" onClick={() => galeria.current?.click()}>📁 Fotos, PDF o XML</button>
@@ -100,13 +121,13 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
         </div>
         {archivos.length > 0 && <>
           <ul className="bandeja-archivos">
-            {archivos.map((f, k) => <li key={k}><span>{f.name}</span><span className="mini">{Math.round(f.size / 1024)} KB</span><button className="link" type="button" aria-label={`Quitar ${f.name}`} onClick={() => setArchivos((a) => a.filter((_, j) => j !== k))}>✕</button></li>)}
+            {archivos.map((f, k) => <li key={k}><span>{f.name}</span><span className="mini">{Math.round(f.size / 1024)} KB</span>{esImagen(f) && <button className="link" type="button" title="Recortar el margen o girar la foto" onClick={() => setRecortar(k)}>✂ Encuadrar</button>}<button className="link" type="button" aria-label={`Quitar ${f.name}`} onClick={() => setArchivos((a) => a.filter((_, j) => j !== k))}>✕</button></li>)}
           </ul>
           <div className="fields-row">
             <div className="field"><label htmlFor="bandeja-venta">¿Para qué venta? (opcional)</label>
               <select id="bandeja-venta" value={ventaId} onChange={(e) => setVentaId(e.target.value)}>
                 <option value="">No sé / después</option>
-                {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre}</option>)}
+                {(clase === "venta" ? todasVentas : ventas).map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre}</option>)}
               </select></div>
             <div className="field"><label htmlFor="bandeja-nota">Nota (opcional)</label>
               <input id="bandeja-nota" value={nota} placeholder="Ej: compré en Sodimac para Maule" onChange={(e) => setNota(e.target.value)} /></div>
@@ -125,6 +146,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
             <div key={d.id} className={`bandeja-doc estado-${d.estado}`}>
               <div className="bandeja-doc-tipo" aria-hidden="true">{ICONO[d.tipo] || "DOC"}</div>
               <div className="bandeja-doc-cuerpo">
+                {d.clase === "venta" && <div className="mini" style={{ color: "var(--accent)", fontWeight: 600 }}>✍ Respaldo de venta (cedible / guía firmada)</div>}
                 {d.leyendo ? <div><span className="spinner"></span> Leyendo el documento…</div>
                   : d.proveedor || d.folio ? <div className="bandeja-doc-titulo">{d.proveedor || "Proveedor ?"}{d.folio ? ` · N° ${d.folio}` : ""}</div>
                   : <div className="bandeja-doc-titulo">{d.nombre_archivo}</div>}
@@ -139,7 +161,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
                     {ventas.map((v) => <option key={v.id} value={v.id}>{v.numero} · {v.cliente_nombre}</option>)}
                   </select>}
                 </div>
-                {d.estado === "por_procesar" && (d.venta_id ? (
+                {d.estado === "por_procesar" && d.clase !== "venta" && (d.venta_id ? (
                   <div className="mini">Compra:
                     <select className="select-linea" style={{ marginLeft: 6, maxWidth: 260 }} aria-label="A qué compra de la venta pertenece" value={d.sugerencia?.orden_id || ""} onChange={(e) => cambiar(d, { orden_id: e.target.value || null })}>
                       <option value="">Compra nueva de la venta</option>
@@ -148,14 +170,16 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
                     {d.sugerencia?.orden_id && !d.sugerencia.elegida && <span style={{ color: "var(--accent)" }}> (sugerida)</span>}
                   </div>
                 ) : d.sugerencia?.orden_id ? <div className="mini" style={{ color: "var(--accent)" }}>Compra sugerida: {d.sugerencia.orden_numero}{d.sugerencia.venta_numero ? ` (${d.sugerencia.venta_numero}${d.sugerencia.cliente ? ` · ${d.sugerencia.cliente}` : ""})` : ""} · elige la venta para confirmarla</div> : null)}
-                {d.estado === "procesado" && <div className="mini" style={{ color: "var(--success)" }}>✓ Registrado{d.orden_numero ? ` en ${d.orden_numero}` : d.gasto_id ? " como gasto" : ""} · {d.procesado_por} · {fechaHora(d.procesado_en)}</div>}
+                {d.estado === "procesado" && <div className="mini" style={{ color: "var(--success)" }}>✓ Registrado{d.documento_venta_id ? ` como respaldo de ${d.venta?.numero || "la venta"}${d.folio ? ` (N° ${d.folio})` : ""}` : d.orden_numero ? ` en ${d.orden_numero}` : d.gasto_id ? " como gasto" : ""} · {d.procesado_por} · {fechaHora(d.procesado_en)}</div>}
                 {d.nota && <div className="mini">Nota: {d.nota}</div>}
                 <div className="mini bandeja-doc-quien">Subido por {d.subido_por || "—"} · {fechaHora(d.createdAt)} · {d.nombre_archivo}</div>
               </div>
               <div className="bandeja-doc-acciones">
                 <button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button>
-                {puedeOperar && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar compra</button>}
-                {puedeOperar && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto" onClick={() => setGastoDe(d)}>Es un gasto</button>}
+                {d.estado === "por_procesar" && d.clase === "venta" && <button className="btn btn-primary btn-sm" onClick={() => setAVenta(d)}>Registrar en la venta</button>}
+                {puedeOperar && d.clase !== "venta" && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar compra</button>}
+                {d.clase !== "venta" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Es la cedible o la guía firmada de una venta, no una compra" onClick={() => setAVenta(d)}>Es respaldo de venta</button>}
+                {puedeOperar && d.clase !== "venta" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto" onClick={() => setGastoDe(d)}>Es un gasto</button>}
                 {["por_procesar", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => descartar(d)}>Descartar</button>}
                 {["descartado", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => cambiar(d, { estado: "por_procesar" }, "Vuelve a Por procesar")}>Recuperar</button>}
               </div>
@@ -166,6 +190,9 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
 
       {gastoDe && <GastoVenta ventas={ventas} notify={notify} onClose={() => setGastoDe(null)} onListo={() => { setGastoDe(null); cargar(); }}
         inicial={{ bandeja_id: gastoDe.id, total: gastoDe.total, proveedor: gastoDe.proveedor, documento: gastoDe.folio, fecha: gastoDe.fecha_documento, empresa: gastoDe.empresa, venta_id: gastoDe.venta_id, descripcion: gastoDe.nota || "" }} />}
+      {aVenta && <RegistrarEnVenta doc={aVenta} ventas={todasVentas} notify={notify} onClose={() => setAVenta(null)} onHecho={() => { setAVenta(null); cargar(); }} />}
+      {recortar != null && archivos[recortar] && <Recortador archivo={archivos[recortar]} onClose={() => setRecortar(null)}
+        onListo={(f) => { setArchivos((a) => a.map((x, j) => (j === recortar ? f : x))); setRecortar(null); }} />}
       {procesar && <FacturaCompra bandeja={procesar.doc} orden={procesar.orden} notify={notify} proveedores={proveedores}
         onClose={() => { setProcesar(null); cargar(); }} onListo={() => { setProcesar(null); cargar(); }} />}
     </div>

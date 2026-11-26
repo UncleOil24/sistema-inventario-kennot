@@ -1,4 +1,5 @@
 const router = require("express").Router();
+const multerRespaldo = require("multer")({ storage: require("multer").memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 const { soloAdmin, permite } = require("../middlewares/auth");
 const comercial = permite("comercial");
 const operativo = permite("operativo");
@@ -23,6 +24,7 @@ router.get("/:id/interna-simple", c.internaSimple);
 router.get("/:id/buscar-precio", operativo, c.buscarPrecio);
 router.post("/:id/precio-linea", operativo, c.precioLinea);
 router.post("/:id/linea-comprada", operativo, c.lineaComprada);
+router.post("/:id/respaldo", permite("comercial", "operativo"), multerRespaldo.single("archivo"), c.subirRespaldo);
 router.post("/:id/cambiar-producto", permite("comercial", "operativo"), c.cambiarProducto);
 router.post("/:id/cambiar-proveedor", operativo, c.cambiarProveedorLinea);
 router.post("/:id/generar-ordenes", operativo, c.generarOrdenes);
