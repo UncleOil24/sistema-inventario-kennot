@@ -57,10 +57,20 @@ async function precioDesdeFactura(p, { proveedor, precio, fecha, documento, cant
 
 // POST /api/ordenes-compra/factura/leer   (multipart: archivo, orden_id opcional)
 const leer = handler(async (req, res) => {
-  if (!req.file) throw new ErrorNegocio("Adjunta la factura (PDF o foto)");
+  // Desde la bandeja de documentos: el archivo ya está guardado y leído
+  let file = req.file; let extraido = null; let bandeja = null;
+  if (!file && Number(req.body?.bandeja_id)) {
+    bandeja = await require("../models/DocumentoBandeja").findByPk(Number(req.body.bandeja_id));
+    if (!bandeja) throw new ErrorNegocio("Documento de la bandeja no encontrado", 404);
+    file = { buffer: bandeja.datos, originalname: bandeja.nombre_archivo, mimetype: bandeja.mime };
+    extraido = bandeja.lectura || null;
+    if (!req.body.venta_id && bandeja.venta_id && !req.body.orden_id) req.body.venta_id = bandeja.venta_id;
+  }
+  if (!file) throw new ErrorNegocio("Adjunta la factura (PDF, foto o XML)");
+  req.file = file;
   const { indiceCatalogo } = require("./iaController");
   const { indice, productos } = await indiceCatalogo();
-  const r = await ia.leerDocumentoProveedor(req.file, indice, firma(req));
+  const r = await ia.leerDocumentoProveedor(file, indice, firma(req), extraido);
   const ordenId = Number(req.body?.orden_id) || null;
   const orden = ordenId ? await OrdenCompra.findByPk(ordenId) : null;
   if (ordenId && !orden) throw new ErrorNegocio("Compra no encontrada", 404);
@@ -120,7 +130,7 @@ const leer = handler(async (req, res) => {
 
   // Proveedor y compras pendientes del mismo proveedor (para asociar la factura)
   const e = r.encabezado;
-  const prov = e.proveedor ? await Proveedor.findOne({ where: sequelize.where(sequelize.fn("upper", sequelize.col("nombre")), normProv(e.proveedor)) }) : null;
+  const prov = await require("../services/proveedorDoc").proveedorDeDocumento(e);
   const { Op } = require("sequelize");
   const donde = venta
     ? { estado: "borrador", [Op.or]: [{ venta_id: venta.id }, ...(prov ? [{ proveedor_id: prov.id }] : [])] }
@@ -141,7 +151,7 @@ const leer = handler(async (req, res) => {
   res.json({
     ok: true,
     data: {
-      archivo_token: guardarPendiente(req.file), archivo: req.file.originalname,
+      archivo_token: guardarPendiente(req.file), archivo: req.file.originalname, bandeja_id: bandeja?.id || null,
       encabezado: { ...e, proveedor: prov?.nombre || e.proveedor,
         // A nombre de quién viene el documento: su IVA va a esa empresa
         empresa_documento: empresaCompradora(e.cliente_rut, e.cliente_razon_social, await getParametros()) },
@@ -349,8 +359,15 @@ const registrarFactura = handler(async (req, res) => {
     }
     return { orden, resumen };
   });
+  await marcarProcesado(b.bandeja_id, { orden_id: out.orden?.id || null }, req);
   res.json({ ok: true, data: { orden: out.orden, ...out.resumen } });
 });
+
+// El documento de la bandeja con que se registró queda procesado (con su compra o gasto)
+async function marcarProcesado(id, datos, req) {
+  if (!Number(id)) return;
+  await require("../models/DocumentoBandeja").update({ estado: "procesado", ...datos, procesado_por: firma(req), procesado_en: new Date() }, { where: { id: Number(id) } }).catch(() => {});
+}
 
 // POST /api/ordenes-compra/factura/gasto
 // { archivo_token, venta_id, tipo, descripcion, proveedor, documento, tipo_documento, fecha, empresa, total, iva }
@@ -381,6 +398,7 @@ const registrarGasto = handler(async (req, res) => {
     await registrar({ usuario, tabla: "gastos", registro_id: gasto.id, campo: "creado", despues: `${gasto.descripcion} ${pesos(total)}`, motivo: venta ? `Gasto de la venta ${venta.numero}` : "Gasto" }, t);
     return gasto;
   });
+  await marcarProcesado(b.bandeja_id, { gasto_id: g.id }, req);
   res.status(201).json({ ok: true, data: g });
 });
 

@@ -484,7 +484,7 @@ const leerProveedor = handler(async (req, res) => {
   const cot = await Cotizacion.findByPk(req.params.id);
   if (!cot) throw new ErrorNegocio("Cotización no encontrada", 404);
   if (!req.file) throw new ErrorNegocio("Adjunta la cotización del proveedor");
-  const doc = await ia.extraerDocumentoProveedor(req.file, firma(req));
+  const doc = await ia.extraerDocumento(req.file, firma(req));
   // Se calza cada línea del proveedor contra las líneas de esta cotización (no contra todo el catálogo)
   const items = cot.items || [];
   const indice = ia.crearIndice(items.map((i, k) => ({ id: k + 1, nombre: `${i.descripcion_cliente || ""} ${i.nombre || ""}`.trim(), unidad: i.unidad })));

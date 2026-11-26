@@ -21,6 +21,7 @@ import Login from "./erp/Login";
 import { Avisos } from "./erp/ui";
 import Usuarios from "./erp/Usuarios";
 import CambiarPassword from "./erp/CambiarPassword";
+import Bandeja from "./erp/Bandeja";
 
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
@@ -290,6 +291,29 @@ const styles = `
     .fields-row { grid-template-columns: 1fr; }
   }
 
+  /* ---------- Bandeja de documentos ---------- */
+  .bandeja { max-width: 980px; margin: 0 auto; }
+  .bandeja-botones { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn-grande-movil { min-height: 46px; font-size: 13px; padding: 10px 18px; }
+  .bandeja-archivos { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .bandeja-archivos li { display: flex; gap: 10px; align-items: center; justify-content: space-between; background: var(--surface2); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+  .bandeja-archivos li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .bandeja-lista { display: flex; flex-direction: column; gap: 8px; }
+  .bandeja-doc { display: flex; gap: 12px; align-items: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .bandeja-doc.estado-duplicado { border-color: var(--danger); }
+  .bandeja-doc.estado-procesado { opacity: 0.85; }
+  .bandeja-doc-tipo { flex-shrink: 0; width: 46px; height: 46px; border-radius: 8px; background: rgba(var(--accent-rgb),0.12); color: var(--accent); font-family: var(--mono); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .bandeja-doc-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .bandeja-doc-titulo { font-weight: 600; font-size: 14px; }
+  .bandeja-doc-quien { color: var(--text3); overflow-wrap: anywhere; }
+  .bandeja-doc-acciones { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  @media (max-width: 640px) {
+    .bandeja-doc { flex-wrap: wrap; }
+    .bandeja-doc-acciones { flex-direction: row; width: 100%; }
+    .bandeja-doc-acciones .btn { flex: 1; min-height: 42px; }
+    .btn-grande-movil { width: 100%; }
+  }
+
   /* ---------- Ventas y cotizaciones ---------- */
   .col-desc { min-width: 300px; }
   .textarea { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 12px; font-family: var(--sans); font-size: 12px; color: var(--text); outline: none; width: 100%; resize: vertical; }
@@ -371,6 +395,20 @@ const styles = `
     .cuadro-imprimible { position: absolute; left: 0; top: 0; width: 100%; }
     .cuadro-imprimible button.link, .cuadro-imprimible .btn { display: none; }
   }
+  /* ---------- Celular y tablet (al final, para que mande sobre lo anterior) ---------- */
+  @media (max-width: 768px) {
+    .header { gap: 8px; }
+    .header .deptos-nav { overflow-x: auto; flex-wrap: nowrap; min-width: 0; flex: 1 1 auto; }
+    .header .depto-btn { white-space: nowrap; font-size: 11px; padding: 5px 8px; flex-shrink: 0; }
+    .secciones-nav { flex-wrap: nowrap; overflow-x: auto; padding: 6px 1rem; -webkit-overflow-scrolling: touch; }
+    .secciones-nav .nav-btn { white-space: nowrap; flex-shrink: 0; }
+    .modal-overlay .modal { max-width: 100vw !important; }
+    .modal-overlay { padding: 6px; }
+  }
+  @media (max-width: 520px) {
+    .header .depto-btn { font-size: 0; padding: 6px 10px; }
+    .header .depto-btn .depto-num { font-size: 13px; margin: 0; }
+  }
 `;
 
 // Raíz: decide entre pantalla de login y el sistema
@@ -417,9 +455,9 @@ const BORRADOR_VACIO = { cliente_id: "", tipo_precio: "convenio", nombre_cotizac
 // Departamentos (Estructura del sistema, 4-nov-2026). Cada uno con sus secciones; cada persona ve solo el suyo y gerencia todo.
 const DEPTOS = [
   { id: "comercial", nombre: "Comercial", area: "Área Comercial", roles: ["comercial", "usuario"], secciones: [
-    ["inicio", "Inicio"], ["licitaciones", "Merc. Público"], ["cotizaciones", "Cotizaciones"], ["ventas", "Ventas"], ["facturacion", "Facturación"], ["clientes", "Clientes"], ["catalogo", "Catálogo"]] },
+    ["inicio", "Inicio"], ["licitaciones", "Merc. Público"], ["cotizaciones", "Cotizaciones"], ["ventas", "Ventas"], ["facturacion", "Facturación"], ["bandeja", "📥 Documentos"], ["clientes", "Clientes"], ["catalogo", "Catálogo"]] },
   { id: "operativo", nombre: "Operativo", area: "Área Operativa", roles: ["operativo"], secciones: [
-    ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
+    ["inicio", "Inicio"], ["ventas", "Ventas por ejecutar"], ["compras", "Compras"], ["bandeja", "📥 Documentos"], ["despachos", "Despachos"], ["proveedores", "Proveedores"], ["catalogo", "Catálogo"]] },
   { id: "finanzas", nombre: "Finanzas y Control", area: "Área Finanzas y Control", roles: [], secciones: [
     ["inicio", "Resumen"], ["produccion", "Producción"], ["cobranza", "Cobranza"], ["por-pagar", "Por pagar"], ["iva", "IVA"], ["ventas", "Ventas y cobros"], ["gastos", "Gastos"], ["reportes", "Reportes"]] },
 ];
@@ -452,6 +490,33 @@ function App({ usuario: usuarioInicial, onLogout }) {
   const [ventaAbrir, setVentaAbrir] = useState(null);
   const [licAbrir, setLicAbrir] = useState(null); // proceso de Mercado Público a abrir directo (desde Inicio)
   const [ordenAbrir, setOrdenAbrir] = useState(null);
+  // Bandeja de documentos: cuántos hay por procesar y archivos compartidos desde otra app del celular
+  const [porProcesar, setPorProcesar] = useState(0);
+  const [compartidos, setCompartidos] = useState(null);
+  useEffect(() => { api("/bandeja/resumen").then((r) => setPorProcesar(r.por_procesar || 0)).catch(() => {}); }, [view]);
+  useEffect(() => {
+    if (!/[?&]compartido=1/.test(window.location.search) || !("caches" in window)) return;
+    (async () => {
+      try {
+        const cache = await caches.open("compartidos");
+        const claves = await cache.keys();
+        const files = [];
+        for (const req of claves) {
+          const r = await cache.match(req);
+          const nombre = decodeURIComponent(r.headers.get("X-Nombre") || "documento");
+          files.push(new File([await r.blob()], nombre, { type: r.headers.get("Content-Type") || "application/octet-stream" }));
+          await cache.delete(req);
+        }
+        if (files.length) {
+          setCompartidos(files);
+          const d = deptos.find((x) => x.secciones.some(([sid]) => sid === "bandeja"));
+          if (d) setDepto(d.id);
+          setView("bandeja");
+        }
+      } catch { /* sin archivos */ }
+      window.history.replaceState(null, "", window.location.pathname);
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showNotif = useCallback((msg, type = "success") => {
     setNotif({ msg, type });
@@ -544,6 +609,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
           {dep.secciones.map(([sid, texto]) => (
             <button key={sid} className={`nav-btn ${seccionActiva === sid ? "active" : ""}`} onClick={() => { if (sid === "cotizaciones") { setFiltroCot("borrador"); setView(borrador.items.length ? "cotizar" : "cotizaciones"); return; } setView(sid); }}>
               {texto}{sid === "cotizaciones" && borrador.items.length > 0 && <span className="badge" title="Productos en la cotización que estás armando">{borrador.items.length}</span>}
+              {sid === "bandeja" && porProcesar > 0 && <span className="badge" title="Documentos por procesar">{porProcesar}</span>}
             </button>
           ))}
           {(view === "config" || view === "usuarios") && <span className="nav-btn active">{view === "config" ? "Configuración" : "Usuarios"}</span>}
@@ -588,6 +654,7 @@ function App({ usuario: usuarioInicial, onLogout }) {
             <Compras notify={showNotif} esAdmin={esGerencia} puedeOperar={puedeOperar} proveedores={proveedores} onPreciosCambio={invalidarProductos}
               abrirOrdenId={ordenAbrir} onAbierta={() => setOrdenAbrir(null)} />
           )}
+          {view === "bandeja" && <Bandeja notify={showNotif} puedeOperar={puedeOperar} proveedores={proveedores} compartidos={compartidos} onCompartidosUsados={() => setCompartidos(null)} />}
           {view === "proveedores" && (
             <Proveedores esAdmin={esGerencia} proveedores={proveedores} loading={loadingProveedores} recargar={fetchProveedores} notify={showNotif} />
           )}

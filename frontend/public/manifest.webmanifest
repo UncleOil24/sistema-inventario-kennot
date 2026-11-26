@@ -1,0 +1,27 @@
+{
+  "name": "SyncroGes-Control · KenTacs",
+  "short_name": "KenTacs",
+  "description": "Sistema SyncroGes-Control de KenTacs: ventas, compras y documentos.",
+  "lang": "es-CL",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F3F4F6",
+  "theme_color": "#2B3038",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "/compartir",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "titulo",
+      "text": "texto",
+      "files": [{ "name": "archivos", "accept": ["image/*", "application/pdf", ".pdf", ".xml", "text/xml", "application/xml"] }]
+    }
+  }
+}
