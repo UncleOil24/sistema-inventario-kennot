@@ -162,9 +162,10 @@ const getVentas = handler(async (req, res) => {
     c.ordenes += 1; if (o.estado === "recibida") c.recibidas += 1;
     compras.set(o.venta_id, c);
   }
+  const resp = await require("../services/respaldoVenta").respaldos(data);
   res.json({ ok: true, data: data.map((v) => {
     const c = compras.get(v.id) || { ordenes: 0, recibidas: 0 };
-    return { ...verVenta(req, v), tiene_compras: c.ordenes > 0, compras: c };
+    return { ...verVenta(req, v), tiene_compras: c.ordenes > 0, compras: c, respaldo: resp.get(v.id) || null };
   }) });
 });
 
@@ -204,7 +205,10 @@ const getVenta = handler(async (req, res) => {
   const facturas = await Factura.findAll({ where: { venta_id: venta.id }, order: [["fecha", "ASC"], ["id", "ASC"]] });
   const ocs = await OrdenCompra.findAll({ where: { venta_id: venta.id, estado: { [Op.ne]: "anulada" } }, attributes: ["id", "numero", "proveedor_nombre", "estado"], raw: true });
   const historial = await HistorialVenta.findAll({ where: { venta_id: venta.id }, order: [["createdAt", "ASC"], ["id", "ASC"]], attributes: ["id", "tipo", "texto", "motivo", "por", "createdAt"], raw: true });
-  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, facturas, historial, compras: { ordenes: ocs.length, recibidas: ocs.filter((o) => o.estado === "recibida").length, detalle: ocs }, ...extra } });
+  const respaldo = (await require("../services/respaldoVenta").respaldos([venta])).get(venta.id);
+  const DocumentoVenta = require("../models/DocumentoVenta");
+  const documentos = await DocumentoVenta.findAll({ where: { venta_id: venta.id }, attributes: ["id", "tipo", "folio", "fecha", "monto", "nombre_archivo", "createdAt", "creado_por"], order: [["id", "ASC"]] });
+  res.json({ ok: true, data: { ...verVenta(req, venta), pagos, facturas, historial, respaldo, documentos, compras: { ordenes: ocs.length, recibidas: ocs.filter((o) => o.estado === "recibida").length, detalle: ocs }, ...extra } });
 });
 
 // Lo que pidió el cliente (descripción de la cotización); si no hay, el nombre del catálogo
@@ -1275,6 +1279,20 @@ const lineaComprada = handler(async (req, res) => {
   res.json({ ok: true, data: r });
 });
 
+// POST /api/ventas/:id/respaldo  (multipart: archivo, tipo, folio, fecha)  — cedible o guía recepcionada, acta…
+const subirRespaldo = handler(async (req, res) => {
+  const { TIPOS_RESPALDO } = require("../services/respaldoVenta");
+  const v = await Venta.findByPk(req.params.id, { attributes: ["id", "numero"] });
+  if (!v) throw new ErrorNegocio("Venta no encontrada", 404);
+  if (!req.file) throw new ErrorNegocio("Adjunta el documento (foto o PDF)");
+  const tipo = TIPOS_RESPALDO[req.body?.tipo] ? req.body.tipo : "otro_respaldo";
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.fecha || "") ? req.body.fecha : null;
+  const d = await require("../models/DocumentoVenta").create({ venta_id: v.id, tipo, folio: String(req.body?.folio || "").trim().slice(0, 40) || null, fecha,
+    nombre_archivo: String(req.file.originalname || "respaldo").slice(0, 200), mime: req.file.mimetype || "application/octet-stream", datos: req.file.buffer, creado_por: firma(req) });
+  await HistorialVenta.anotar(v, "paso", `${TIPOS_RESPALDO[tipo]}${d.folio ? ` N° ${d.folio}` : ""} subida`, req, null);
+  res.status(201).json({ ok: true, data: { id: d.id } });
+});
+
 // GET /api/ventas/:id/buscar-precio?indice=&q=   (cuadro de compra)
 // Precios de hoy del producto de la línea (todos sus proveedores) y de productos parecidos del catálogo,
 // por si el precio quedó cargado en otro producto (otra forma de escribirlo)
@@ -1355,5 +1373,5 @@ module.exports = {
   aceptarVenta, confirmarVenta, despacharVenta, entregarVenta, retrocederEtapa, agregarFactura, quitarFactura, listarFacturas, recalcularFacturas, montoConIva, cerrarFacturacion,
   verVenta, SIN_PROVEEDOR,
   getVentas, getVenta, crearVenta, ventaDesdeCotizacion, anularVenta, registrarCobro, actualizarDatos,
-  getCuadroCompra, marcarStock, lineaComprada, solicitudCotizacion, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
+  getCuadroCompra, marcarStock, lineaComprada, subirRespaldo, solicitudCotizacion, cuadroExcel, agruparDatos, agruparExcel, agruparOrdenes, cambiarProveedorLinea, generarOrdenes, asignarProveedores, crearOrdenVenta, descartarBorradores, pedidoExcel,
 };

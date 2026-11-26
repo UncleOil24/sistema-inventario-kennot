@@ -73,11 +73,13 @@ const subir = handler(async (req, res) => {
   const usuario = firma(req);
   const ventaId = Number(req.body?.venta_id) || null;
   const nota = String(req.body?.nota || "").trim().slice(0, 500) || null;
+  // Respaldo de venta (cedible o guía firmada por el cliente): no se lee con IA, solo se guarda para asignarlo a la venta
+  const clase = req.body?.clase === "venta" ? "venta" : "compra";
   const out = [];
   for (const f of files) {
     const nombre = String(f.originalname || "documento").slice(0, 200);
     // XML: uno por cada factura que traiga; se leen al tiro (datos exactos, sin IA)
-    const partes = tipoDe(f) === "xml"
+    const partes = clase === "compra" && tipoDe(f) === "xml"
       ? (() => { try { return dte.leerDTE(f.buffer).map((d, n, arr) => ({ buf: arr.length > 1 ? Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n<DTE version="1.0"><Documento>${d.xml}</Documento></DTE>`, "utf8") : f.buffer, lectura: d.datos, nombre: arr.length > 1 ? `${nombre.replace(/\.xml$/i, "")}_${d.datos.encabezado.numero_documento || n + 1}.xml` : nombre })); }
         catch (e) { out.push({ nombre, error: e.message }); return []; } })()
       : [{ buf: f.buffer, lectura: null, nombre }];
@@ -87,9 +89,10 @@ const subir = handler(async (req, res) => {
       if (igual) { out.push({ nombre: p.nombre, repetido: true, id: igual.id, mensaje: `Ya estaba en la bandeja (subido por ${igual.subido_por || "—"})` }); continue; }
       const doc = await DocumentoBandeja.create({
         nombre_archivo: p.nombre, mime: p.lectura ? "application/xml" : f.mimetype || "application/octet-stream", tipo: p.lectura ? "xml" : tipoDe(f),
-        tamano: p.buf.length, hash, datos: p.buf, venta_id: ventaId, nota, subido_por: usuario, leyendo: !p.lectura,
+        tamano: p.buf.length, hash, datos: p.buf, venta_id: ventaId, nota, subido_por: usuario, leyendo: clase === "compra" && !p.lectura, clase,
       });
-      if (p.lectura) await completar(doc, p.lectura); else leerEnFondo(doc.id, usuario);
+      if (clase === "venta") { /* se registra a mano en la venta */ }
+      else if (p.lectura) await completar(doc, p.lectura); else leerEnFondo(doc.id, usuario);
       out.push({ nombre: p.nombre, id: doc.id });
     }
   }
@@ -176,4 +179,24 @@ const releer = handler(async (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { subir, listar, resumen, archivo, lectura, actualizar, releer };
+// POST /api/bandeja/:id/a-venta  { venta_id, tipo, folio, fecha } — guarda el documento como respaldo de la venta
+const aVenta = handler(async (req, res) => {
+  const { TIPOS_RESPALDO } = require("../services/respaldoVenta");
+  const DocumentoVenta = require("../models/DocumentoVenta");
+  const HistorialVenta = require("../models/HistorialVenta");
+  const d = await DocumentoBandeja.findByPk(req.params.id);
+  if (!d) throw new ErrorNegocio("Documento no encontrado", 404);
+  if (d.documento_venta_id) throw new ErrorNegocio("Este documento ya se registró en una venta");
+  const b = req.body || {};
+  const v = await Venta.findByPk(Number(b.venta_id) || d.venta_id || 0);
+  if (!v) throw new ErrorNegocio("Elige la venta a la que pertenece");
+  const tipo = TIPOS_RESPALDO[b.tipo] ? b.tipo : "otro_respaldo";
+  const folio = String(b.folio || "").trim().slice(0, 40) || null;
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(b.fecha || "") ? b.fecha : null;
+  const dv = await DocumentoVenta.create({ venta_id: v.id, tipo, folio, fecha, nombre_archivo: d.nombre_archivo, mime: d.mime, datos: d.datos, creado_por: firma(req) });
+  await d.update({ venta_id: v.id, clase: "venta", documento_venta_id: dv.id, estado: "procesado", procesado_por: firma(req), procesado_en: new Date(), folio: folio || d.folio, leyendo: false });
+  await HistorialVenta.anotar(v, "paso", `${TIPOS_RESPALDO[tipo]}${folio ? ` N° ${folio}` : ""} registrada desde Documentos`, req, null);
+  res.json({ ok: true, data: { documento_venta_id: dv.id, venta_numero: v.numero } });
+});
+
+module.exports = { aVenta, subir, listar, resumen, archivo, lectura, actualizar, releer };
