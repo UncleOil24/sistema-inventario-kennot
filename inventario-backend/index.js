@@ -13,6 +13,7 @@ require("./src/models/Cotizacion");
 require("./src/models/Cliente");
 require("./src/models/Proveedor");
 require("./src/models/OrdenCompra");
+require("./src/models/RegistroFactura");
 require("./src/models/Venta");
 require("./src/models/DocumentoVenta");
 require("./src/models/HistorialVenta");

@@ -489,7 +489,8 @@ export function prepararLineas(lineas, items, productos) {
   });
 }
 
-export function PresentacionLinea({ l, items = [], complementos = [], productos, onChange }) {
+// usados: clave → [{ fila, cant }] de las OTRAS filas (para marcar lo ya elegido y no repetirlo)
+export function PresentacionLinea({ l, items = [], complementos = [], productos, onChange, usados = {} }) {
   const f = factorDe(l);
   const u = l.producto ? UNIDAD_BASE(l.producto.unidad) : "";
   const s = l.factor_sugerido;
@@ -516,7 +517,15 @@ export function PresentacionLinea({ l, items = [], complementos = [], productos,
         }}>
           <option value="">— como está —</option>
           {[...new Set(items.map((x) => x.grupo || ""))].map((g) => {
-            const op = items.filter((x) => (x.grupo || "") === g).map((x) => <option key={x.clave} value={x.clave}>{x.etiqueta}: {x.nombre} · {x.cantidad} {x.unidad || ""}{x.en_compra?.length ? ` (pedido en ${x.en_compra.map((c) => c.numero).join(", ")})` : ""}</option>);
+            // Lo ya elegido en otras filas: completo → bloqueado (al final); a medias → "quedan N"
+            const info = (x) => { const u = usados[x.clave] || []; const cub = u.reduce((s2, z) => s2 + z.cant, 0); return { u, quedan: Math.round((Number(x.cantidad) - cub) * 1000) / 1000 }; };
+            const op = items.filter((x) => (x.grupo || "") === g)
+              .map((x) => ({ x, ...info(x) }))
+              .sort((a, b) => (a.x.clave === l.para ? -1 : b.x.clave === l.para ? 1 : (a.u.length && a.quedan <= 0) - (b.u.length && b.quedan <= 0)))
+              .map(({ x, u, quedan }) => {
+                const lleno = u.length > 0 && quedan <= 0 && x.clave !== l.para;
+                return <option key={x.clave} value={x.clave} disabled={lleno}>{lleno ? "✓ " : ""}{x.etiqueta}: {x.nombre} · {x.cantidad} {x.unidad || ""}{x.en_compra?.length ? ` (pedido en ${x.en_compra.map((c) => c.numero).join(", ")})` : ""}{lleno ? ` — ya elegida (fila ${u.map((z) => z.fila).join(", ")})` : u.length ? ` (quedan ${quedan})` : ""}</option>;
+              });
             return g ? <optgroup key={g} label={g}>{op}</optgroup> : op;
           })}
           {complementos.length > 0 && <optgroup label="━━ ★ COMPLEMENTO DE… (producto EXTRA que va con esa línea, sin precio al cliente) ━━">
@@ -724,4 +733,53 @@ export function GastoVenta({ inicial = {}, ventas = [], notify, onClose, onListo
       {g.tipo_documento === "factura" && <EmpresaCompra valor={g.empresa || venta?.empresa || ""} detectada={inicial.empresa || null} ventaEmpresa={venta?.empresa || null} conDocumento={!!inicial.bandeja_id} onChange={(empresa) => set({ empresa })} />}
     </Modal>
   );
+}
+
+// "↶ Deshacer registro" de una factura de compra: vuelve compras, ventas, precios y gastos a como estaban y deja el
+// documento otra vez por procesar en la bandeja. Se busca por la compra (orden_id) o por el documento de la bandeja.
+export function DeshacerRegistro({ orden_id, bandeja_id, notify, onHecho, className = "btn btn-ghost" }) {
+  const [reg, setReg] = useState(null);
+  const [abierto, setAbierto] = useState(false);
+  const [motivo, setMotivo] = useState("");
+  const [confirma, setConfirma] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    const q = orden_id ? `orden_id=${orden_id}` : `bandeja_id=${bandeja_id}`;
+    api(`/ordenes-compra/registros?${q}`).then((r) => vivo && setReg(r && r.id ? r : null)).catch(() => {});
+    return () => { vivo = false; };
+  }, [orden_id, bandeja_id]);
+  if (!reg) return null;
+  const hacer = async () => {
+    if (!motivo.trim()) return notify("Escribe por qué se deshace (ej. \"repartí mal el pegamento\")", "danger");
+    setEnviando(true);
+    try {
+      await api(`/ordenes-compra/registros/${reg.id}/deshacer`, { method: "POST", body: { motivo, confirmar: confirma } });
+      notify("Registro deshecho: el documento quedó otra vez por procesar en Documentos", "success");
+      setAbierto(false); setReg(null); onHecho?.();
+    } catch (e) { notify(e.message, "danger"); } finally { setEnviando(false); }
+  };
+  return <>
+    <button className={className} title="Deshacer el registro de esta factura para corregirla y registrarla otra vez" onClick={() => setAbierto(true)}>↶ Deshacer registro</button>
+    {abierto && <Modal titulo={`Deshacer registro · factura ${reg.folio} · ${reg.proveedor}`} onClose={() => setAbierto(false)} ancho={560}
+      footer={<><button className="btn btn-ghost" onClick={() => setAbierto(false)}>Cancelar</button>
+        <button className="btn btn-danger" disabled={enviando || reg.bloqueos.length > 0 || (reg.avisos.length > 0 && !confirma)} onClick={hacer}>{enviando ? "Deshaciendo..." : "Deshacer registro"}</button></>}>
+      <div className="mini" style={{ marginBottom: 8 }}>Registrada por {reg.creado_por || "—"}{reg.total ? ` · total ${fmt(reg.total)}` : ""}.</div>
+      <div style={{ fontSize: 13, marginBottom: 8 }}>Todo vuelve a como estaba antes de esta factura:
+        <ul style={{ margin: "4px 0 0 18px" }}>
+          {reg.compras.length > 0 && <li>Compras: {reg.compras.join(", ")} (las que creó se anulan; las que recibió quedan pendientes otra vez)</li>}
+          {reg.ventas.length > 0 && <li>Ventas: {reg.ventas.join(", ")} (sus líneas vuelven como estaban)</li>}
+          {reg.gastos > 0 && <li>{reg.gastos} gasto(s) creados desde la factura se eliminan</li>}
+          <li>Los precios que guardó en el catálogo se quitan</li>
+          <li>El documento queda en <b>Documentos → Por procesar</b>, para corregirlo y registrarlo otra vez sin volver a subirlo</li>
+        </ul>
+      </div>
+      {reg.bloqueos.map((b, k) => <div key={k} className="aviso" style={{ color: "var(--danger)" }}>{b}</div>)}
+      {reg.avisos.length > 0 && <label className="aviso" style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+        <input type="checkbox" checked={confirma} onChange={(e) => setConfirma(e.target.checked)} />
+        <span>{reg.avisos.join(" ")} Deshacer igual.</span></label>}
+      <div className="field"><label>¿Por qué se deshace?</label>
+        <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej: el pegamento era para dos ventas" /></div>
+    </Modal>}
+  </>;
 }

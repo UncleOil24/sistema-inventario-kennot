@@ -356,6 +356,23 @@ const styles = `
   .sugerencia-equivalente { margin-top: 4px; padding: 3px 6px; border-left: 3px solid var(--accent); background: rgba(var(--accent-rgb),0.06); border-radius: 3px; line-height: 1.35; }
   .simulador { margin-top: 10px; padding: 8px 10px; border: 1.5px solid rgba(var(--accent-rgb),0.5); border-radius: 8px; background: rgba(var(--accent-rgb),0.04); }
   .simulador .chip-fuera { text-decoration: line-through; opacity: 0.55; }
+  .sim-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 1.6fr); gap: 10px; align-items: start; }
+  .sim-provs { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); max-height: 460px; overflow-y: auto; }
+  .sim-provs-head { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; padding: 6px 8px; font-size: 11px; color: var(--text3); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+  .sim-provs-head .activo { font-weight: 700; text-decoration: underline; }
+  .sim-prov { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  .sim-prov.sel { background: rgba(var(--accent-rgb),0.10); box-shadow: inset 3px 0 0 var(--accent); }
+  .sim-prov.fuera .sim-prov-nombre b { text-decoration: line-through; opacity: .55; }
+  .sim-sacar { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text3); white-space: nowrap; }
+  .sim-prov-nombre { flex: 1; text-align: left; background: none; border: none; padding: 4px; cursor: pointer; font: inherit; display: flex; flex-direction: column; min-width: 0; }
+  .sim-prov-nombre b { font-size: 12.5px; }
+  .sim-caro { color: var(--danger); } .sim-ok { color: var(--success); } .sim-solo { color: #8a5a00; font-weight: 600; }
+  .sim-detalle { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 8px; min-height: 120px; max-height: 460px; overflow-y: auto; }
+  .sim-detalle-titulo { margin-bottom: 6px; }
+  .sim-tabla tr.sim-no-gana td { color: var(--text3); }
+  .sim-escenarios { margin-top: 8px; } .sim-escenarios summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+  .fila-actual td { background: rgba(var(--accent-rgb),0.10); font-weight: 600; }
+  @media (max-width: 760px) { .sim-grid { grid-template-columns: 1fr; } .sim-provs, .sim-detalle { max-height: none; } }
   .sim-resultado { margin-top: 8px; font-size: 12px; }
   .componente-linea { font-size: 11px; color: #555; display: flex; align-items: center; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
   .fila-separador td { height: 10px; padding: 0 !important; background: transparent !important; border: none !important; }
@@ -487,6 +504,26 @@ const styles = `
     .main { padding-bottom: 70px; }
     .btn { min-height: 36px; }
     .chip { padding: 7px 12px; }
+  }
+  /* Avance de la venta por etapas */
+  .avance-venta { list-style: none; display: flex; margin: 4px 0 10px; padding: 0; gap: 0; }
+  .avance-venta li { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; text-align: center; position: relative; font-size: 11px; color: var(--text3); padding: 0 2px; }
+  .avance-venta li::before { content: ""; position: absolute; top: 13px; left: -50%; width: 100%; height: 3px; background: #d5dbe0; z-index: 0; }
+  .avance-venta li:first-child::before { display: none; }
+  .avance-venta li.hecho::before, .avance-venta li.actual::before { background: #2f9e5b; }
+  .avance-punto { position: relative; z-index: 1; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #e6eaee; color: #6b7680; font-weight: 700; margin-bottom: 4px; border: 2px solid #d5dbe0; }
+  .avance-venta li.hecho .avance-punto { background: #e3f4e8; color: #1e7b3c; border-color: #2f9e5b; }
+  .avance-venta li.hecho { color: #1e7b3c; }
+  .avance-venta li.actual .avance-punto { background: #2f9e5b; color: #fff; border-color: #2f9e5b; box-shadow: 0 0 0 4px #2f9e5b33; }
+  .avance-venta li.actual { color: #14532d; font-weight: 700; }
+  .avance-venta em { font-style: normal; font-weight: 400; display: block; font-size: 10px; }
+  .avance-falta { color: #b42318; }
+  @media (max-width: 640px) {
+    .avance-venta { flex-direction: column; gap: 6px; }
+    .avance-venta li { flex-direction: row; text-align: left; gap: 8px; }
+    .avance-venta li::before { display: none; }
+    .avance-punto { margin: 0; width: 24px; height: 24px; flex: 0 0 auto; }
+    .avance-venta em { display: inline; }
   }
 `;
 

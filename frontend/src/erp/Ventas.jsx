@@ -417,7 +417,7 @@ function DetalleVenta({ venta, modo, esAdmin, verCompras, verCobros, puedeOperar
         </div>
       )}
       <HistorialVenta venta={venta} />
-      <RespaldoVenta venta={venta} puede={puedeOperar || puedeVender || esAdmin} notify={notify} onCambio={onCambio} />
+      <RespaldoVenta venta={venta} puede={puedeOperar} notify={notify} onCambio={onCambio} />
       {(modo !== "operativo" || venta.facturas?.length > 0) && <PanelFacturas venta={venta} puedeVender={editaDatos || (puedeVender && modo === "finanzas" && esAdmin)} notify={notify} onCambio={onCambio} />}
       <div className="table-wrap">
         <table className="table table-compacta">

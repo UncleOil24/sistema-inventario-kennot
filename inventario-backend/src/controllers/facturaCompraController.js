@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { Op } = require("sequelize");
 const { firma, esGerencia } = require("../middlewares/auth");
 const sequelize = require("../../config/database");
 const OrdenCompra = require("../models/OrdenCompra");
@@ -15,6 +16,7 @@ const { recalcular, origenDe, normProv, registrar } = require("../services/preci
 const { unidadDeProducto } = require("../services/unidades");
 const ia = require("../services/ia");
 const { pendientesPorProducto, repartoInicial, dividir } = require("../services/repartoCompra");
+const regFactura = require("../services/registroFactura");
 
 // "Subir factura de compra" (Operativo): Claude lee la factura del proveedor, se compara con nuestra compra
 // (C-0001...) o se crea una compra nueva, y los precios entran al catálogo con la fecha de la factura.
@@ -131,7 +133,7 @@ const leer = handler(async (req, res) => {
   // Proveedor y compras pendientes del mismo proveedor (para asociar la factura)
   const e = r.encabezado;
   const prov = await require("../services/proveedorDoc").proveedorDeDocumento(e);
-  const { Op } = require("sequelize");
+
   const donde = venta
     ? { estado: "borrador", [Op.or]: [{ venta_id: venta.id }, ...(prov ? [{ proveedor_id: prov.id }] : [])] }
     : prov ? { proveedor_id: prov.id, estado: "borrador" } : null;
@@ -150,6 +152,16 @@ const leer = handler(async (req, res) => {
   const ventaTitulo = venta || (orden?.venta_id ? await Venta.findByPk(orden.venta_id, { attributes: ["id", "numero", "empresa", "cliente_nombre", "items"] }) : null);
   // Otras compras de esa venta: para avisar si una línea de la venta ya está pedida en otra compra
   const otrasCompras = ventaTitulo ? await OrdenCompra.findAll({ where: { venta_id: ventaTitulo.id, estado: { [Op.ne]: "anulada" }, ...(orden ? { id: { [Op.ne]: orden.id } } : {}) }, attributes: ["id", "numero", "estado", "items"] }) : [];
+  // Compras abiertas de esta venta y de este proveedor (para elegir en "Es para:" línea por línea)
+  const condAbiertas = [...(ventaTitulo ? [{ venta_id: ventaTitulo.id }] : []), ...(prov ? [{ proveedor_id: prov.id }] : [])];
+  const abiertas = condAbiertas.length ? await OrdenCompra.findAll({ where: { estado: { [Op.notIn]: ["anulada", "recibida"] }, [Op.or]: condAbiertas, ...(orden ? { id: { [Op.ne]: orden.id } } : {}) },
+    attributes: ["id", "numero", "estado", "venta_id", "proveedor_id", "proveedor_nombre", "items"], order: [["id", "DESC"]], limit: 25 }) : [];
+  const ventasAb = abiertas.length ? await Venta.findAll({ where: { id: [...new Set(abiertas.map((o) => o.venta_id).filter(Boolean))] }, attributes: ["id", "numero", "cliente_nombre"], raw: true }) : [];
+  const compras_abiertas = abiertas.filter((o) => (o.items || []).length).map((o) => {
+    const v = ventasAb.find((x) => x.id === o.venta_id);
+    return { id: o.id, numero: o.numero, estado: o.estado, proveedor: o.proveedor_nombre, es_proveedor: !!prov && o.proveedor_id === prov.id, venta_id: o.venta_id, venta: v ? `${v.numero} · ${v.cliente_nombre || ""}`.trim() : "sin venta",
+      items: (o.items || []).map((it, k) => ({ k, producto_id: it.producto_id, nombre: it.nombre, unidad: it.unidad, cantidad: Number(it.cantidad) })) };
+  });
   const enCompra = (pid) => otrasCompras.filter((o) => (o.items || []).some((it) => Number(it.producto_id) === Number(pid))).map((o) => ({ numero: o.numero, recibida: o.estado === "recibida" }));
   res.json({
     ok: true,
@@ -159,7 +171,7 @@ const leer = handler(async (req, res) => {
         // A nombre de quién viene el documento: su IVA va a esa empresa
         empresa_documento: empresaCompradora(e.cliente_rut, e.cliente_razon_social, await getParametros()) },
       proveedor_existente: prov ? { id: prov.id, nombre: prov.nombre } : null,
-      control: r.control, truncado: r.truncado, lineas, faltan, sugeridas, ya_registrada: yaRegistrada,
+      control: r.control, truncado: r.truncado, lineas, faltan, sugeridas, ya_registrada: yaRegistrada, compras_abiertas,
       totales: { neto, iva: Math.round(neto * 0.19), total: neto + Math.round(neto * 0.19) },
       orden: orden ? { id: orden.id, numero: orden.numero, total: Number(orden.total), estado: orden.estado, documento: orden.documento } : null,
       venta: ventaTitulo ? { id: ventaTitulo.id, numero: ventaTitulo.numero, empresa: ventaTitulo.empresa, cliente: ventaTitulo.cliente_nombre || "" } : null,
@@ -196,6 +208,8 @@ const registrarFactura = handler(async (req, res) => {
   const doc = `${boleta ? "BOL." : "FACT."} ${folio}`;
 
   const out = await sequelize.transaction(async (t) => {
+    regFactura.iniciar(t); // anota lo que se crea y cambia, para poder deshacer el registro
+    const fotoRegistro = () => regFactura.guardar(t, { folio: doc.replace(/^(FACT|BOL)\.\s*/, ""), proveedor: ficha?.nombre || proveedor, total: Number(b.total) || null, bandeja_id: b.bandeja_id, usuario });
     // Proveedor
     let ficha = await Proveedor.findOne({ where: sequelize.where(sequelize.fn("upper", sequelize.col("nombre")), proveedor), transaction: t });
     if (!ficha) ficha = await Proveedor.create({ nombre: proveedor, razon_social: b.razon_social || null, rut: b.rut || null, tipo: "proveedor" }, { transaction: t });
@@ -272,6 +286,7 @@ const registrarFactura = handler(async (req, res) => {
       resumen.gastos = gastos;
       if (sinCompra) {
         if (archivoFactura) pendientes.delete(b.archivo_token);
+        await fotoRegistro();
         return { orden: null, gastos, resumen };
       }
       neto = restoN; iva = restoI; total = restoT;
@@ -342,6 +357,30 @@ const registrarFactura = handler(async (req, res) => {
         await ventaPara.update({ items: vItems, costo_total: require("../services/cuadroCompra").costoItems(vItems) }, { transaction: t });
         resumen.lineas_venta_cambiadas = [...tocadas].length;
       }
+    }
+    // Líneas para una línea de OTRA venta (destino otra venta, o una compra abierta de otra venta): esa línea queda
+    // con el producto de la factura si tenía otro N° del catálogo; se recuerda el N° anterior para dar por recibido lo pedido
+    const viejoEn = new Map(); // venta_id → Map(producto nuevo → producto anterior)
+    const porVentaOtra = new Map();
+    for (const it of items) { const c = it.l.cubre_otra; if (c && Number(c.venta_id) && Number(c.venta_id) !== Number(ventaPara?.id || 0)) { const k = Number(c.venta_id); porVentaOtra.set(k, [...(porVentaOtra.get(k) || []), it]); } }
+    for (const [vid, lista] of porVentaOtra) {
+      const vW = await Venta.findByPk(vid, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!vW) continue;
+      const vItems = [...(vW.items || [])];
+      const tocadas = new Set();
+      for (const { p, l } of lista) {
+        const c = l.cubre_otra;
+        let k = c.indice != null && c.indice !== "" ? Number(c.indice) : -1;
+        if (k < 0 || !vItems[k]) k = vItems.findIndex((it, j) => !tocadas.has(j) && Number(it.producto_id) === Number(c.producto_id));
+        const it = vItems[k];
+        if (!it) continue;
+        tocadas.add(k);
+        if (Number(it.producto_id) === p.id) continue;
+        const m = viejoEn.get(vid) || new Map(); m.set(p.id, Number(it.producto_id)); viejoEn.set(vid, m);
+        vItems[k] = { ...it, producto_id: p.id, codigo: p.codigo, nombre: p.nombre, costo: Math.round(Number(l.precio)), proveedor: ficha.nombre,
+          cambio: { antes: it.nombre, fecha: String(fecha).slice(0, 10), motivo: `Comprado como ${p.nombre} (${doc} ${ficha.nombre})` } };
+      }
+      if (viejoEn.has(vid)) await vW.update({ items: vItems, costo_total: require("../services/cuadroCompra").costoItems(vItems) }, { transaction: t });
     }
     if (b.orden_id && !ordenPrevia) throw new ErrorNegocio("Compra no encontrada", 404);
     if (ordenP0) {
@@ -415,7 +454,8 @@ const registrarFactura = handler(async (req, res) => {
         const abierta = await ordenElegida(pt.venta_id);
         if (abierta) {
           // Compra abierta de esa venta: recibe lo que vino; lo pedido que no vino vuelve a "por comprar"
-          const llego = new Map(); pt.items.forEach((it) => llego.set(it.producto_id, (llego.get(it.producto_id) || 0) + Number(it.cantidad)));
+          const llego = new Map(); const viejos = viejoEn.get(Number(pt.venta_id)) || new Map();
+          pt.items.forEach((it) => { const pid = viejos.get(it.producto_id) || it.producto_id; llego.set(pid, (llego.get(pid) || 0) + Number(it.cantidad)); });
           const noVino = (abierta.items || []).filter((it) => it.producto_id && (llego.get(it.producto_id) || 0) < Number(it.cantidad) * 0.97)
             .map((it) => ({ producto_id: it.producto_id, nombre: it.nombre, cantidad: Number(it.cantidad) - (llego.get(it.producto_id) || 0), pedido: Number(it.cantidad) }));
           await abierta.update({ no_vinieron: noVino.length ? noVino : null, proveedor_id: ficha.id, proveedor_nombre: ficha.nombre, items: pt.items, subtotal: pt.neto, iva: pt.iva, total: pt.total,
@@ -436,8 +476,12 @@ const registrarFactura = handler(async (req, res) => {
       resumen.reparto = [orden, ...otras].map((o, k) => ({ numero: o.numero, venta_id: o.venta_id, total: Number(o.total), parte: k + 1 }));
     }
 
-    // Precios al catálogo con la fecha de la factura
+    // Precios al catálogo con la fecha de la factura (una línea dividida en dos guarda su precio una sola vez)
+    const yaPrecio = new Set();
     for (const { p, l } of items) {
+      const kp = `${p.id}|${Math.round(Number(l.precio))}`;
+      if (yaPrecio.has(kp)) continue;
+      yaPrecio.add(kp);
       const r = await precioDesdeFactura(p, {
         proveedor: ficha.nombre, precio: Number(l.precio), fecha, documento: doc, cantidad: l.cantidad, unidad: l.unidad,
         descripcion: l.descripcion, marca: l.marca, calce: l.calce, origen, usuario, motivo: `${doc} ${ficha.nombre} (${orden.numero})`,
@@ -462,10 +506,29 @@ const registrarFactura = handler(async (req, res) => {
       for (const o of [orden, ...otras]) await DocumentoCompra.create({ orden_id: o.id, folio, fecha, monto: total, nombre_archivo: archivo.nombre, mime: archivo.mime, datos: archivo.buf, creado_por: usuario }, { transaction: t });
       pendientes.delete(b.archivo_token);
     }
+    await fotoRegistro();
     return { orden, resumen };
   });
   await marcarProcesado(b.bandeja_id, { orden_id: out.orden?.id || null, gasto_id: out.orden ? null : out.gastos?.[0]?.id || null }, req);
   res.json({ ok: true, data: { orden: out.orden, ...out.resumen } });
+});
+
+// GET /api/ordenes-compra/registros?orden_id=|bandeja_id=  — registro de factura vigente (para deshacerlo)
+const verRegistro = handler(async (req, res) => {
+  const reg = await regFactura.buscar({ orden_id: req.query.orden_id, bandeja_id: req.query.bandeja_id });
+  if (!reg) return res.json({ ok: true, data: null });
+  const rev = await regFactura.revisar(reg);
+  res.json({ ok: true, data: { id: reg.id, folio: reg.folio, proveedor: reg.proveedor, total: Number(reg.total) || null, creado_por: reg.creado_por, createdAt: reg.createdAt,
+    gastos: (reg.creados?.gastos || []).length, ...rev } });
+});
+
+// POST /api/ordenes-compra/registros/:id/deshacer  { motivo, confirmar }
+const deshacerRegistro = handler(async (req, res) => {
+  const reg = await require("../models/RegistroFactura").findByPk(req.params.id);
+  if (!reg) throw new ErrorNegocio("Registro no encontrado", 404);
+  const r = await regFactura.deshacer(reg, { usuario: firma(req), motivo: String(req.body?.motivo || "").trim(), confirmar: !!req.body?.confirmar });
+  if (r.releer && r.bandeja_id) require("./bandejaController").leerEnFondo(r.bandeja_id, firma(req));
+  res.json({ ok: true, data: r });
 });
 
 // El documento de la bandeja con que se registró queda procesado (con su compra o gasto)
@@ -530,4 +593,4 @@ const descargar = handler(async (req, res) => {
   res.end(d.datos);
 });
 
-module.exports = { leer, registrarFactura, registrarGasto, descargar, descargarGasto, precioDesdeFactura };
+module.exports = { verRegistro, deshacerRegistro, leer, registrarFactura, registrarGasto, descargar, descargarGasto, precioDesdeFactura };

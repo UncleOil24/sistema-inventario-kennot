@@ -26,21 +26,44 @@ export function foliosVenta(v, tipo) {
   return [];
 }
 
+// Etapas de la venta, en orden; la actual se marca en verde fuerte
+const ETAPAS_AVANCE = ["Venta aprobada", "En compras", "Material listo para despacho", "Despachada", "Recepcionada", "Pendiente de pago", "Pagada y finalizada"];
+const IDX_ETAPA = { registrada: 0, en_compra: 1, productos_listos: 2, despachada: 3, entregada: 5 };
+export function avanceVenta(v) {
+  const pagada = v.estado_pago === "pagada";
+  let actual = IDX_ETAPA[v.etapa] ?? 0;
+  if (v.etapa === "entregada" && pagada) actual = 6;
+  // hecho: todo lo anterior a la actual; "pendiente de pago" también se da por hecho si ya se pagó antes de entregar
+  return ETAPAS_AVANCE.map((nombre, i) => ({ nombre, hecho: i < actual || (i === 6 && actual === 6) || (i === 5 && pagada && actual >= 5), actual: i === actual && actual !== 6 }));
+}
+
 // Panel en el detalle de la venta
 export function RespaldoVenta({ venta, puede, notify, onCambio }) {
   const r = venta.respaldo;
   const [subir, setSubir] = useState(false);
   if (!r || venta.estado === "anulada") return null;
   const docs = venta.documentos || [];
+  // Cedibles y guías firmadas: las sube Operativo cuando el material está listo, despachado o entregado
+  const enEntrega = ["productos_listos", "despachada", "entregada"].includes(venta.etapa);
+  const pasos = avanceVenta(venta);
+  const docChecks = r.checks.filter((c) => ["factura", "cedible", "guia"].includes(c.clave));
   return (
     <div className="respaldo-venta">
       <div className="respaldo-titulo">
-        <b>Estado y respaldo de la venta</b>
+        <b>Avance de la venta</b>
         {r.completada ? <span className="estado estado-ok">✓ Venta completada</span> : r.faltan?.length ? <span className="estado estado-danger">FALTA DOC: {r.faltan.join(", ")}</span> : null}
-        {puede && <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => setSubir(true)}>+ Subir cedible / guía firmada</button>}
+        {puede && enEntrega && <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }} onClick={() => setSubir(true)}>+ Subir cedible / guía firmada</button>}
       </div>
+      <ol className="avance-venta">
+        {pasos.map((p, i) => (
+          <li key={i} className={p.hecho ? "hecho" : p.actual ? "actual" : ""}>
+            <span className="avance-punto">{p.hecho ? "✓" : i + 1}</span>
+            <span className="avance-nombre">{p.nombre}{p.actual && <em> · aquí va</em>}{i === 6 && p.hecho && r.faltan?.length ? <em className="avance-falta"> · falta doc.</em> : null}</span>
+          </li>
+        ))}
+      </ol>
       <div className="respaldo-checks">
-        {r.checks.map((c) => <span key={c.clave} className={`respaldo-check ${c.ok ? "ok" : /^FALTA/.test(c.texto) ? "falta" : ""}`}>{c.ok ? "✓" : /^FALTA/.test(c.texto) ? "✗" : "○"} {c.texto}</span>)}
+        {docChecks.map((c) => <span key={c.clave} className={`respaldo-check ${c.ok ? "ok" : /^FALTA/.test(c.texto) ? "falta" : ""}`}>{c.ok ? "✓" : /^FALTA/.test(c.texto) ? "✗" : "○"} {c.texto}</span>)}
       </div>
       {docs.length > 0 && (
         <div className="respaldo-docs">
