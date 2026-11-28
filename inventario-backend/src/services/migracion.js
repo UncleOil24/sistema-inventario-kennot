@@ -61,6 +61,7 @@ async function migrar() {
   await acidoMuriaticoLitroV1();
   await preciosConDocumentoV1();
   await pegamentoFactura159491V1();
+  await codoTerminalFactura159491V1();
   await protegerTablas(q);
 }
 
@@ -360,6 +361,62 @@ async function pegamentoFactura159491V1() {
       await nota(`hecha: ${o13.numero} (V-0013) queda con 2 potes y ${o07.numero} (V-0007) recibe 1 pote (${unit} neto + ${ivaU} IVA); se quitó el complemento de V-0013 y las líneas de pegamento/adhesivo de ambas ventas quedan compradas con el N° 1488`, t);
     });
   } catch (e) { console.error("pegamento 159491", e.message); }
+}
+
+// 28-nov-2026 (gerencia): en la misma factura 159491, el codo 90° y el terminal HI (2 de cada uno) quedaron en la compra
+// de V-0013 (Ejército) por el reparto, pero eran de V-0007 (Forestal). Pasan a la compra de V-0007 con su neto e IVA.
+// Una sola vez y solo si todo está como se espera; si no, no toca nada y lo anota.
+async function codoTerminalFactura159491V1() {
+  const CLAVE = "migracion_codo_terminal_159491_v1";
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = '${CLAVE}'`);
+  if (hecho) return;
+  const OrdenCompra = require("../models/OrdenCompra");
+  const Venta = require("../models/Venta");
+  const Producto = require("../models/Producto");
+  const { Op } = require("sequelize");
+  const { costoItems } = require("./cuadroCompra");
+  const nota = async (txt, t) => {
+    await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('${CLAVE}', :v, NOW(), NOW())`, { replacements: { v: txt.slice(0, 900) }, transaction: t });
+    await sequelize.query(`INSERT INTO registro_cambios (usuario, tabla, registro_id, campo, antes, despues, motivo, "createdAt") VALUES ('Sistema', 'ordenes_compra', 0, 'factura 159491', '', :v, 'Corrección codo 90° y terminal HI: de V-0013 a V-0007 (gerencia, 28-nov-2026)', NOW())`, { replacements: { v: txt.slice(0, 900) }, transaction: t });
+    console.log(`Codo/terminal factura 159491: ${txt}`);
+  };
+  try {
+    await sequelize.transaction(async (t) => {
+      const v07 = await Venta.findOne({ where: { numero: "V-0007" }, transaction: t, lock: t.LOCK.UPDATE });
+      const v13 = await Venta.findOne({ where: { numero: "V-0013" }, transaction: t, lock: t.LOCK.UPDATE });
+      const ocs = await OrdenCompra.findAll({ where: { estado: { [Op.ne]: "anulada" }, documento: { [Op.in]: ["0000159491", "159491", "000159491"] } }, transaction: t, lock: t.LOCK.UPDATE });
+      if (!v07 || !v13) return nota("omitida: no se encontraron las ventas V-0007 / V-0013", t);
+      const o13 = ocs.find((o) => o.venta_id === v13.id);
+      const o07 = ocs.find((o) => o.venta_id === v07.id);
+      if (!o13 || !o07) return nota(`omitida: no se encontraron las compras de V-0013 y V-0007 de la factura 159491 (hay ${ocs.map((o) => o.numero).join(", ") || "ninguna"})`, t);
+      const esCodo = (it) => /CODO/i.test(it.nombre || "") && /90/.test(it.nombre || "");
+      const esTerm = (it) => /TERMINAL/i.test(it.nombre || "") && /HI\b|HIDR/i.test(it.nombre || "");
+      const mover = (o13.items || []).filter((it) => (esCodo(it) || esTerm(it)) && Number(it.cantidad) === 2);
+      if (mover.length !== 2 || !mover.some(esCodo) || !mover.some(esTerm)) return nota(`omitida: en ${o13.numero} no están el codo 90° y el terminal HI (2 c/u) como se esperaba`, t);
+      const neto = mover.reduce((s2, it) => s2 + Math.round(Number(it.precio) * Number(it.cantidad)), 0);
+      const iva = Number(o13.subtotal) > 0 ? Math.round(neto * Number(o13.iva) / Number(o13.subtotal)) : Math.round(neto * 0.19);
+      for (const o of [o13, o07]) await OrdenCompra.quitarPagosAutomaticos(o, t);
+      await o13.reload({ transaction: t }); await o07.reload({ transaction: t });
+      await o13.update({ items: o13.items.filter((it) => !mover.includes(it) && !mover.some((m) => m.producto_id === it.producto_id && Number(m.cantidad) === Number(it.cantidad) && (esCodo(it) || esTerm(it)))),
+        subtotal: Number(o13.subtotal) - neto, iva: Number(o13.iva) - iva, total: Number(o13.total) - neto - iva }, { transaction: t });
+      await o07.update({ items: [...(o07.items || []), ...mover], subtotal: Number(o07.subtotal) + neto, iva: Number(o07.iva) + iva, total: Number(o07.total) + neto + iva }, { transaction: t });
+      for (const o of [o13, o07]) { await o.reload({ transaction: t }); if (Number(o.monto_pagado) > Number(o.total)) await OrdenCompra.update({ monto_pagado: Number(o.total), estado_pago: "pagada" }, { where: { id: o.id }, transaction: t, hooks: false }); }
+      // V-0007: sus líneas de codo y terminal quedan con el producto comprado (si tenían otro N° del catálogo)
+      const i07 = [...(v07.items || [])]; const cambiadas = [];
+      for (const m of mover) {
+        if (i07.some((it) => Number(it.producto_id) === Number(m.producto_id))) continue;
+        const cand = i07.map((it, k) => ({ it, k })).filter(({ it }) => !it.complemento_de && (esCodo(m) ? /CODO/i.test(`${it.descripcion_cliente || ""} ${it.nombre || ""}`) : /TERMINAL/i.test(`${it.descripcion_cliente || ""} ${it.nombre || ""}`)));
+        if (cand.length !== 1) continue;
+        const pr = await Producto.findByPk(m.producto_id, { transaction: t });
+        if (!pr) continue;
+        const { it, k } = cand[0];
+        i07[k] = { ...it, producto_id: pr.id, codigo: pr.codigo, nombre: pr.nombre, cambio: { antes: it.nombre, fecha: "2026-11-28", motivo: `Comprado como ${pr.nombre} (FACT. 159491 Ferrecom)` } };
+        cambiadas.push(pr.nombre);
+      }
+      if (cambiadas.length) await v07.update({ items: i07, costo_total: costoItems(i07) }, { transaction: t });
+      await nota(`hecha: codo 90° y terminal HI (2 c/u, ${neto} neto + ${iva} IVA) pasan de ${o13.numero} (V-0013) a ${o07.numero} (V-0007)${cambiadas.length ? `; líneas de V-0007 conectadas: ${cambiadas.join(", ")}` : ""}`, t);
+    });
+  } catch (e) { console.error("codo/terminal 159491", e.message); }
 }
 
 async function catalogoPaso7() {
