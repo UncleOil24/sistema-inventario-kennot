@@ -10,6 +10,8 @@ router.post("/factura/leer", operativo, subirFactura.single("archivo"), fc.leer)
 router.post("/factura/registrar", operativo, fc.registrarFactura);
 router.post("/factura/gasto", operativo, fc.registrarGasto);
 router.get("/gastos/:gastoId/documento", operativo, fc.descargarGasto);
+router.get("/registros", operativo, fc.verRegistro);
+router.post("/registros/:id/deshacer", operativo, fc.deshacerRegistro);
 router.get("/:id/documentos/:docId", fc.descargar);
 router.get("/", c.getOrdenes);
 router.get("/:id", c.getOrden);

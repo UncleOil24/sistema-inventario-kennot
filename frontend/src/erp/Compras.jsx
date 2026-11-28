@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando, EmpresaCompra, AvisoCamposClave } from "./ui";
+import { DeshacerRegistro, Modal, Estado, ItemsEditor, Totales, PagosPanel, confirmar, RepartoLinea, repartoParaEnviar, Cargando, EmpresaCompra, AvisoCamposClave } from "./ui";
 import { api, fmt, fecha, useProductos, descargar, TIPOS_PAGO, nombreTipoPago, imprimirHTML, escaparHTML as h, nombreArchivo } from "./lib";
 import DocumentoProveedor from "./DocumentoProveedor";
 import FacturaCompra from "./FacturaCompra";
@@ -483,6 +483,7 @@ export function DetalleOrden({ orden, esAdmin, puedeOperar, notify, onClose, onE
         {puedeOperar && orden.estado !== "anulada" && <button className="btn btn-ghost" style={{ color: "var(--danger)" }} onClick={quitar}>{orden.estado === "borrador" ? "Descartar" : "Anular"}</button>}
         {orden.estado === "borrador" && puedeOperar && <button className="btn btn-success" onClick={recibir}>✓ Marcar recibida</button>}
         {orden.estado !== "anulada" && puedeOperar && !(orden.documentos || []).length && <button className="btn btn-primary" onClick={() => setSubir(true)}>⇪ Subir factura</button>}
+        {orden.estado === "recibida" && puedeOperar && <DeshacerRegistro orden_id={orden.id} notify={notify} onHecho={() => { onCambio?.(); onClose(); }} />}
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </>}>
       <div className="hist-meta">

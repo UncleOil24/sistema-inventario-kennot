@@ -60,6 +60,7 @@ async function migrar() {
   await limpiarDescripcionesV1();
   await acidoMuriaticoLitroV1();
   await preciosConDocumentoV1();
+  await pegamentoFactura159491V1();
   await protegerTablas(q);
 }
 
@@ -305,6 +306,60 @@ async function preciosConDocumentoV1() {
   }
   console.log(`Precios con documento: ${ids.length} productos revisados, ${cambiados} cambiaron de precio vigente`);
   await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('migracion_precios_con_documento_v1', :v, NOW(), NOW())`, { replacements: { v: `${new Date().toISOString()} · ${cambiados} de ${ids.length}` } });
+}
+
+// 28-nov-2026 (gerencia): factura 159491 de Ferrecom (Chilemat/Madesur). El pegamento N° 1488 (3 potes) quedó como
+// complemento a $0 en V-0013, cuando era 1 para la línea de adhesivo de V-0007 (Forestal) y 2 para la línea de
+// pegamento de V-0013 (Ejército). Una sola vez y solo si todo está como se espera; si no, no toca nada y lo anota.
+async function pegamentoFactura159491V1() {
+  const CLAVE = "migracion_pegamento_159491_v1";
+  const [[hecho]] = await sequelize.query(`SELECT valor FROM parametros WHERE clave = '${CLAVE}'`);
+  if (hecho) return;
+  const OrdenCompra = require("../models/OrdenCompra");
+  const Venta = require("../models/Venta");
+  const Producto = require("../models/Producto");
+  const { Op } = require("sequelize");
+  const { costoItems } = require("./cuadroCompra");
+  const nota = async (txt, t) => {
+    await sequelize.query(`INSERT INTO parametros (clave, valor, "createdAt", "updatedAt") VALUES ('${CLAVE}', :v, NOW(), NOW())`, { replacements: { v: txt.slice(0, 900) }, transaction: t });
+    await sequelize.query(`INSERT INTO registro_cambios (usuario, tabla, registro_id, campo, antes, despues, motivo, "createdAt") VALUES ('Sistema', 'ordenes_compra', 0, 'factura 159491', '', :v, 'Corrección pegamento N° 1488: 1 a V-0007 y 2 a V-0013 (gerencia, 28-nov-2026)', NOW())`, { replacements: { v: txt.slice(0, 900) }, transaction: t });
+    console.log(`Pegamento factura 159491: ${txt}`);
+  };
+  try {
+    await sequelize.transaction(async (t) => {
+      const pr = await Producto.findOne({ where: { codigo: 1488 }, transaction: t });
+      const v07 = await Venta.findOne({ where: { numero: "V-0007" }, transaction: t, lock: t.LOCK.UPDATE });
+      const v13 = await Venta.findOne({ where: { numero: "V-0013" }, transaction: t, lock: t.LOCK.UPDATE });
+      const ocs = await OrdenCompra.findAll({ where: { estado: { [Op.ne]: "anulada" }, documento: { [Op.in]: ["0000159491", "159491", "000159491"] } }, transaction: t, lock: t.LOCK.UPDATE });
+      if (!pr || !v07 || !v13) return nota("omitida: no se encontró el producto 1488 o las ventas V-0007 / V-0013", t);
+      const o13 = ocs.find((o) => o.venta_id === v13.id && (o.items || []).some((it) => Number(it.producto_id) === pr.id && Number(it.cantidad) === 3));
+      const o07 = ocs.find((o) => o.venta_id === v07.id);
+      if (!o13 || !o07) return nota(`omitida: no se encontraron las compras de la factura 159491 esperadas (hay ${ocs.map((o) => o.numero).join(", ") || "ninguna"})`, t);
+      const kComp = (v13.items || []).findIndex((it) => it.complemento_de && Number(it.producto_id) === pr.id && Number(it.cantidad) === 3 && !Number(it.precio));
+      const kLin13 = (v13.items || []).findIndex((it) => !it.complemento_de && /PEGAMENTO|ADHESIVO/i.test(`${it.descripcion_cliente || ""} ${it.nombre || ""}`));
+      const kLin07 = (v07.items || []).findIndex((it) => !it.complemento_de && /ADHESIVO|PEGAMENTO/i.test(`${it.descripcion_cliente || ""} ${it.nombre || ""}`));
+      if (kComp < 0 || kLin13 < 0 || kLin07 < 0) return nota(`omitida: no calzan las líneas (complemento ${kComp}, pegamento V-0013 ${kLin13}, adhesivo V-0007 ${kLin07})`, t);
+      const fecha = "2026-11-28";
+      const conPegamento = (it) => (Number(it.producto_id) === pr.id ? it : { ...it, producto_id: pr.id, codigo: pr.codigo, nombre: pr.nombre,
+        cambio: { antes: it.nombre, fecha, motivo: "Comprado como " + pr.nombre + " (FACT. 159491 Ferrecom)" } });
+      // Ventas: V-0013 sin el complemento y con su línea de pegamento comprada; V-0007 con su línea de adhesivo comprada
+      const i13 = (v13.items || []).map((it, k) => (k === kLin13 ? conPegamento(it) : it)).filter((_, k) => k !== kComp);
+      const i07 = (v07.items || []).map((it, k) => (k === kLin07 ? conPegamento(it) : it));
+      await v13.update({ items: i13, costo_total: costoItems(i13) }, { transaction: t });
+      await v07.update({ items: i07, costo_total: costoItems(i07) }, { transaction: t });
+      // Compras: 1 pote pasa de la de V-0013 a la de V-0007, con su neto y su IVA
+      const it13 = o13.items.find((it) => Number(it.producto_id) === pr.id);
+      const unit = Math.round(Number(it13.precio));
+      const ivaU = Number(o13.subtotal) > 0 ? Math.round(unit * Number(o13.iva) / Number(o13.subtotal)) : Math.round(unit * 0.19);
+      for (const o of [o13, o07]) await OrdenCompra.quitarPagosAutomaticos(o, t);
+      await o13.reload({ transaction: t }); await o07.reload({ transaction: t });
+      await o13.update({ items: o13.items.map((it) => (it === undefined ? it : Number(it.producto_id) === pr.id ? { ...it, cantidad: 2 } : it)),
+        subtotal: Number(o13.subtotal) - unit, iva: Number(o13.iva) - ivaU, total: Number(o13.total) - unit - ivaU }, { transaction: t });
+      await o07.update({ items: [...(o07.items || []), { ...it13, cantidad: 1 }], subtotal: Number(o07.subtotal) + unit, iva: Number(o07.iva) + ivaU, total: Number(o07.total) + unit + ivaU }, { transaction: t });
+      for (const o of [o13, o07]) { await o.reload({ transaction: t }); if (Number(o.monto_pagado) > Number(o.total)) await OrdenCompra.update({ monto_pagado: Number(o.total), estado_pago: "pagada" }, { where: { id: o.id }, transaction: t, hooks: false }); }
+      await nota(`hecha: ${o13.numero} (V-0013) queda con 2 potes y ${o07.numero} (V-0007) recibe 1 pote (${unit} neto + ${ivaU} IVA); se quitó el complemento de V-0013 y las líneas de pegamento/adhesivo de ambas ventas quedan compradas con el N° 1488`, t);
+    });
+  } catch (e) { console.error("pegamento 159491", e.message); }
 }
 
 async function catalogoPaso7() {

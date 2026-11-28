@@ -204,4 +204,4 @@ const aVenta = handler(async (req, res) => {
   res.json({ ok: true, data: { documento_venta_id: dv.id, venta_numero: v.numero } });
 });
 
-module.exports = { aVenta, subir, listar, resumen, archivo, lectura, actualizar, releer };
+module.exports = { leerEnFondo, aVenta, subir, listar, resumen, archivo, lectura, actualizar, releer };

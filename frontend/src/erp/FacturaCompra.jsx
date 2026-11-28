@@ -6,10 +6,25 @@ import { PreciosProducto } from "./Catalogo";
 // Líneas a las que puede ir una línea de la factura ("Es para:"): las de la compra y las de la venta que no estaban en ella
 function itemsPara(res) {
   const oc = (res?.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}`, etiqueta: res.orden?.numero || "Pedido", grupo: res.orden ? `De esta compra ${res.orden.numero}` : "" }));
-  const enOrden = new Set(oc.map((x) => Number(x.producto_id)));
-  const vt = (res?.venta_items || []).filter((x) => !enOrden.has(Number(x.producto_id)))
-    .map((x) => ({ ...x, clave: `v${x.k}`, etiqueta: res.venta?.numero || "Venta", grupo: res.orden ? `De la venta ${res.venta?.numero || ""} (no estaban en esta compra)` : `De la venta ${res.venta?.numero || ""}` }));
-  return [...oc, ...vt];
+  // Compras abiertas (de esta venta y de este proveedor), cada una con su venta: se elige línea por línea
+  const ab = (res?.compras_abiertas || []).flatMap((o) => o.items.map((x) => ({ ...x, clave: `q${o.id}:${x.k}`, orden_id: o.id, orden_venta: o.venta_id, etiqueta: o.numero,
+    grupo: `Compra ${o.numero} · ${o.proveedor || ""} · ${o.venta_id === res.venta?.id ? "esta venta" : o.venta}` })));
+  const pedidos = new Set([...oc, ...ab.filter((x) => x.orden_venta === res?.venta?.id)].map((x) => Number(x.producto_id)));
+  const vt = (res?.venta_items || []).filter((x) => !pedidos.has(Number(x.producto_id)))
+    .map((x) => ({ ...x, clave: `v${x.k}`, etiqueta: res.venta?.numero || "Venta", grupo: `De la venta ${res.venta?.numero || ""} (sin compra pendiente)` }));
+  return [...oc, ...ab, ...vt];
+}
+// Qué compra recibe cada línea, según lo elegido en "Es para:" (para el resumen y para registrar)
+function compraDeLineas(res, lineas, ordenProp) {
+  const its = itemsPara(res);
+  const V = res?.venta?.id || null;
+  const cuenta = new Map();
+  for (const l of lineas) { const it = its.find((x) => x.clave === l.para && x.clave.startsWith("q")); if (it) cuenta.set(it.orden_id, (cuenta.get(it.orden_id) || 0) + 1); }
+  const masUsada = (vid) => [...cuenta.entries()].filter(([oid]) => (res.compras_abiertas.find((o) => o.id === oid)?.venta_id || null) === vid).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  const principal = ordenProp?.id || masUsada(V);
+  const porVenta = {};
+  for (const [oid] of cuenta) { const vid = res.compras_abiertas.find((o) => o.id === oid)?.venta_id; if (vid && vid !== V && !porVenta[vid]) porVenta[vid] = masUsada(vid); }
+  return { its, V, principal, porVenta };
 }
 
 // "Subir factura de compra": Claude lee la factura del proveedor; se compara con nuestra compra (C-0001...) si existe,
@@ -65,16 +80,56 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
         orden_id: orden?.id || "", empresa: e.empresa_documento || orden?.empresa || gasto?.empresa || "", razon_social: e.razon_social, rut: e.rut, tipo_pago: orden?.tipo_pago || "contado",
       });
       const items = (r.orden_items || []).map((x) => ({ ...x, clave: `o${x.k}` }));
-      setLineas(prepararLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })), items, prods));
+      // Se conectan solas con la compra (la elegida o la abierta de este proveedor para esta venta)
+      const auto = itemsPara(r).filter((x) => x.clave.startsWith("o") || (x.clave.startsWith("q") && x.orden_venta === (r.venta?.id || null) && r.compras_abiertas.find((o) => o.id === x.orden_id)?.es_proveedor));
+      setLineas(prepararLineas(r.lineas.map((l) => ({ ...l, reparto_de: l.producto?.id, omitir: false, accion: l.producto && l.calce !== "parecido" ? "existente" : "nuevo", nuevo: { nombre: String(l.descripcion).toUpperCase(), unidad: (l.unidad || "UNIDAD").toUpperCase() } })), auto.length ? auto : items, prods));
     } catch (e) { notify(e.message, "danger"); }
     finally { setLeyendo(false); }
   };
 
   useEffect(() => { if (bandeja) leer(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (i, c) => setLineas((ls) => ls.map((l) => (l.i === i ? { ...l, ...c } : l)));
+  // Dividir una línea en dos (ej. 3 potes: 1 para esta venta y 2 para otra): cada parte elige su destino
+  const [dividiendo, setDividiendo] = useState(null); // { i, cant }
+  const dividirLinea = (i, n) => setLineas((ls) => {
+    const k = ls.findIndex((l) => l.i === i);
+    const l = ls[k]; const cant = Number(l?.cantidad) || 0; n = Number(n);
+    if (!l || !(n > 0) || n >= cant) return ls;
+    const nueva = { ...l, i: Math.max(...ls.map((x) => x.i)) + 1, cantidad: n, para: "", destino: null, reparto: [], renombrar: undefined, decidir: false,
+      total_linea: l.total_linea ? Math.round((Number(l.total_linea) * n) / cant) : l.total_linea, dividida_de: l.i };
+    // El reparto de lo que queda se ajusta a la nueva cantidad (se descuenta desde el final)
+    let sobra = (l.reparto || []).reduce((s2, r) => s2 + Number(r.cantidad || 0), 0) - (cant - n);
+    const reparto = [...(l.reparto || [])].reverse().map((r) => { const q = Math.min(Number(r.cantidad || 0), Math.max(0, sobra)); sobra -= q; return { ...r, cantidad: Number(r.cantidad || 0) - q }; }).reverse().filter((r) => r.cantidad > 0);
+    const resto = { ...l, cantidad: cant - n, reparto, total_linea: l.total_linea ? Number(l.total_linea) - nueva.total_linea : l.total_linea };
+    return [...ls.slice(0, k), resto, nueva, ...ls.slice(k + 1)];
+  });
   const esGasto = (l) => l.destino?.tipo === "gasto";
   const activas = lineas.filter((l) => !l.omitir && (esGasto(l) || (l.accion === "nuevo" ? l.nuevo.nombre : l.producto)));
   const ventaActual = res?.venta?.id || null;
+  const mapa = res ? compraDeLineas(res, activas, orden) : { its: [], V: null, principal: null, porVenta: {} };
+  // Lo elegido en "Es para" por fila (para marcarlo en las demás filas): clave → [{ fila, cant }]
+  const usadosPor = (i) => {
+    const u = {};
+    lineas.forEach((l, n) => { if (l.i === i || l.omitir || !l.para || String(l.para).startsWith("c")) return; (u[l.para] = u[l.para] || []).push({ fila: n + 1, cant: (Number(l.cantidad) || 0) * (Number(l.factor) || 1) }); });
+    return u;
+  };
+  // Resumen: qué compra recibe la factura
+  const resumenCompras = (() => {
+    if (!res) return [];
+    const m = new Map();
+    const sumar = (k) => m.set(k, (m.get(k) || 0) + 1);
+    const num = (oid) => res.compras_abiertas?.find((o) => o.id === Number(oid))?.numero;
+    for (const l of activas) {
+      const d = l.destino || {};
+      if (d.tipo === "gasto") { sumar(`gasto ${d.venta_id ? (ventas.find((v) => String(v.id) === String(d.venta_id))?.numero || "de venta") : "general"}`); continue; }
+      if (d.tipo === "venta" || d.tipo === "complemento") { const vn = ventas.find((v) => String(v.id) === String(d.venta_id))?.numero || "otra venta"; sumar(d.orden_id ? `${num(d.orden_id) || "compra"} (${vn})` : `compra nueva de ${vn}`); continue; }
+      const it = mapa.its.find((x) => x.clave === l.para);
+      if (it?.clave.startsWith("q") && (it.orden_venta || null) !== mapa.V) { sumar(`${num(mapa.porVenta[it.orden_venta]) || "compra"} (otra venta)`); continue; }
+      const p = orden?.numero || num(mapa.principal);
+      sumar(p ? p : `compra nueva${res.venta ? ` de ${res.venta.numero}` : ""}`);
+    }
+    return [...m.entries()];
+  })();
   // Destino incompleto (falta elegir venta o línea): no se puede registrar
   const destinoIncompleto = activas.some((l) => (l.destino?.tipo === "venta" && !l.destino.venta_id) || (l.destino?.tipo === "complemento" && (!l.destino.venta_id || l.destino.indice === "" || l.destino.indice == null)));
   // Cómo queda repartida la factura (neto de las líneas)
@@ -101,19 +156,34 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
         method: "POST",
         body: {
           ...enc, archivo_token: res.archivo_token, orden_id: enc.orden_id || null, gasto_id: gasto?.id || null, bandeja_id: res.bandeja_id || null,
-          ordenes_por_venta: Object.fromEntries(activas.filter((l) => l.destino?.tipo === "venta" && l.destino.orden_id).map((l) => [l.destino.venta_id, l.destino.orden_id])),
+          ...(() => { // la compra que recibe se decide por lo elegido en cada línea
+            const opv = { ...mapa.porVenta, ...Object.fromEntries(activas.filter((l) => l.destino?.tipo === "venta" && l.destino.orden_id).map((l) => [l.destino.venta_id, l.destino.orden_id])) };
+            return { orden_id: orden?.id || mapa.principal || null, ordenes_por_venta: opv };
+          })(),
           lineas: activas.map((l) => {
             const d = l.destino || {};
             if (d.tipo === "gasto") return { destino: { tipo: "gasto", gasto_tipo: d.gasto_tipo || "general", venta_id: d.venta_id || null, descripcion: d.descripcion || "" },
               descripcion: l.descripcion, cantidad: Number(l.cantidad), precio: Number(l.precio_neto) };
-            const base = presentacionParaEnviar(l, repartoParaEnviar(l)); // bidón 5 L → litros, con su costo por litro
+            // "Es para" una línea de esta venta (o de su compra): todo queda en esta venta, aunque otra venta use ese N° del catálogo
+            const it = mapa.its.find((x) => x.clave === l.para);
+            const deEsta = it && (it.clave.startsWith("o") || it.clave.startsWith("v") || (it.clave.startsWith("q") && (it.orden_venta || null) === mapa.V));
+            const deOtra = it && it.clave.startsWith("q") && (it.orden_venta || null) !== mapa.V;
+            const reparto = deEsta && mapa.V ? [{ venta_id: mapa.V, cantidad: Number(l.cantidad) }] : deOtra ? [{ venta_id: it.orden_venta, cantidad: Number(l.cantidad) }] : repartoParaEnviar(l);
+            const base = presentacionParaEnviar({ ...l, para: it?.clave.startsWith("q") ? "" : l.para }, reparto); // bidón 5 L → litros, con su costo por litro
+            // Línea de una compra abierta: la compra principal la recibe por su posición; otra compra de esta venta, por la línea de la venta
+            if (it?.clave.startsWith("q")) {
+              if (deEsta && it.orden_id === mapa.principal) base.para = { tipo: "orden", indice: it.k };
+              else if (deEsta) { const vk = (res.venta_items || []).find((x) => Number(x.producto_id) === Number(it.producto_id)); base.para = vk ? { tipo: "venta", indice: vk.k } : undefined; }
+              else { base.para = undefined; base.cubre_otra = { venta_id: it.orden_venta, producto_id: it.producto_id }; }
+            }
             const otra = (d.tipo === "venta" || d.tipo === "complemento") && d.venta_id;
             return {
               producto_id: l.accion === "existente" ? l.producto.id : null, nuevo: l.accion === "nuevo" ? l.nuevo : null,
               descripcion: l.descripcion, unidad: l.unidad, marca: l.marca, calce: l.calce, ...base,
               renombrar: l.accion === "existente" && l.producto && l.renombrar && l.renombrar.trim() && l.renombrar.trim() !== l.producto.nombre ? l.renombrar.trim() : null,
               ...(otra ? { reparto: [{ venta_id: Number(d.venta_id), cantidad: base.cantidad }],
-                para: d.tipo === "complemento" ? { tipo: "complemento", indice: Number(d.indice), venta_id: Number(d.venta_id) } : undefined } : {}),
+                para: d.tipo === "complemento" ? { tipo: "complemento", indice: Number(d.indice), venta_id: Number(d.venta_id) } : undefined,
+                cubre_otra: d.tipo === "venta" && d.indice !== "" && d.indice != null ? { venta_id: Number(d.venta_id), indice: Number(d.indice) } : undefined } : {}),
             };
           }),
         },
@@ -163,7 +233,7 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
         {destinoIncompleto && <span className="mini" style={{ color: "var(--warn)" }}>Falta elegir la venta o la línea de destino</span>}
         {activas.some((l) => l.decidir && !esGasto(l)) && <span className="mini" style={{ color: "var(--warn)" }}>Define en las líneas marcadas si es el mismo producto o uno nuevo</span>}
         <button className="btn btn-primary" disabled={!activas.length || !enc.proveedor || !enc.documento || !enc.empresa || guardando || destinoIncompleto || activas.some((l) => l.decidir && !esGasto(l))} onClick={registrar}>
-          {guardando ? "Guardando..." : enc.orden_id ? "Registrar factura y recibir compra" : "Crear compra con esta factura"}
+          {guardando ? "Guardando..." : "Registrar factura"}
         </button>
       </> : <>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -208,13 +278,6 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
             <div className="field campo-clave"><label>★ Total</label><input type="number" value={enc.total} onChange={(e) => setEnc({ ...enc, total: e.target.value })} /></div>
           </div>
           <div className="fields-row tres">
-            {!orden && (
-              <div className="field"><label>Compra pendiente de este proveedor</label>
-                <select value={enc.orden_id} onChange={(e) => setEnc({ ...enc, orden_id: e.target.value })}>
-                  <option value="">Crear compra nueva</option>
-                  {res.sugeridas.map((o) => <option key={o.id} value={o.id}>{o.numero} · {o.fecha} · {fmt(o.total)}</option>)}
-                </select></div>
-            )}
             <EmpresaCompra valor={enc.empresa} detectada={res.encabezado.empresa_documento} ventaEmpresa={res.venta?.empresa || orden?.empresa || null}
               onChange={(empresa) => setEnc({ ...enc, empresa })} />
           </div>
@@ -233,7 +296,12 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
                   <tr key={l.i} className={l.omitir ? "fila-anulada" : l.alza || l.diferencia ? "fila-alerta" : ""}>
                     <td><input type="checkbox" checked={!l.omitir} onChange={(e) => set(l.i, { omitir: !e.target.checked })} title="Incluir" /></td>
                     <td>{l.descripcion}
-                      {l.omitir && <div className="aviso-fuera">Queda fuera: su monto y su IVA no se registran. <button className="link" onClick={() => set(l.i, { omitir: false, destino: { tipo: "gasto", gasto_tipo: "general", venta_id: ventaActual } })}>Es un gasto (recupera IVA)</button></div>}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div></td>
+                      {l.omitir && <div className="aviso-fuera">Queda fuera: su monto y su IVA no se registran. <button className="link" onClick={() => set(l.i, { omitir: false, destino: { tipo: "gasto", gasto_tipo: "general", venta_id: ventaActual } })}>Es un gasto (recupera IVA)</button></div>}<div className="mini">{[l.codigo_proveedor, l.marca, l.unidad].filter(Boolean).join(" · ")}</div>
+                      {l.dividida_de != null && <div className="mini" style={{ color: "var(--accent)" }}>✂ parte de una línea dividida</div>}
+                      {!l.omitir && Number(l.cantidad) > 1 && (dividiendo?.i === l.i
+                        ? <div className="mini dividir-linea">Separar <input className="qty-input" style={{ width: 50 }} type="number" min="1" max={Number(l.cantidad) - 1} value={dividiendo.cant} onChange={(e) => setDividiendo({ i: l.i, cant: e.target.value })} /> de {l.cantidad}
+                            <button className="link" onClick={() => { dividirLinea(l.i, dividiendo.cant); setDividiendo(null); }}>dividir</button> · <button className="link" onClick={() => setDividiendo(null)}>cancelar</button></div>
+                        : <button className="link mini" title="Para repartir esta línea entre esta venta y otra (cada parte con su destino)" onClick={() => setDividiendo({ i: l.i, cant: 1 })}>✂ dividir línea</button>)}</td>
                     <td><input className="qty-input" style={{ width: 60 }} type="number" value={l.cantidad} onChange={(e) => set(l.i, { cantidad: e.target.value })} /></td>
                     <td><input className="qty-input" style={{ width: 90 }} type="number" value={l.precio_neto} onChange={(e) => set(l.i, { precio_neto: e.target.value })} /></td>
                     <td>
@@ -254,8 +322,15 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
                         : <input className="qty-input" style={{ width: "100%", textAlign: "left" }} value={l.nuevo.nombre} onChange={(e) => set(l.i, { nuevo: { ...l.nuevo, nombre: e.target.value.toUpperCase() } })} />}
                       {l.accion === "existente" && <Estado valor={l.calce} />}
                       <PresentacionLinea l={l} productos={productos} complementos={res.complementos || []} onChange={(c) => set(l.i, c)}
-                        items={itemsPara(res)} />
-                      {!l.destino?.tipo || l.destino.tipo === "compra" ? <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} /> : null}
+                        items={mapa.its} usados={usadosPor(l.i)} />
+                      {(() => {
+                        if (l.destino?.tipo && l.destino.tipo !== "compra") return null;
+                        const it = mapa.its.find((x) => x.clave === l.para);
+                        const deEsta = it && (it.clave.startsWith("o") || it.clave.startsWith("v") || (it.clave.startsWith("q") && (it.orden_venta || null) === mapa.V));
+                        if (it && !deEsta) return <div className="mini reparto-linea">→ va a la otra venta de esa compra ({it.grupo.split(" · ").pop()})</div>;
+                        if (deEsta && mapa.V) return <div className="mini reparto-linea">→ {res.venta?.numero} (esta venta){Number(l.cantidad) > 1 ? " · para dar una parte a otra venta usa ✂ dividir línea" : ""}</div>;
+                        return <RepartoLinea l={l} onChange={(r) => set(l.i, { reparto: r })} />;
+                      })()}
                       {l.accion === "existente" && l.producto && (() => { const pr = productos.find((x) => x.id === l.producto.id) || l.producto; const e = envaseEnFactura(l, pr); return e ? (
                         <div className="aviso-envase">Facturado por unidad: {l.cantidad} un = {e.cantidad} envase(s) de {e.contenido} a ${e.precio.toLocaleString("es-CL")}.{" "}
                           <button className="link" onClick={() => set(l.i, { cantidad: e.cantidad, precio_neto: e.precio, envase_ok: true })}>Convertir</button>{" · "}
@@ -277,6 +352,8 @@ export default function FacturaCompra({ orden, gasto, bandeja, notify, onClose, 
               </tbody>
             </table>
           </div>
+          {resumenCompras.length > 0 && <div className="reparto-factura resumen-compras"><b>Esta factura recibe:</b> {resumenCompras.map(([k, n]) => <span key={k}>{k} ({n} línea{n > 1 ? "s" : ""})</span>)}
+            <span className="mini">· se decide por lo elegido en "Es para" de cada línea</span></div>}
           {repartoFactura.length > 1 && <div className="reparto-factura">Así queda la factura (neto): {repartoFactura.map(([k, v]) => <span key={k}><b>{k}</b> {fmt(v)}</span>)}
             <span className="mini">· el IVA se reparte en la misma proporción: todo queda como crédito fiscal, con el mismo N° de factura.</span></div>}
           {verPrecios && <PreciosProducto producto={verPrecios} puedeConfirmar={gerencia} proveedores={proveedores} notify={notify} onClose={() => setVerPrecios(null)} onCambio={() => {}} />}
@@ -320,6 +397,22 @@ function DestinoLinea({ l, ventas, ventaActual, onChange }) {
           <option value="">Compra nueva de {vSel?.numero} (misma factura)</option>
           {(compras[d.venta_id] || []).map((o) => <option key={o.id} value={o.id}>{o.numero} · {o.proveedor_nombre} · {fmt(o.total)}</option>)}
         </select>)}
+      {d.tipo === "venta" && vSel && (
+        <select className="select-linea" aria-label="Línea de esa venta" value={d.indice ?? ""} onChange={(e) => onChange({ ...d, indice: e.target.value })}>
+          <option value="">Línea de esa venta: la que tenga el mismo producto</option>
+          {(vSel.items || []).map((it, k) => it.complemento_de ? null : <option key={k} value={k}>es para: {(it.descripcion_cliente || it.nombre || "").slice(0, 60)} · {it.cantidad}</option>)}
+        </select>)}
+      {d.tipo === "complemento" && vSel && (() => {
+        // ¿La otra venta ya tiene esta línea? Entonces no es complemento: se asigna directo a esa línea
+        const NO = new Set(["PARA", "TIPO", "MARCA", "UNIDAD", "COLOR", "BLANCO", "NEGRO", "GRIS"]);
+        const pal = (t) => new Set(String(t || "").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^A-Z0-9]+/).filter((w) => w.length > 3 && !NO.has(w)));
+        const mias = pal(`${l.descripcion} ${l.producto?.nombre || ""}`);
+        const k = (vSel.items || []).findIndex((it) => !it.complemento_de && ((l.producto && Number(it.producto_id) === Number(l.producto.id)) || [...pal(`${it.descripcion_cliente || ""} ${it.nombre || ""}`)].filter((w) => mias.has(w)).length >= 1));
+        if (k < 0) return null;
+        const it = vSel.items[k];
+        return <div className="aviso-fuera" style={{ flexBasis: "100%" }}>⚠ {vSel.numero} ya tiene «{(it.descripcion_cliente || it.nombre || "").slice(0, 50)}» en su venta: no es complemento.
+          <button className="link" onClick={() => onChange({ tipo: "venta", venta_id: d.venta_id, orden_id: "", indice: String(k) })}>Asignar directo a esa línea</button></div>;
+      })()}
       {d.tipo === "complemento" && vSel && (
         <select className="select-linea" aria-label="Línea de esa venta" value={d.indice ?? ""} onChange={(e) => onChange({ ...d, indice: e.target.value })}>
           <option value="">— complemento de… —</option>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, fmt, authFetch, API_URL } from "./lib";
-import { Cargando, confirmar, GastoVenta } from "./ui";
+import { DeshacerRegistro, Cargando, confirmar, GastoVenta } from "./ui";
 import FacturaCompra from "./FacturaCompra";
 import DocumentoProveedor from "./DocumentoProveedor";
 import { RegistrarEnVenta, Recortador, comprimirImagen, esImagen } from "./Respaldo";
@@ -118,7 +118,7 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
         <div className="panel-titulo">Subir documentos</div>
         <div className="empresa-btns" style={{ marginBottom: 8 }} role="group" aria-label="Tipo de documento">
           <button type="button" className={`empresa-btn ${clase === "compra" ? "activo" : ""}`} onClick={() => setClase("compra")}>🧾 Compra o gasto<span className="mini">factura, boleta del proveedor</span></button>
-          <button type="button" className={`empresa-btn ${clase === "venta" ? "activo" : ""}`} onClick={() => setClase("venta")}>✍ Respaldo de venta<span className="mini">cedible o guía firmada por el cliente</span></button>
+          {puedeOperar && <button type="button" className={`empresa-btn ${clase === "venta" ? "activo" : ""}`} onClick={() => setClase("venta")}>✍ Respaldo de venta<span className="mini">cedible o guía firmada por el cliente</span></button>}
           <button type="button" className={`empresa-btn ${clase === "cotizacion" ? "activo" : ""}`} onClick={() => setClase("cotizacion")}>📋 Cotización de proveedor<span className="mini">precios para el catálogo</span></button>
         </div>
         <div className="mini" style={{ marginBottom: 10 }}>{clase === "cotizacion"
@@ -185,15 +185,16 @@ export default function Bandeja({ notify, puedeOperar, proveedores = [], compart
                   </div>
                 ) : d.sugerencia?.orden_id ? <div className="mini" style={{ color: "var(--accent)" }}>Compra sugerida: {d.sugerencia.orden_numero}{d.sugerencia.venta_numero ? ` (${d.sugerencia.venta_numero}${d.sugerencia.cliente ? ` · ${d.sugerencia.cliente}` : ""})` : ""} · elige la venta para confirmarla</div> : null)}
                 {d.estado === "procesado" && <div className="mini" style={{ color: "var(--success)" }}>✓ {d.clase === "cotizacion" ? `Precios guardados en el catálogo${d.folio ? ` (${d.folio})` : ""}` : "Registrado"}{d.clase === "cotizacion" ? "" : d.documento_venta_id ? ` como respaldo de ${d.venta?.numero || "la venta"}${d.folio ? ` (N° ${d.folio})` : ""}` : d.orden_numero ? ` en ${d.orden_numero}` : d.gasto_id ? " como gasto" : ""} · {d.procesado_por} · {fechaHora(d.procesado_en)}</div>}
+                {puedeOperar && d.estado === "procesado" && d.clase === "compra" && (d.orden_id || d.gasto_id) && <DeshacerRegistro bandeja_id={d.id} notify={notify} onHecho={cargar} className="link mini" />}
                 {d.nota && <div className="mini">Nota: {d.nota}</div>}
                 <div className="mini bandeja-doc-quien">Subido por {d.subido_por || "—"} · {fechaHora(d.createdAt)} · {d.nombre_archivo}</div>
               </div>
               <div className="bandeja-doc-acciones">
                 <button className="btn btn-ghost btn-sm" onClick={() => ver(d)}>Ver</button>
-                {d.estado === "por_procesar" && d.clase === "venta" && <button className="btn btn-primary btn-sm" onClick={() => setAVenta(d)}>Registrar en la venta</button>}
+                {puedeOperar && d.estado === "por_procesar" && d.clase === "venta" && <button className="btn btn-primary btn-sm" onClick={() => setAVenta(d)}>Registrar en la venta</button>}
                 {puedeOperar && d.clase === "cotizacion" && d.estado === "por_procesar" && <button className="btn btn-primary btn-sm" onClick={() => abrirCotizacion(d)}>Procesar cotización</button>}
                 {puedeOperar && d.clase === "compra" && ["por_procesar", "duplicado"].includes(d.estado) && !d.leyendo && <button className="btn btn-primary btn-sm" onClick={() => abrirProcesar(d)}>Procesar compra</button>}
-                {d.clase === "compra" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Es la cedible o la guía firmada de una venta, no una compra" onClick={() => setAVenta(d)}>Es respaldo de venta</button>}
+                {puedeOperar && d.clase === "compra" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Es la cedible o la guía firmada de una venta, no una compra" onClick={() => setAVenta(d)}>Es respaldo de venta</button>}
                 {puedeOperar && d.clase === "compra" && d.estado === "por_procesar" && !d.leyendo && <button className="btn btn-ghost btn-sm" title="Bencina, flete, comisión u otro gasto del proyecto" onClick={() => setGastoDe(d)}>Es un gasto</button>}
                 {["por_procesar", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => descartar(d)}>Descartar</button>}
                 {["descartado", "duplicado"].includes(d.estado) && <button className="btn btn-ghost btn-sm" onClick={() => cambiar(d, { estado: "por_procesar" }, "Vuelve a Por procesar")}>Recuperar</button>}
